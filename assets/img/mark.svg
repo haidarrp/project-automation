@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PKP">
+  <rect width="64" height="64" rx="16" fill="#12355B"/>
+  <path d="M16 30 32 15l16 15v19H16V30Z" fill="#FFFFFF" opacity=".96"/>
+  <path d="M24 49V33h16v16" fill="#D9A62E"/>
+  <path d="m22 27 10-9 10 9" fill="none" stroke="#D9A62E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="32" y="44" text-anchor="middle" font-family="Arial, sans-serif" font-weight="700" font-size="9" fill="#12355B">PKP</text>
+</svg>

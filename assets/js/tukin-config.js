@@ -1,0 +1,40 @@
+window.TUKIN_CONFIG = Object.freeze({
+  MODULE_NAME: 'Perhitungan Tunjangan Kinerja',
+  MODULE_SHORT: 'Tunjangan Kinerja',
+  TIME_ZONE: 'Asia/Jakarta',
+  LOCALE: 'id-ID',
+  SATKER: '694037',
+  DEFAULT_TUKIN: 6349000,
+  SKP_SCORE: 100,
+  DEFAULT_SKP_DEDUCTION: 0,
+  UNIT_WORK: 'Pusat Data dan Informasi',
+  UNIT_ORGANIZATION: 'Sekretariat Jenderal',
+  UNIT_LABEL: 'Pusat Data dan Informasi, Sekretariat Jenderal',
+  DATA_START_ROW: 10,
+  RULES: Object.freeze({
+    NORMAL_START_MINUTES: 7 * 60 + 30,
+    NORMAL_END_MON_THU_MINUTES: 16 * 60,
+    NORMAL_END_FRIDAY_MINUTES: 16 * 60 + 30,
+    RAMADAN_START_MINUTES: 8 * 60,
+    RAMADAN_END_MON_THU_MINUTES: 15 * 60,
+    RAMADAN_END_FRIDAY_MINUTES: 15 * 60 + 30,
+    FLEX_MINUTES: 60,
+    TL1_WINDOW_MINUTES: 30,
+    TL2_WINDOW_MINUTES: 60,
+    TL1_PERCENT: 0.5,
+    TL2_PERCENT: 0.75,
+    TL3_PERCENT: 1.25,
+    PSW1_PERCENT: 0.5,
+    PSW2_PERCENT: 0.75,
+    PSW3_PERCENT: 1.0,
+    PSW4_PERCENT: 1.25,
+    MAX_DAILY_PERCENT: 2.5,
+    ATTENDANCE_WEIGHT: 0.30,
+    SKP_WEIGHT: 0.70
+  }),
+  MONTHS: Object.freeze([
+    'Januari','Februari','Maret','April','Mei','Juni',
+    'Juli','Agustus','September','Oktober','November','Desember'
+  ]),
+  DAYS: Object.freeze(['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'])
+});
