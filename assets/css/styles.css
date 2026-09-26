@@ -371,17 +371,26 @@ a{color:inherit}
   .download-row{grid-template-columns:auto 1fr}.download-row .btn{grid-column:1/-1;width:100%}
 }
 
-/* Grouped module navigation */
+/* Collapsible module navigation */
 .nav-button{text-decoration:none}
-.nav-modules{gap:16px;min-height:0}
+.nav-modules{gap:8px;min-height:0}
 .nav-home{flex:0 0 auto}
-.nav-groups{display:flex;flex-direction:column;gap:16px;min-height:0}
-.nav-group{border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:7px;background:rgba(255,255,255,.018)}
-.nav-group.active-group{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.11)}
-.nav-group-title{height:38px;display:flex;align-items:center;gap:11px;padding:0 10px;color:#eef0f2;font-size:12px;font-weight:700;letter-spacing:.01em}
-.nav-group:not(.active-group) .nav-group-title{color:#c2c7cc}
-.nav-submenu{display:flex;flex-direction:column;gap:3px;margin-top:2px}
-.nav-sub-button{height:36px;border-radius:10px;color:#969da4;text-decoration:none;display:flex;align-items:center;gap:9px;padding:0 10px 0 40px;font-size:11px;font-weight:620;transition:background .15s ease,color .15s ease}
+.nav-groups{display:flex;flex-direction:column;gap:4px;min-height:0}
+.nav-group{position:relative}
+.nav-group-title{
+  width:100%;height:46px;border:0;border-radius:12px;background:transparent;color:#c2c7cc;cursor:pointer;
+  display:flex;align-items:center;gap:11px;padding:0 12px;text-align:left;font:inherit;font-size:12px;font-weight:700;letter-spacing:.01em;
+  transition:background .15s ease,color .15s ease;
+}
+.nav-group-title:hover,.nav-group.open .nav-group-title{background:rgba(255,255,255,.045);color:#fff}
+.nav-group.active-group .nav-group-title{color:#fff}
+.nav-group-title .nav-label{min-width:0;flex:1}
+.nav-chevron{width:16px;height:16px;display:grid;place-items:center;flex:0 0 16px;color:#8e969e;transition:transform .18s ease,color .15s ease}
+.nav-chevron svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.nav-group.open .nav-chevron{transform:rotate(90deg);color:#d8c78d}
+.nav-submenu{display:none;flex-direction:column;gap:3px;margin:3px 0 6px}
+.nav-group.open .nav-submenu{display:flex}
+.nav-sub-button{height:36px;border-radius:10px;color:#969da4;text-decoration:none;display:flex;align-items:center;gap:9px;padding:0 10px 0 42px;font-size:11px;font-weight:620;transition:background .15s ease,color .15s ease}
 .nav-sub-button:hover{background:rgba(255,255,255,.045);color:#fff}
 .nav-sub-button.active{background:var(--side-2);color:#fff;box-shadow:inset 3px 0 0 var(--gold)}
 .nav-sub-dot{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.65;flex:0 0 auto}
@@ -401,13 +410,16 @@ a{color:inherit}
   .nav-home{width:auto;height:36px;padding:0 10px;white-space:nowrap;flex:0 0 auto}
   .nav-home .nav-icon{display:none}
   .nav-home .nav-label{display:block!important}
-  .nav-groups{min-width:0;flex:1 1 auto;flex-direction:row;gap:6px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
-  .nav-groups::-webkit-scrollbar{display:none}
-  .nav-group{display:flex;align-items:center;gap:3px;padding:3px;flex:0 0 auto}
-  .nav-group-title{display:none}
-  .nav-submenu{flex-direction:row;margin:0;gap:2px}
-  .nav-sub-button{height:36px;padding:0 10px;font-size:10px;white-space:nowrap}
-  .nav-sub-button.active{box-shadow:inset 0 -3px 0 var(--gold)}
+  .nav-groups{min-width:0;flex:1 1 auto;flex-direction:row;gap:4px;overflow:visible}
+  .nav-group{flex:0 0 auto}
+  .nav-group-title{height:36px;width:auto;padding:0 9px;gap:6px;white-space:nowrap}
+  .nav-group-title .nav-icon{display:none}
+  .nav-group-title .nav-label{display:block!important}
+  .nav-chevron{width:13px;height:13px;flex-basis:13px}
+  .nav-chevron svg{width:12px;height:12px}
+  .nav-submenu{position:absolute;left:0;top:42px;min-width:148px;margin:0;padding:6px;background:var(--side);border:1px solid rgba(255,255,255,.09);border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.25);z-index:90}
+  .nav-sub-button{height:34px;padding:0 10px;font-size:10px;white-space:nowrap}
+  .nav-sub-button.active{box-shadow:inset 3px 0 0 var(--gold)}
   .nav-sub-dot{display:none}
 }
 

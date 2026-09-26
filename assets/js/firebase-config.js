@@ -19,7 +19,7 @@
     allowedEmailDomain: 'pkp.go.id',
 
     // Google login dapat dimatikan jika organisasi hanya memakai Email/Password.
-    enableGoogleSignIn: true,
+    enableGoogleSignIn: false,
     enableEmailPasswordSignIn: true,
 
     // Data riwayat dibuat privat per Firebase UID.

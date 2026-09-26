@@ -6,7 +6,8 @@
     tukin: '<path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
     overtime: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
     history: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>',
-    process: '<path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M5 18v3h14v-3"/>'
+    process: '<path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M5 18v3h14v-3"/>',
+    chevron: '<path d="m9 6 6 6-6 6"/>'
   });
 
   function icon(name) {
@@ -19,13 +20,36 @@
     const label = isTukin ? 'Tunjangan Kinerja' : 'Lembur';
     const processLabel = isTukin ? 'Proses Tukin' : 'Proses Lembur';
     const file = isTukin ? 'tukin.html' : 'lembur.html';
-    return `<div class="nav-group ${active ? 'active-group' : ''}">
-      <div class="nav-group-title"><span class="nav-icon">${icon(isTukin ? 'tukin' : 'overtime')}</span><span class="nav-label">${label}</span></div>
+    return `<div class="nav-group ${active ? 'active-group open' : ''}" data-nav-group="${module}">
+      <button class="nav-group-title" type="button" aria-expanded="${active ? 'true' : 'false'}" onclick="window.AppShell.toggleModule(this)">
+        <span class="nav-icon">${icon(isTukin ? 'tukin' : 'overtime')}</span>
+        <span class="nav-label">${label}</span>
+        <span class="nav-chevron">${icon('chevron')}</span>
+      </button>
       <div class="nav-submenu">
         <a class="nav-sub-button ${active && activeView === 'process' ? 'active' : ''}" href="${file}#process"><span class="nav-sub-dot"></span><span>${processLabel}</span></a>
         <a class="nav-sub-button ${active && activeView === 'history' ? 'active' : ''}" href="${file}#history"><span class="nav-sub-dot"></span><span>Riwayat</span></a>
       </div>
     </div>`;
+  }
+
+  function toggleModule(button) {
+    const group = button?.closest?.('.nav-group');
+    if (!group) return;
+
+    const shouldOpen = !group.classList.contains('open');
+    const navGroups = group.parentElement?.querySelectorAll?.('.nav-group') || [];
+
+    navGroups.forEach((item) => {
+      item.classList.remove('open');
+      const trigger = item.querySelector('.nav-group-title');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    });
+
+    if (shouldOpen) {
+      group.classList.add('open');
+      button.setAttribute('aria-expanded', 'true');
+    }
   }
 
   function navigation(activeModule, activeView) {
@@ -68,5 +92,5 @@
     </div>${overlays}`;
   }
 
-  window.AppShell = Object.freeze({ render, navigation, icon });
+  window.AppShell = Object.freeze({ render, navigation, icon, toggleModule });
 })();

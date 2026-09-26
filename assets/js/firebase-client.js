@@ -102,12 +102,8 @@
   }
 
   function loginMarkup(message) {
-    const google = settings.enableGoogleSignIn !== false
-      ? '<button class="btn btn-secondary firebase-google-btn" type="button" data-firebase-google>Masuk dengan Google</button>'
-      : '';
     const emailForm = settings.enableEmailPasswordSignIn !== false
-      ? `<div class="firebase-auth-divider"><span>atau</span></div>
-        <form class="firebase-login-form" data-firebase-email-form>
+      ? `<form class="firebase-login-form" data-firebase-email-form>
           <div class="field"><label for="firebase-email">Email</label><input id="firebase-email" type="email" autocomplete="username" required placeholder="nama@pkp.go.id"></div>
           <div class="field"><label for="firebase-password">Password</label><input id="firebase-password" type="password" autocomplete="current-password" required></div>
           <button class="btn btn-primary" type="submit">Masuk</button>
@@ -117,11 +113,10 @@
     return `<section class="firebase-auth-page"><div class="firebase-auth-card">
       <img src="assets/img/logo-pkp.png" alt="Kementerian PKP" class="firebase-auth-logo">
       <div class="firebase-auth-kicker">Generator Dokumen Pusdatin</div>
-      <h1>Masuk ke aplikasi</h1>
-      <p>Gunakan akun yang telah diizinkan untuk mengakses riwayat Lembur dan Tunjangan Kinerja.</p>
+      <h1>Selamat Datang</h1>
+      <p>Gunakan akun pegawai atau akun institusi Anda</p>
       ${message ? `<div class="alert alert-danger firebase-auth-message">${esc(message)}</div>` : ''}
-      ${google}${emailForm}
-      ${settings.allowedEmailDomain ? `<div class="firebase-auth-note">Akses dibatasi untuk akun <strong>@${esc(settings.allowedEmailDomain)}</strong>.</div>` : ''}
+      ${emailForm}
     </div></section>`;
   }
 
