@@ -13,18 +13,55 @@ service cloud.firestore {
       return isAllowedUser() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isAllowedUser()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
+    }
+
+    // Dokumen penanda administrator dibuat manual melalui Firebase Console.
+    // Pengguna biasa hanya boleh membaca status admin miliknya sendiri.
+    match /admins/{userId} {
+      allow read: if isAllowedUser() && request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    // Profil dan seluruh data proses tetap privat per Firebase UID.
     match /users/{userId} {
-      // Profil dibuat/di-update oleh akun itu sendiri setelah login terverifikasi.
       allow read, create, update: if isOwner(userId);
       allow delete: if false;
 
-      // Semua data aplikasi (lemburRuns, tukinRuns, employees) privat per UID.
       match /{document=**} {
         allow read, write: if isOwner(userId);
       }
     }
 
-    // Default deny untuk semua path lain.
+    // Master operasional hanya memuat hash identitas dan parameter yang diperlukan aplikasi.
+    // Seluruh pengguna terverifikasi pada domain instansi boleh membaca; hanya admin boleh mengubah.
+    match /masterEmployees/{masterId} {
+      allow read: if isAllowedUser();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Direktori plaintext (Nama/NIP) hanya untuk tampilan dan pengelolaan oleh admin.
+    match /masterDirectory/{masterId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    // Pengaturan operasional dibaca aplikasi dan hanya dapat diubah administrator.
+    match /appSettings/{settingId} {
+      allow read: if isAllowedUser();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Audit log bersifat append-only dari halaman admin.
+    match /adminAudit/{auditId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // Default deny untuk seluruh path lain.
     match /{document=**} {
       allow read, write: if false;
     }

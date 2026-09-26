@@ -1,4 +1,4 @@
-window.APP_CONFIG = Object.freeze({
+window.APP_CONFIG = {
   APP_NAME: 'Generator Dokumen Lembur',
   APP_SUBTITLE: 'Pusat Data dan Informasi',
   MINISTRY: 'PERUMAHAN DAN KAWASAN PERMUKIMAN',
@@ -11,9 +11,10 @@ window.APP_CONFIG = Object.freeze({
 
   RESPONSIBLE_TITLE_1: 'Pejabat yang Bertanggung Jawab',
   RESPONSIBLE_TITLE_2: 'Kepala Pusat Data dan Informasi',
-  RESPONSIBLE_NAME: 'Adhita Surya Permana, S.Si., M.T.',
-  RESPONSIBLE_NIP: '197804102002121003',
-  SPKL_ADDRESS: 'Wisma Mandiri 2, Jl. Kebon Sirih No.83, RT.2/RW.1, Kb. Sirih, Kec. Menteng, Kota Jakarta Pusat, Daerah Khusus Jakarta, 10340',
+  // Nilai operasional berikut dimuat dari Firestore: appSettings/lembur.
+  RESPONSIBLE_NAME: '',
+  RESPONSIBLE_NIP: '',
+  SPKL_ADDRESS: '',
 
   RULES: Object.freeze({
     NORMAL_START_MINUTES: 7 * 60 + 30,
@@ -48,4 +49,4 @@ window.APP_CONFIG = Object.freeze({
 
   STORAGE_KEY: 'generator-lembur-pusdatin:v1',
   HISTORY_LIMIT: 12
-});
+};

@@ -1,10 +1,11 @@
-window.TUKIN_CONFIG = Object.freeze({
+window.TUKIN_CONFIG = {
   MODULE_NAME: 'Perhitungan Tunjangan Kinerja',
   MODULE_SHORT: 'Tunjangan Kinerja',
   TIME_ZONE: 'Asia/Jakarta',
   LOCALE: 'id-ID',
-  SATKER: '694037',
-  DEFAULT_TUKIN: 6349000,
+  // Nilai operasional berikut dimuat dari Firestore: appSettings/tukin.
+  SATKER: '',
+  DEFAULT_TUKIN: 0,
   SKP_SCORE: 100,
   DEFAULT_SKP_DEDUCTION: 0,
   UNIT_WORK: 'Pusat Data dan Informasi',
@@ -37,4 +38,4 @@ window.TUKIN_CONFIG = Object.freeze({
     'Juli','Agustus','September','Oktober','November','Desember'
   ]),
   DAYS: Object.freeze(['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'])
-});
+};

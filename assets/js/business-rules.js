@@ -177,25 +177,25 @@
   }
 
   async function assignSatkerCodes(employees) {
-    const master = window.SATKER_MASTER_HASHED || [];
-    const byNip = new Map(master.map((item) => [item.nipHash, item.code]));
-    const byName = new Map(master.map((item) => [item.nameHash, item.code]));
+    if (!window.MasterDataService) throw new Error('Layanan master data belum termuat.');
+    const maps = await window.MasterDataService.getLookup(false);
     const unmatched = [];
 
     for (const employee of employees) {
       const nipDigits = String(employee.nip || '').replace(/\D/g, '');
       const nameNormalized = normalizeName(employee.name);
-      let code = '';
+      let item = null;
       if (nipDigits) {
         const nipHash = await sha256(nipDigits);
-        if (byNip.has(nipHash)) code = byNip.get(nipHash);
+        item = maps.byNip.get(nipHash) || null;
       }
-      if (!code && nameNormalized) {
+      if (!item && nameNormalized) {
         const nameHash = await sha256(nameNormalized);
-        if (byName.has(nameHash)) code = byName.get(nameHash);
+        item = maps.byName.get(nameHash) || null;
       }
+      const code = item?.lemburSatkerCode ?? item?.code ?? '';
       employee.satkerCode = code;
-      if (!code) unmatched.push(employee.name + (employee.nip ? ` (${employee.nip})` : ''));
+      if (code === '' || code === null || code === undefined) unmatched.push(employee.name + (employee.nip ? ` (${employee.nip})` : ''));
     }
 
     return unmatched;

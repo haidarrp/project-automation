@@ -7,6 +7,7 @@
   let auth = null;
   let db = null;
   let currentUser = null;
+  let adminUser = false;
   let authReadyPromise = null;
   let configured = false;
 
@@ -58,6 +59,9 @@
         currentUser = user || null;
         if (user && accessAllowed(user)) {
           try { await ensureUserProfile(user); } catch (error) { console.warn('Profil pengguna gagal diperbarui:', error); }
+          await refreshAdminStatus(user);
+        } else {
+          adminUser = false;
         }
         unsubscribe();
         resolve(currentUser);
@@ -74,6 +78,30 @@
       photoURL: user.photoURL || '',
       lastLoginAt: new Date().toISOString()
     }, { merge: true });
+  }
+
+  async function refreshAdminStatus(user) {
+    adminUser = false;
+    if (!db || !user || !accessAllowed(user)) return false;
+    try {
+      const snap = await db.collection('admins').doc(user.uid).get();
+      adminUser = Boolean(snap.exists && snap.data()?.active !== false);
+    } catch (error) {
+      console.warn('Status admin tidak dapat diperiksa:', error);
+      adminUser = false;
+    }
+    return adminUser;
+  }
+
+  function renderAdminRequired() {
+    const root = document.getElementById('app') || document.body;
+    root.innerHTML = `<section class="firebase-auth-page"><div class="firebase-auth-card firebase-setup-card">
+      <img src="assets/img/logo-pkp.png" alt="Kementerian PKP" class="firebase-auth-logo">
+      <div class="firebase-auth-kicker">Akses Administrasi</div>
+      <h1>Akses admin diperlukan</h1>
+      <p>Akun ini dapat menggunakan aplikasi, tetapi belum terdaftar sebagai administrator master data.</p>
+      <div class="firebase-login-form"><a class="btn btn-primary" href="index.html">Kembali ke Dashboard</a></div>
+    </div></section>`;
   }
 
   function renderSetupRequired() {
@@ -246,6 +274,7 @@
           return;
         }
         try { await ensureUserProfile(user); } catch (error) { console.warn(error); }
+        await refreshAdminStatus(user);
         resolve(user);
       });
     });
@@ -253,8 +282,19 @@
 
   async function signOut() {
     initialize();
+    adminUser = false;
     if (auth) await auth.signOut();
     location.replace('index.html');
+  }
+
+  async function requireAdmin() {
+    const user = await requireAuth();
+    if (!adminUser) await refreshAdminStatus(user);
+    if (!adminUser) {
+      renderAdminRequired();
+      return new Promise(() => {});
+    }
+    return user;
   }
 
   function userRoot() {
@@ -269,16 +309,20 @@
   function getCurrentUser() { return currentUser; }
   function getDb() { return db; }
   function getAuth() { return auth; }
+  function isAdmin() { return adminUser; }
 
   window.FirebaseClient = Object.freeze({
     initialize,
     requireAuth,
+    requireAdmin,
     signOut,
     userRoot,
     userCollection,
     getCurrentUser,
     getDb,
     getAuth,
+    isAdmin,
+    refreshAdminStatus,
     emailAllowed,
     accessAllowed,
     configLooksValid

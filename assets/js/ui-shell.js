@@ -7,7 +7,8 @@
     overtime: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
     history: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>',
     process: '<path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M5 18v3h14v-3"/>',
-    chevron: '<path d="m9 6 6 6-6 6"/>'
+    chevron: '<path d="m9 6 6 6-6 6"/>',
+    admin: '<circle cx="12" cy="8" r="3"/><path d="M5 20c.7-4 3-6 7-6s6.3 2 7 6"/><path d="M18.5 5.5 20 4m-1.5 6.5L20 12"/>'
   });
 
   function icon(name) {
@@ -53,17 +54,22 @@
   }
 
   function navigation(activeModule, activeView) {
+    const adminLink = window.FirebaseClient?.isAdmin?.()
+      ? `<a class="nav-button nav-admin ${activeModule === 'admin' ? 'active' : ''}" href="admin.html"><span class="nav-icon">${icon('admin')}</span><span class="nav-label">Administrasi</span></a>`
+      : '';
     return `<nav class="nav nav-modules" aria-label="Navigasi utama">
       <a class="nav-button nav-home ${activeModule === 'dashboard' ? 'active' : ''}" href="index.html"><span class="nav-icon">${icon('home')}</span><span class="nav-label">Dashboard</span></a>
       <div class="nav-groups" role="group" aria-label="Modul">
         ${moduleGroup('tukin', activeModule, activeView)}
         ${moduleGroup('lembur', activeModule, activeView)}
       </div>
+      ${adminLink}
     </nav>`;
   }
 
   function breadcrumb(module, viewLabel) {
     if (module === 'dashboard') return '<strong>Generator Dokumen</strong><span>/ Dashboard</span>';
+    if (module === 'admin') return '<strong>Generator Dokumen</strong><span>/ Administrasi / Master Data</span>';
     const moduleLabel = module === 'tukin' ? 'Tunjangan Kinerja' : 'Lembur';
     return `<strong>Generator Dokumen</strong><span>/ ${moduleLabel} / ${viewLabel || ''}</span>`;
   }

@@ -423,6 +423,11 @@ a{color:inherit}
   .nav-sub-dot{display:none}
 }
 
+@media (max-width:780px){
+  .nav-admin{height:36px;padding:0 10px;white-space:nowrap;flex:0 0 auto}
+  .nav-admin .nav-icon{display:none}
+}
+
 /* Firebase Authentication */
 .firebase-auth-page{min-height:100vh;display:grid;place-items:center;padding:28px;background:linear-gradient(155deg,#151719 0%,#1b1e21 58%,#23272b 100%)}
 .firebase-auth-card{width:min(440px,100%);background:#fff;border:1px solid #e5e6e2;border-radius:20px;padding:34px;box-shadow:0 24px 70px rgba(0,0,0,.22)}

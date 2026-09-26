@@ -93,13 +93,8 @@
     return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
   }
   async function resolveMaster(identity) {
-    const master=window.TUKIN_MASTER_HASHED || [];
-    const nip=String(identity.nip||'').replace(/\D/g,'');
-    const name=rules.normalizeName(identity.name);
-    let item=null;
-    if (nip) { const h=await sha256(nip); item=master.find(x=>x.nipHash===h)||null; }
-    if (!item && name) { const h=await sha256(name); item=master.find(x=>x.nameHash===h)||null; }
-    return item;
+    if (!window.MasterDataService) throw new Error('Layanan master data belum termuat.');
+    return window.MasterDataService.findByIdentity(identity);
   }
 
   async function parseAttendanceFile(file, tukinPeriod, settings) {

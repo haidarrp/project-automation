@@ -150,6 +150,7 @@
 
   async function init() {
     await window.FirebaseClient.requireAuth();
+    await window.AppSettingsService?.loadAndApply?.();
     const legacyRoute = String(location.hash || '').replace(/^#/, '').toLowerCase();
     if (legacyRoute === 'process' || legacyRoute === 'history') {
       location.replace(`lembur.html#${legacyRoute}`);

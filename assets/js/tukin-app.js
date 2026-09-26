@@ -780,6 +780,8 @@
 
   async function init() {
     await window.FirebaseClient.requireAuth();
+    await window.AppSettingsService?.loadAndApply?.();
+    await window.MasterDataService?.getEmployees?.(false);
     setViewFromHash();
     if (state.view === 'history') {
       state.historyBusy = true;
