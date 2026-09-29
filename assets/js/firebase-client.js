@@ -85,7 +85,7 @@
     if (!db || !user || !accessAllowed(user)) return false;
     try {
       const snap = await db.collection('admins').doc(user.uid).get();
-      adminUser = Boolean(snap.exists && snap.data()?.active !== false);
+      adminUser = Boolean(snap.exists && snap.data()?.active === true);
     } catch (error) {
       console.warn('Status admin tidak dapat diperiksa:', error);
       adminUser = false;

@@ -42,6 +42,25 @@ service cloud.firestore {
       }
     }
 
+
+
+    // Koleksi riwayat privat versi lama. Pemilik tetap dapat mengelola datanya,
+    // dan admin diberi hak delete agar hard-delete shared history juga dapat
+    // membersihkan sumber legacy milik akun lain.
+    match /users/{userId}/lemburRuns/{runId} {
+      allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      match /employees/{employeeId} {
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    match /users/{userId}/tukinRuns/{runId} {
+      allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      match /employees/{employeeId} {
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
     // Riwayat Lembur bersama.
     // Semua akun instansi yang terverifikasi dapat membaca seluruh riwayat.
     // Riwayat hanya dapat dibuat oleh akun yang sedang login dan hanya dapat
@@ -69,8 +88,6 @@ service cloud.firestore {
       allow read: if isAllowedUser();
       allow create: if isAdmin() || (
         isAllowedUser()
-        && exists(/databases/$(database)/documents/lemburRuns/$(runId))
-        && get(/databases/$(database)/documents/lemburRuns/$(runId)).data.ownerUid == request.auth.uid
         && request.resource.data.ownerUid == request.auth.uid
       );
       allow update: if isAllowedUser()
@@ -102,8 +119,6 @@ service cloud.firestore {
       allow read: if isAllowedUser();
       allow create: if isAdmin() || (
         isAllowedUser()
-        && exists(/databases/$(database)/documents/tukinRuns/$(runId))
-        && get(/databases/$(database)/documents/tukinRuns/$(runId)).data.ownerUid == request.auth.uid
         && request.resource.data.ownerUid == request.auth.uid
       );
       allow update: if isAllowedUser()

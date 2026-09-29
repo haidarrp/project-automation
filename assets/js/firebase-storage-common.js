@@ -65,6 +65,15 @@
   async function deleteRunWithChildren(parentRef, childCollections) {
     for (const name of childCollections || []) await deleteSubcollection(parentRef, name);
     await parentRef.delete();
+
+    // Jangan anggap delete berhasil hanya karena cache lokal sudah berubah.
+    // Baca ulang langsung dari server agar UI hanya menyatakan sukses setelah
+    // dokumen induk benar-benar hilang dari Firestore.
+    const verification = await parentRef.get({ source: 'server' });
+    if (verification.exists) {
+      throw new Error(`Hard delete Firestore gagal: dokumen ${parentRef.path} masih ada di server.`);
+    }
+    return true;
   }
 
   function latestTimestamp(run) {

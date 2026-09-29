@@ -62,9 +62,13 @@
     }
   }
 
-  async function deleteLegacyCloudRun(id) {
+  async function deleteLegacyCloudRun(id, ownerUid) {
     try {
-      const legacyRef = legacyRunsCollection().doc(id);
+      const currentUser = client.getCurrentUser();
+      const targetUid = ownerUid || currentUser?.uid || '';
+      if (!targetUid) return;
+      if (targetUid !== currentUser?.uid && !client.isAdmin()) return;
+      const legacyRef = client.getDb().collection('users').doc(targetUid).collection(LEGACY_COLLECTION).doc(id);
       const legacySnap = await legacyRef.get();
       if (legacySnap.exists) await common.deleteRunWithChildren(legacyRef, ['employees']);
     } catch (error) {
@@ -81,10 +85,10 @@
     };
   }
 
-  function normalizeMetadata(item) {
+  function normalizeMetadata(item, documentId) {
     if (!item || typeof item !== 'object') return null;
     return {
-      id: item.id,
+      id: documentId || item.id,
       period: item.period,
       processedAt: item.processedAt || null,
       updatedAt: item.updatedAt || null,
@@ -158,13 +162,13 @@
   async function getMetadata(id) {
     if (!id) return null;
     const snap = await runsCollection().doc(id).get();
-    return snap.exists ? normalizeMetadata(snap.data()) : null;
+    return snap.exists ? normalizeMetadata(snap.data(), snap.id) : null;
   }
 
   async function listHistory() {
     await migrateLegacyOnce();
     const snap = await runsCollection().orderBy('sortAt', 'desc').limit(HISTORY_LIMIT).get();
-    return snap.docs.map((doc) => normalizeMetadata(doc.data())).filter(Boolean);
+    return snap.docs.map((doc) => normalizeMetadata(doc.data(), doc.id)).filter(Boolean);
   }
 
   async function getRun(id) {
@@ -182,40 +186,71 @@
       return data;
     });
     return {
-      ...normalizeMetadata(meta),
+      ...normalizeMetadata(meta, metaSnap.id),
       employees: rules.hydrateEmployees(serialized)
     };
   }
 
-  async function deleteRun(id) {
-    if (!id) return false;
-    const ref = runsCollection().doc(id);
-    const snap = await ref.get();
-    const meta = snap.exists ? normalizeMetadata(snap.data()) : null;
+  async function resolveRunDocuments(id) {
+    const found = new Map();
+    const directRef = runsCollection().doc(id);
+    const directSnap = await directRef.get({ source: 'server' });
+    if (directSnap.exists) found.set(directSnap.id, directSnap);
 
-    if (meta && !canManage(meta)) {
-      throw new Error('Riwayat ini dibuat oleh akun lain dan hanya dapat dihapus oleh pembuat atau administrator.');
+    // Fallback untuk data lama/migrasi yang field `id`-nya berbeda dengan
+    // Firestore document ID. Single-field query tidak memerlukan composite index.
+    const byStoredId = await runsCollection().where('id', '==', id).limit(10).get({ source: 'server' });
+    byStoredId.docs.forEach((doc) => found.set(doc.id, doc));
+    return [...found.values()];
+  }
+
+  async function deleteRun(id) {
+    if (!id) throw new Error('ID riwayat Lembur tidak valid.');
+
+    const documents = await resolveRunDocuments(id);
+    if (!documents.length) {
+      throw new Error(`Dokumen Lembur dengan ID ${id} tidak ditemukan di Firestore server.`);
     }
 
-    // Catat tombstone SEBELUM menghapus dokumen utama. Dengan demikian,
-    // data legacy di localStorage / users/{uid}/lemburRuns tidak dapat
-    // dimigrasikan kembali pada login atau perangkat berikutnya.
-    await markDeletedRun(id, meta);
+    for (const snap of documents) {
+      const meta = normalizeMetadata(snap.data(), snap.id);
+      if (!canManage(meta)) {
+        throw new Error('Riwayat ini dibuat oleh akun lain dan hanya dapat dihapus oleh pembuat atau administrator.');
+      }
+    }
 
-    if (snap.exists) await common.deleteRunWithChildren(ref, ['employees']);
+    for (const snap of documents) {
+      const raw = snap.data() || {};
+      const canonicalId = snap.id;
+      const logicalId = raw.id || canonicalId;
+      const ownerUid = raw.ownerUid || '';
 
-    // Bersihkan salinan legacy milik akun yang sedang login bila ada.
-    // Untuk penghapusan oleh admin atas data akun lain, tombstone global
-    // tetap cukup untuk mencegah data lama muncul kembali.
-    deleteLegacyLocalRun(id);
-    await deleteLegacyCloudRun(id);
-    return Boolean(snap.exists);
+      // Simpan tombstone untuk document ID dan logical ID bila berbeda.
+      await markDeletedRun(canonicalId, { ...raw, id: canonicalId });
+      if (logicalId !== canonicalId) await markDeletedRun(logicalId, { ...raw, id: logicalId });
+
+      await common.deleteRunWithChildren(snap.ref, ['employees']);
+
+      // Bersihkan sumber legacy agar tidak ada duplikasi fisik tersisa.
+      deleteLegacyLocalRun(logicalId);
+      if (canonicalId !== logicalId) deleteLegacyLocalRun(canonicalId);
+      await deleteLegacyCloudRun(canonicalId, ownerUid);
+      if (logicalId !== canonicalId) await deleteLegacyCloudRun(logicalId, ownerUid);
+    }
+
+    // Verifikasi sekali lagi menggunakan query server. Jika masih ada dokumen
+    // dengan field id lama yang sama, jangan laporkan delete sebagai sukses.
+    const leftovers = await runsCollection().where('id', '==', id).limit(10).get({ source: 'server' });
+    if (!leftovers.empty) {
+      throw new Error(`Penghapusan belum tuntas: masih ada ${leftovers.size} dokumen Lembur dengan ID ${id} di Firestore.`);
+    }
+    return true;
   }
 
   async function clearHistory() {
     const snap = await runsCollection().get();
     for (const doc of snap.docs) {
-      const meta = normalizeMetadata(doc.data());
+      const meta = normalizeMetadata(doc.data(), doc.id);
       if (canManage(meta)) await deleteRun(doc.id);
     }
   }
@@ -305,7 +340,7 @@
 
   function subscribeHistory(onChange, onError) {
     return runsCollection().orderBy('sortAt', 'desc').limit(HISTORY_LIMIT).onSnapshot((snap) => {
-      const history = snap.docs.map((doc) => normalizeMetadata(doc.data())).filter(Boolean);
+      const history = snap.docs.map((doc) => normalizeMetadata(doc.data(), doc.id)).filter(Boolean);
       if (typeof onChange === 'function') onChange(history);
     }, (error) => {
       if (typeof onError === 'function') onError(error);

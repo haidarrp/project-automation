@@ -49,9 +49,13 @@
     }));
   }
 
-  async function deleteLegacyCloudRun(id) {
+  async function deleteLegacyCloudRun(id, ownerUid) {
     try {
-      const legacyRef = legacyCloudCollection().doc(id);
+      const currentUser = client.getCurrentUser();
+      const targetUid = ownerUid || currentUser?.uid || '';
+      if (!targetUid) return;
+      if (targetUid !== currentUser?.uid && !client.isAdmin()) return;
+      const legacyRef = client.getDb().collection('users').doc(targetUid).collection(LEGACY_COLLECTION).doc(id);
       const legacySnap = await legacyRef.get();
       if (legacySnap.exists) await common.deleteRunWithChildren(legacyRef, ['employees']);
     } catch (error) {
@@ -121,9 +125,9 @@
     await txRequest('readwrite', (store) => store.delete(id));
   }
 
-  function summaryOnly(run) {
+  function summaryOnly(run, documentId) {
     return {
-      id: run.id,
+      id: documentId || run.id,
       period: run.period,
       settings: run.settings || {},
       processedAt: run.processedAt,
@@ -233,7 +237,7 @@
 
   async function cloudList() {
     const snap = await cloudCollection().orderBy('sortAt', 'desc').limit(HISTORY_LIMIT).get();
-    return snap.docs.map((doc) => summaryOnly(doc.data()));
+    return snap.docs.map((doc) => summaryOnly(doc.data(), doc.id));
   }
 
   async function cloudGetFrom(collection, id, cloudOnly) {
@@ -246,6 +250,7 @@
     const meta = metaSnap.data();
     return {
       ...meta,
+      id: metaSnap.id,
       employees: empSnap.docs.map((doc) => hydrateCloudEmployee(doc.data())),
       cloudOnly: Boolean(cloudOnly),
       binaryFilesAvailable: false
@@ -265,7 +270,7 @@
       return (await localListFull())
         .sort((a, b) => common.latestTimestamp(b) - common.latestTimestamp(a))
         .slice(0, HISTORY_LIMIT)
-        .map(summaryOnly);
+        .map((run) => summaryOnly(run));
     }
   }
 
@@ -308,24 +313,58 @@
     return enriched;
   }
 
-  async function deleteRun(id) {
-    if (!id) return false;
-    const ref = cloudCollection().doc(id);
-    const snap = await ref.get();
-    const meta = snap.exists ? snap.data() : null;
+  async function resolveRunDocuments(id) {
+    const found = new Map();
+    const directRef = cloudCollection().doc(id);
+    const directSnap = await directRef.get({ source: 'server' });
+    if (directSnap.exists) found.set(directSnap.id, directSnap);
 
-    if (meta && !canManage(meta)) {
-      throw new Error('Riwayat ini dibuat oleh akun lain dan hanya dapat dihapus oleh pembuat atau administrator.');
+    const byStoredId = await cloudCollection().where('id', '==', id).limit(10).get({ source: 'server' });
+    byStoredId.docs.forEach((doc) => found.set(doc.id, doc));
+    return [...found.values()];
+  }
+
+  async function deleteRun(id) {
+    if (!id) throw new Error('ID riwayat Tukin tidak valid.');
+
+    const documents = await resolveRunDocuments(id);
+    if (!documents.length) {
+      throw new Error(`Dokumen Tukin dengan ID ${id} tidak ditemukan di Firestore server.`);
     }
 
-    // Tombstone global mencegah salinan legacy pada IndexedDB maupun
-    // users/{uid}/tukinRuns menghidupkan riwayat kembali saat login.
-    await markDeletedRun(id, meta);
+    for (const snap of documents) {
+      const meta = { ...snap.data(), id: snap.id };
+      if (!canManage(meta)) {
+        throw new Error('Riwayat ini dibuat oleh akun lain dan hanya dapat dihapus oleh pembuat atau administrator.');
+      }
+    }
 
-    try { await localDelete(id); } catch (error) { console.warn(error); }
-    if (snap.exists) await common.deleteRunWithChildren(ref, ['employees']);
-    await deleteLegacyCloudRun(id);
-    return Boolean(snap.exists);
+    for (const snap of documents) {
+      const raw = snap.data() || {};
+      const canonicalId = snap.id;
+      const logicalId = raw.id || canonicalId;
+      const ownerUid = raw.ownerUid || '';
+
+      await markDeletedRun(canonicalId, { ...raw, id: canonicalId });
+      if (logicalId !== canonicalId) await markDeletedRun(logicalId, { ...raw, id: logicalId });
+
+      // Hapus cloud lebih dulu; cache lokal baru dibersihkan setelah server
+      // mengonfirmasi parent document benar-benar hilang.
+      await common.deleteRunWithChildren(snap.ref, ['employees']);
+
+      try { await localDelete(logicalId); } catch (error) { console.warn(error); }
+      if (canonicalId !== logicalId) {
+        try { await localDelete(canonicalId); } catch (error) { console.warn(error); }
+      }
+      await deleteLegacyCloudRun(canonicalId, ownerUid);
+      if (logicalId !== canonicalId) await deleteLegacyCloudRun(logicalId, ownerUid);
+    }
+
+    const leftovers = await cloudCollection().where('id', '==', id).limit(10).get({ source: 'server' });
+    if (!leftovers.empty) {
+      throw new Error(`Penghapusan belum tuntas: masih ada ${leftovers.size} dokumen Tukin dengan ID ${id} di Firestore.`);
+    }
+    return true;
   }
 
   async function trimLocalHistory() {
@@ -380,7 +419,7 @@
 
   function subscribeRuns(onChange, onError) {
     return cloudCollection().orderBy('sortAt', 'desc').limit(HISTORY_LIMIT).onSnapshot((snap) => {
-      const history = snap.docs.map((doc) => summaryOnly(doc.data()));
+      const history = snap.docs.map((doc) => summaryOnly(doc.data(), doc.id));
       if (typeof onChange === 'function') onChange(history);
     }, (error) => {
       if (typeof onError === 'function') onError(error);
