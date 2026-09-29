@@ -8,6 +8,7 @@
   const HISTORY_LIMIT = Number(window.FIREBASE_APP_SETTINGS?.historyLimit || cfg.HISTORY_LIMIT || 24);
   const SHARED_COLLECTION = 'lemburRuns';
   const LEGACY_COLLECTION = 'lemburRuns';
+  const DELETION_COLLECTION = 'lemburRunDeletions';
 
   function runsCollection() {
     return client.sharedCollection(SHARED_COLLECTION);
@@ -15,6 +16,60 @@
 
   function legacyRunsCollection() {
     return client.userCollection(LEGACY_COLLECTION);
+  }
+
+  function deletionCollection() {
+    return client.sharedCollection(DELETION_COLLECTION);
+  }
+
+  async function isDeletedRun(id) {
+    if (!id) return false;
+    try {
+      const snap = await deletionCollection().doc(id).get();
+      return snap.exists;
+    } catch (error) {
+      console.warn('Status penghapusan riwayat Lembur tidak dapat diperiksa:', error);
+      return false;
+    }
+  }
+
+  async function markDeletedRun(id, meta) {
+    if (!id) return;
+    const currentActor = actor();
+    await deletionCollection().doc(id).set(common.sanitize({
+      id,
+      ownerUid: meta?.ownerUid || currentActor.uid,
+      ownerEmail: meta?.ownerEmail || currentActor.email,
+      deletedByUid: currentActor.uid,
+      deletedByEmail: currentActor.email,
+      deletedAt: new Date().toISOString(),
+      schemaVersion: 1
+    }));
+  }
+
+  function deleteLegacyLocalRun(id) {
+    try {
+      const raw = localStorage.getItem(cfg.STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed.history)) return;
+      const next = parsed.history.filter((item) => item?.id !== id);
+      if (next.length === parsed.history.length) return;
+      parsed.history = next;
+      localStorage.setItem(cfg.STORAGE_KEY, JSON.stringify(parsed));
+    } catch (error) {
+      console.warn('Riwayat Lembur lokal lama gagal dibersihkan:', error);
+    }
+  }
+
+  async function deleteLegacyCloudRun(id) {
+    try {
+      const legacyRef = legacyRunsCollection().doc(id);
+      const legacySnap = await legacyRef.get();
+      if (legacySnap.exists) await common.deleteRunWithChildren(legacyRef, ['employees']);
+    } catch (error) {
+      console.warn('Riwayat Lembur privat lama gagal dibersihkan:', error);
+    }
   }
 
   function actor() {
@@ -136,20 +191,32 @@
     if (!id) return false;
     const ref = runsCollection().doc(id);
     const snap = await ref.get();
-    if (!snap.exists) return false;
-    const meta = normalizeMetadata(snap.data());
-    if (!canManage(meta)) {
+    const meta = snap.exists ? normalizeMetadata(snap.data()) : null;
+
+    if (meta && !canManage(meta)) {
       throw new Error('Riwayat ini dibuat oleh akun lain dan hanya dapat dihapus oleh pembuat atau administrator.');
     }
-    await common.deleteRunWithChildren(ref, ['employees']);
-    return true;
+
+    // Catat tombstone SEBELUM menghapus dokumen utama. Dengan demikian,
+    // data legacy di localStorage / users/{uid}/lemburRuns tidak dapat
+    // dimigrasikan kembali pada login atau perangkat berikutnya.
+    await markDeletedRun(id, meta);
+
+    if (snap.exists) await common.deleteRunWithChildren(ref, ['employees']);
+
+    // Bersihkan salinan legacy milik akun yang sedang login bila ada.
+    // Untuk penghapusan oleh admin atas data akun lain, tombstone global
+    // tetap cukup untuk mencegah data lama muncul kembali.
+    deleteLegacyLocalRun(id);
+    await deleteLegacyCloudRun(id);
+    return Boolean(snap.exists);
   }
 
   async function clearHistory() {
     const snap = await runsCollection().get();
     for (const doc of snap.docs) {
       const meta = normalizeMetadata(doc.data());
-      if (canManage(meta)) await common.deleteRunWithChildren(doc.ref, ['employees']);
+      if (canManage(meta)) await deleteRun(doc.id);
     }
   }
 
@@ -198,6 +265,7 @@
     }
 
     for (const doc of snap.docs) {
+      if (await isDeletedRun(doc.id)) continue;
       const target = runsCollection().doc(doc.id);
       const exists = await target.get();
       if (exists.exists) continue;
@@ -210,6 +278,7 @@
     const legacy = legacyLocalRuns();
     for (const item of legacy.slice(0, HISTORY_LIMIT)) {
       if (!item?.id) continue;
+      if (await isDeletedRun(item.id)) continue;
       const target = runsCollection().doc(item.id);
       const exists = await target.get();
       if (exists.exists) continue;

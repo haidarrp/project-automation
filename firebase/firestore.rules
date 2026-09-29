@@ -63,6 +63,22 @@ service cloud.firestore {
       }
     }
 
+    // Tombstone penghapusan Lembur. Dokumen ini sengaja dipertahankan
+    // agar data legacy tidak dapat dimigrasikan kembali setelah riwayat dihapus.
+    match /lemburRunDeletions/{runId} {
+      allow read: if isAllowedUser();
+      allow create: if isAdmin() || (
+        isAllowedUser()
+        && exists(/databases/$(database)/documents/lemburRuns/$(runId))
+        && get(/databases/$(database)/documents/lemburRuns/$(runId)).data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid
+      );
+      allow update: if isAllowedUser()
+        && (resource.data.ownerUid == request.auth.uid || isAdmin())
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if false;
+    }
+
     // Riwayat Tunjangan Kinerja bersama, dengan model akses yang sama.
     match /tukinRuns/{runId} {
       allow read: if isAllowedUser();
@@ -79,6 +95,21 @@ service cloud.firestore {
             get(/databases/$(database)/documents/tukinRuns/$(runId)).data
           );
       }
+    }
+
+    // Tombstone penghapusan Tukin, dengan tujuan yang sama seperti Lembur.
+    match /tukinRunDeletions/{runId} {
+      allow read: if isAllowedUser();
+      allow create: if isAdmin() || (
+        isAllowedUser()
+        && exists(/databases/$(database)/documents/tukinRuns/$(runId))
+        && get(/databases/$(database)/documents/tukinRuns/$(runId)).data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid
+      );
+      allow update: if isAllowedUser()
+        && (resource.data.ownerUid == request.auth.uid || isAdmin())
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if false;
     }
 
     // Master operasional hanya memuat hash identitas dan parameter yang diperlukan aplikasi.

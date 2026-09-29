@@ -7,6 +7,7 @@
   const HISTORY_LIMIT = Number(window.FIREBASE_APP_SETTINGS?.historyLimit || 24);
   const SHARED_COLLECTION = 'tukinRuns';
   const LEGACY_COLLECTION = 'tukinRuns';
+  const DELETION_COLLECTION = 'tukinRunDeletions';
   const client = window.FirebaseClient;
   const common = window.FirebaseStorageCommon;
   const rules = window.TukinRules;
@@ -17,6 +18,45 @@
 
   function legacyCloudCollection() {
     return client.userCollection(LEGACY_COLLECTION);
+  }
+
+  function deletionCollection() {
+    return client.sharedCollection(DELETION_COLLECTION);
+  }
+
+  async function isDeletedRun(id) {
+    if (!id) return false;
+    try {
+      const snap = await deletionCollection().doc(id).get();
+      return snap.exists;
+    } catch (error) {
+      console.warn('Status penghapusan riwayat Tukin tidak dapat diperiksa:', error);
+      return false;
+    }
+  }
+
+  async function markDeletedRun(id, meta) {
+    if (!id) return;
+    const currentActor = actor();
+    await deletionCollection().doc(id).set(common.sanitize({
+      id,
+      ownerUid: meta?.ownerUid || currentActor.uid,
+      ownerEmail: meta?.ownerEmail || currentActor.email,
+      deletedByUid: currentActor.uid,
+      deletedByEmail: currentActor.email,
+      deletedAt: new Date().toISOString(),
+      schemaVersion: 1
+    }));
+  }
+
+  async function deleteLegacyCloudRun(id) {
+    try {
+      const legacyRef = legacyCloudCollection().doc(id);
+      const legacySnap = await legacyRef.get();
+      if (legacySnap.exists) await common.deleteRunWithChildren(legacyRef, ['employees']);
+    } catch (error) {
+      console.warn('Riwayat Tukin privat lama gagal dibersihkan:', error);
+    }
   }
 
   function actor() {
@@ -272,14 +312,20 @@
     if (!id) return false;
     const ref = cloudCollection().doc(id);
     const snap = await ref.get();
-    if (!snap.exists) return false;
-    const meta = snap.data();
-    if (!canManage(meta)) {
+    const meta = snap.exists ? snap.data() : null;
+
+    if (meta && !canManage(meta)) {
       throw new Error('Riwayat ini dibuat oleh akun lain dan hanya dapat dihapus oleh pembuat atau administrator.');
     }
+
+    // Tombstone global mencegah salinan legacy pada IndexedDB maupun
+    // users/{uid}/tukinRuns menghidupkan riwayat kembali saat login.
+    await markDeletedRun(id, meta);
+
     try { await localDelete(id); } catch (error) { console.warn(error); }
-    await common.deleteRunWithChildren(ref, ['employees']);
-    return true;
+    if (snap.exists) await common.deleteRunWithChildren(ref, ['employees']);
+    await deleteLegacyCloudRun(id);
+    return Boolean(snap.exists);
   }
 
   async function trimLocalHistory() {
@@ -299,6 +345,7 @@
     }
 
     for (const doc of snap.docs) {
+      if (await isDeletedRun(doc.id)) continue;
       const target = cloudCollection().doc(doc.id);
       const exists = await target.get();
       if (exists.exists) continue;
@@ -312,6 +359,7 @@
     try { local = await localListFull(); } catch (error) { console.warn(error); }
     for (const run of local.slice(0, HISTORY_LIMIT)) {
       if (!run?.id) continue;
+      if (await isDeletedRun(run.id)) continue;
       const ref = cloudCollection().doc(run.id);
       const existing = await ref.get();
       if (!existing.exists) await cloudSave(run);
