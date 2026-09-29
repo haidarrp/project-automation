@@ -533,10 +533,15 @@
   });
 
   app.addEventListener('click', (event) => {
-    const modalPanel = event.target.closest?.('[data-modal-panel]');
-    if (modalPanel) event.stopPropagation();
+    const actionEl = event.target.closest?.('[data-action]');
+    const action = actionEl?.dataset.action;
 
-    const action = event.target.closest?.('[data-action]')?.dataset.action;
+    // The modal backdrop wraps the modal panel. Without this guard, clicking
+    // any input inside the modal finds the backdrop via closest('[data-action]')
+    // and is incorrectly interpreted as a close-modal action.
+    if (action === 'close-modal' && actionEl?.classList.contains('training-modal-backdrop') && event.target !== actionEl) {
+      return;
+    }
     if (action === 'reset-filter') {
       state.filters = { search: '', startMonth: `${now.getFullYear()}-01`, endMonth: currentMonth };
       render();
