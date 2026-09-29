@@ -46,11 +46,20 @@
     return normalizeView(String(location.hash || '').replace(/^#/, '').toLowerCase());
   }
 
-  function employeeName(id) {
+  function employeeIdentity(id) {
     const row = state.directory.get(String(id || '')) || {};
-    const name = String(row.name || '').trim();
-    if (name) return name;
-    return `Pegawai • ${String(id || '').slice(0, 8)}`;
+    return {
+      name: String(row.name || '').trim(),
+      nip: String(row.nip || '').replace(/\D/g, '')
+    };
+  }
+
+  function employeeName(id) {
+    return employeeIdentity(id).name;
+  }
+
+  function unresolvedEmployeeCount() {
+    return state.employees.filter((item) => item.active !== false && !employeeName(item.id)).length;
   }
 
   function employeeOrder(id) {
@@ -61,7 +70,8 @@
   function activeEmployees() {
     return state.employees
       .filter((item) => item.active !== false)
-      .map((item) => ({ ...item, name: employeeName(item.id) }))
+      .map((item) => ({ ...item, ...employeeIdentity(item.id) }))
+      .filter((item) => item.name)
       .sort((a, b) => Number(a.order || 9999) - Number(b.order || 9999) || a.name.localeCompare(b.name, 'id'));
   }
 
@@ -150,6 +160,12 @@
     return rows.filter((employee) => employee.name.toLowerCase().includes(q));
   }
 
+  function identityNotice() {
+    const count = unresolvedEmployeeCount();
+    if (!count) return '';
+    return `<div class="alert alert-warning training-identity-alert"><div class="alert-title">${esc(count)} identitas pegawai belum tersedia</div>Lengkapi Nama/NIP pada menu Administrasi agar identitas pegawai dapat digunakan pada arsip pelatihan.</div>`;
+  }
+
   function metric(label, value, note) {
     return `<div class="card training-metric"><div class="training-metric-label">${esc(label)}</div><div><div class="training-metric-value">${esc(value)}</div><div class="training-metric-note">${esc(note)}</div></div></div>`;
   }
@@ -234,6 +250,7 @@
     return `<div class="training-page">
       <div class="training-head"><div><h1>Data Pegawai</h1><p>Arsip ringkas pelatihan pegawai Pusat Data dan Informasi berdasarkan periode.</p></div><div class="training-head-actions"><a class="btn btn-secondary" href="pelatihan.html#pelatihan">Data Pelatihan</a></div></div>
       ${filterCard()}
+      ${identityNotice()}
       ${employeeMetrics()}
       ${employeeTable()}
     </div>`;
@@ -243,6 +260,7 @@
     return `<div class="training-page">
       <div class="training-head"><div><h1>Data Pelatihan</h1><p>Pencatatan dan arsip pelatihan yang telah diikuti oleh pegawai Pusat Data dan Informasi.</p></div><div class="training-head-actions"><a class="btn btn-secondary" href="pelatihan.html#pegawai">Data Pegawai</a><button class="btn btn-primary" type="button" data-action="add-training">+ Tambah Pelatihan</button></div></div>
       ${filterCard()}
+      ${identityNotice()}
       ${trainingMetrics()}
       ${trainingTable()}
     </div>`;
@@ -250,6 +268,7 @@
 
   function trainingDrawer(training) {
     const participants = (training.participantIds || [])
+      .filter((id) => Boolean(employeeName(id)))
       .slice()
       .sort((a, b) => employeeOrder(a) - employeeOrder(b) || employeeName(a).localeCompare(employeeName(b), 'id'));
     return `<div class="training-drawer-backdrop" data-action="close-drawer"></div><aside class="training-drawer" role="dialog" aria-modal="true" aria-label="Detail pelatihan">
@@ -265,7 +284,7 @@
   }
 
   function employeeDrawer(employeeId) {
-    const name = employeeName(employeeId);
+    const name = employeeName(employeeId) || 'Nama pegawai belum tersedia';
     const history = employeeHistory(employeeId);
     return `<div class="training-drawer-backdrop" data-action="close-drawer"></div><aside class="training-drawer" role="dialog" aria-modal="true" aria-label="Riwayat pelatihan pegawai">
       <div class="training-drawer-head"><div><h3>${esc(name)}</h3><p>Riwayat pelatihan pada ${esc(periodLabel())}.</p></div><button class="icon-btn" type="button" data-action="close-drawer" aria-label="Tutup">×</button></div>

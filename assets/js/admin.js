@@ -50,10 +50,22 @@
   function docLabel(item) {
     const privateData = state.directory.get(item.id) || {};
     const name = String(privateData.name || '').trim();
-    const nip = String(privateData.nip || '').trim();
-    if (name || nip) return { title: name || 'Pegawai', sub: nip ? `NIP ${nip}` : 'Identitas admin' };
-    const hash = String(item.nipHash || item.nameHashes?.[0] || item.nameHash || item.id || '').slice(0, 12);
-    return { title: `Data legacy • ${hash || 'tanpa hash'}…`, sub: 'Identitas plaintext belum dilengkapi' };
+    const nip = String(privateData.nip || '').replace(/\D/g, '');
+    if (name) return { title: name, sub: nip ? `NIP ${nip}` : 'NIP belum tersedia', resolved: true };
+    return { title: 'Nama pegawai belum tersedia', sub: 'Lengkapi identitas tampilan pada master pegawai', resolved: false };
+  }
+
+  function auditDisplay(item) {
+    const target = String(item?.target || '');
+    if (state.directory.has(target)) return docLabel({ id: target }).title;
+    const trainingId = target.replace(/^trainings\//, '');
+    const training = state.trainings.find((row) => row.id === trainingId);
+    if (training) return String(training.name || 'Data pelatihan');
+    if (target === 'appSettings/lembur') return 'Pengaturan Lembur';
+    if (target === 'appSettings/tukin') return 'Pengaturan Tunjangan Kinerja';
+    const detail = String(item?.detail || '').trim();
+    const looksLikeHash = /^[a-f0-9]{32,}$/i.test(detail) || /[a-f0-9]{48,}/i.test(detail);
+    return detail && !looksLikeHash ? detail : 'Perubahan administrasi';
   }
 
   async function audit(action, target, detail) {
@@ -119,8 +131,7 @@
     return state.employees.filter((item) => {
       const label = docLabel(item);
       const fields = [
-        label.title, label.sub, item.id, item.nipHash,
-        ...(Array.isArray(item.nameHashes) ? item.nameHashes : []),
+        label.title, label.sub,
         item.lemburSatkerCode, item.satker, item.anakSatker, item.tukin, item.order
       ].map((x) => String(x || '').toLowerCase());
       return fields.some((x) => x.includes(q));
@@ -131,13 +142,13 @@
     const rows = filteredEmployees();
     return `<div class="card">
       <div class="admin-card-head"><div class="admin-card-head-copy"><h2>Master Pegawai</h2><p>Satu sumber master digunakan bersama oleh modul Lembur dan Tunjangan Kinerja.</p></div><button class="btn btn-primary btn-sm" type="button" data-action="add-master">+ Tambah Master</button></div>
-      <div class="admin-toolbar"><div class="search"><input id="admin-search" placeholder="Cari identitas, hash, satker, anak satker..." value="${esc(state.search)}"></div><span class="card-subtitle">${rows.length} dari ${state.employees.length} data</span></div>
+      <div class="admin-toolbar"><div class="search"><input id="admin-search" placeholder="Cari nama, NIP, satker, anak satker..." value="${esc(state.search)}"></div><span class="card-subtitle">${rows.length} dari ${state.employees.length} data</span></div>
       <div class="admin-table-wrap"><table class="data-table admin-table"><thead><tr><th>Identitas</th><th>Satker Lembur</th><th>Satker Tukin</th><th>Anak Satker</th><th>Besaran Tukin</th><th>Urutan</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
         ${rows.length ? rows.map((item) => {
           const label = docLabel(item);
-          const legacy = !state.directory.has(item.id);
+          const unresolved = !label.resolved;
           return `<tr>
-            <td class="admin-identity"><strong>${esc(label.title)}</strong><span>${esc(label.sub)}</span>${legacy ? '<span class="admin-badge legacy" style="margin-top:6px">Legacy</span>' : ''}</td>
+            <td class="admin-identity"><strong>${esc(label.title)}</strong><span>${esc(label.sub)}</span>${unresolved ? '<span class="admin-badge legacy" style="margin-top:6px">Identitas belum lengkap</span>' : ''}</td>
             <td>${esc(item.lemburSatkerCode ?? '-')}</td>
             <td class="admin-code">${esc(item.satker || '-')}</td>
             <td>${esc(item.anakSatker || '-')}</td>
@@ -189,7 +200,7 @@
         <div class="admin-settings-actions"><button class="btn btn-primary" type="button" data-action="save-tukin-settings">Simpan Pengaturan Tukin</button></div>
       </section>
       <section class="card admin-settings-card admin-audit" style="grid-column:1/-1"><h2>Aktivitas Administrasi Terakhir</h2><p>Catatan perubahan master dan pengaturan yang dilakukan melalui halaman ini.</p>
-        ${state.audits.length ? state.audits.map((item) => `<div class="admin-audit-row"><span>${esc(dateTime(item.createdAt))}</span><span><strong>${esc(item.action || '-')}</strong><br>${esc(item.detail || item.target || '')}</span><span>${esc(item.actorEmail || '-')}</span></div>`).join('') : '<div class="empty-state"><strong>Belum ada aktivitas</strong>Log akan muncul setelah admin melakukan perubahan.</div>'}
+        ${state.audits.length ? state.audits.map((item) => `<div class="admin-audit-row"><span>${esc(dateTime(item.createdAt))}</span><span><strong>${esc(item.action || '-')}</strong><br>${esc(auditDisplay(item))}</span><span>${esc(item.actorEmail || '-')}</span></div>`).join('') : '<div class="empty-state"><strong>Belum ada aktivitas</strong>Log akan muncul setelah admin melakukan perubahan.</div>'}
       </section>
     </div>`;
   }
@@ -204,8 +215,8 @@
     const privateData = existing ? (state.directory.get(existing.id) || {}) : {};
     const title = existing ? 'Edit Master Pegawai' : 'Tambah Master Pegawai';
     const help = existing && !state.directory.has(existing.id)
-      ? 'Data ini berasal dari master legacy. Isi Nama dan NIP untuk melengkapi direktori privat admin. NIP akan diverifikasi terhadap hash yang sudah tersimpan.'
-      : 'Nama dan NIP plaintext hanya disimpan pada koleksi privat admin. Koleksi operasional menggunakan hash SHA-256.';
+      ? 'Lengkapi Nama dan NIP agar identitas pegawai dapat ditampilkan dengan benar pada seluruh menu aplikasi.'
+      : 'Nama dan NIP pada bagian ini digunakan sebagai identitas tampilan pada seluruh menu aplikasi.';
     return `<div class="admin-modal-backdrop" data-action="close-modal"><div class="admin-modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
       <div class="admin-modal-head"><div><h3>${title}</h3><p>${esc(help)}</p></div><button class="icon-btn" type="button" data-action="close-modal">×</button></div>
       <div class="admin-form">
@@ -218,7 +229,7 @@
         ${field('Urutan', 'm-order', existing?.order || state.employees.length + 1, { type: 'number', min: 1 })}
         <div class="field"><label>Status</label><label class="admin-check"><input id="m-active" type="checkbox" ${existing?.active === false ? '' : 'checked'}><span>Aktif digunakan aplikasi</span></label></div>
       </div>
-      ${existing ? `<div class="admin-private-note">ID dokumen: <span class="admin-code">${esc(existing.id)}</span><br>Hash NIP: <span class="admin-code">${esc(existing.nipHash || '-')}</span></div>` : '<div class="admin-private-note">Untuk pencocokan yang stabil, pengisian NIP sangat disarankan.</div>'}
+      ${existing ? `<div class="admin-private-note">Identitas yang ditampilkan pada aplikasi: <strong>${esc(privateData.name || 'Nama belum tersedia')}</strong>${privateData.nip ? `<br>NIP ${esc(privateData.nip)}` : ''}</div>` : '<div class="admin-private-note">Nama dan NIP akan digunakan sebagai identitas tampilan pegawai pada seluruh menu.</div>'}
       <div class="actions"><span></span><div class="actions-right"><button class="btn btn-secondary" type="button" data-action="close-modal">Batal</button><button class="btn btn-primary" type="button" data-action="save-master" ${state.busy ? 'disabled' : ''}>Simpan</button></div></div>
     </div></div>`;
   }
@@ -226,7 +237,7 @@
   function render() {
     if (!window.FirebaseClient?.getCurrentUser?.()) return;
     const active = state.employees.filter((x) => x.active !== false).length;
-    const labeled = state.employees.filter((x) => state.directory.has(x.id)).length;
+    const labeled = state.employees.filter((x) => String(state.directory.get(x.id)?.name || '').trim()).length;
     const content = `<div class="admin-page">
       <div class="admin-head"><div><h1>Administrasi Master Data</h1><p>Kelola master pegawai dan pengaturan operasional yang digunakan oleh proses Tunjangan Kinerja dan Lembur. Perubahan disimpan langsung di Cloud Firestore.</p></div><div class="admin-head-actions"><button class="btn btn-secondary" type="button" data-action="toggle-import">Impor Master Awal</button><button class="btn btn-secondary" type="button" data-action="export-backup">Ekspor Backup</button></div></div>
       ${state.error ? `<div class="alert alert-danger"><div class="alert-title">Data administrasi gagal dimuat</div>${esc(state.error)}</div>` : ''}
@@ -234,7 +245,7 @@
       <div class="admin-metrics">
         ${metric('Total Master', state.employees.length, 'Seluruh dokumen master')}
         ${metric('Master Aktif', active, 'Digunakan untuk pencocokan')}
-        ${metric('Identitas Terpetakan', labeled, 'Memiliki direktori privat admin')}
+        ${metric('Identitas Terpetakan', labeled, 'Memiliki Nama/NIP untuk tampilan')}
         ${metric('Pengaturan', (state.settings.lembur && Object.keys(state.settings.lembur).length ? 1 : 0) + (state.settings.tukin && Object.keys(state.settings.tukin).length ? 1 : 0), 'Dari 2 modul')}
       </div>
       <div class="admin-tabs"><button class="admin-tab ${state.tab === 'master' ? 'active' : ''}" data-tab="master" type="button">Master Pegawai</button><button class="admin-tab ${state.tab === 'settings' ? 'active' : ''}" data-tab="settings" type="button">Pengaturan & Audit</button></div>
@@ -276,7 +287,7 @@
       if (!id) throw new Error('Isi minimal Nama Pegawai atau NIP.');
 
       if (existing?.nipHash && nip && hashes.nipHash !== existing.nipHash) {
-        throw new Error('NIP tidak sesuai dengan hash NIP master yang tersimpan. Periksa kembali NIP pegawai.');
+        throw new Error('NIP tidak sesuai dengan identitas master yang tersimpan. Periksa kembali NIP pegawai.');
       }
 
       const existingNameHashes = window.MasterDataService.nameHashes(existing || {});
