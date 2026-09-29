@@ -5,10 +5,42 @@
     home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/>',
     tukin: '<path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
     overtime: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
+    training: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 5.5v16M8 7h8M8 11h6"/>',
+    users: '<circle cx="9" cy="8" r="3"/><path d="M3.8 19c.7-3 2.4-4.5 5.2-4.5S13.5 16 14.2 19"/><circle cx="17" cy="9" r="2.2"/><path d="M15.7 14.8c2.6-.1 4.1 1.3 4.5 4.2"/>',
     history: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>',
     process: '<path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M5 18v3h14v-3"/>',
     chevron: '<path d="m9 6 6 6-6 6"/>',
     admin: '<circle cx="12" cy="8" r="3"/><path d="M5 20c.7-4 3-6 7-6s6.3 2 7 6"/><path d="M18.5 5.5 20 4m-1.5 6.5L20 12"/>'
+  });
+
+  const MODULES = Object.freeze({
+    tukin: {
+      label: 'Tunjangan Kinerja',
+      icon: 'tukin',
+      file: 'tukin.html',
+      items: [
+        { view: 'process', label: 'Proses Tukin' },
+        { view: 'history', label: 'Riwayat' }
+      ]
+    },
+    lembur: {
+      label: 'Lembur',
+      icon: 'overtime',
+      file: 'lembur.html',
+      items: [
+        { view: 'process', label: 'Proses Lembur' },
+        { view: 'history', label: 'Riwayat' }
+      ]
+    },
+    training: {
+      label: 'Pelatihan Pegawai',
+      icon: 'training',
+      file: 'pelatihan.html',
+      items: [
+        { view: 'pegawai', label: 'Data Pegawai', icon: 'users' },
+        { view: 'pelatihan', label: 'Data Pelatihan', icon: 'training' }
+      ]
+    }
   });
 
   function icon(name) {
@@ -16,20 +48,17 @@
   }
 
   function moduleGroup(module, activeModule, activeView) {
-    const isTukin = module === 'tukin';
+    const config = MODULES[module];
+    if (!config) return '';
     const active = activeModule === module;
-    const label = isTukin ? 'Tunjangan Kinerja' : 'Lembur';
-    const processLabel = isTukin ? 'Proses Tukin' : 'Proses Lembur';
-    const file = isTukin ? 'tukin.html' : 'lembur.html';
     return `<div class="nav-group ${active ? 'active-group open' : ''}" data-nav-group="${module}">
       <button class="nav-group-title" type="button" aria-expanded="${active ? 'true' : 'false'}" onclick="window.AppShell.toggleModule(this)">
-        <span class="nav-icon">${icon(isTukin ? 'tukin' : 'overtime')}</span>
-        <span class="nav-label">${label}</span>
+        <span class="nav-icon">${icon(config.icon)}</span>
+        <span class="nav-label">${config.label}</span>
         <span class="nav-chevron">${icon('chevron')}</span>
       </button>
       <div class="nav-submenu">
-        <a class="nav-sub-button ${active && activeView === 'process' ? 'active' : ''}" href="${file}#process"><span class="nav-sub-dot"></span><span>${processLabel}</span></a>
-        <a class="nav-sub-button ${active && activeView === 'history' ? 'active' : ''}" href="${file}#history"><span class="nav-sub-dot"></span><span>Riwayat</span></a>
+        ${config.items.map((item) => `<a class="nav-sub-button ${active && activeView === item.view ? 'active' : ''}" href="${config.file}#${item.view}"><span class="nav-sub-dot"></span><span>${item.label}</span></a>`).join('')}
       </div>
     </div>`;
   }
@@ -54,14 +83,17 @@
   }
 
   function navigation(activeModule, activeView) {
-    const adminLink = window.FirebaseClient?.isAdmin?.()
+    const isAdmin = Boolean(window.FirebaseClient?.isAdmin?.());
+    const adminLink = isAdmin
       ? `<a class="nav-button nav-admin ${activeModule === 'admin' ? 'active' : ''}" href="admin.html"><span class="nav-icon">${icon('admin')}</span><span class="nav-label">Administrasi</span></a>`
       : '';
+    const trainingGroup = isAdmin ? moduleGroup('training', activeModule, activeView) : '';
     return `<nav class="nav nav-modules" aria-label="Navigasi utama">
       <a class="nav-button nav-home ${activeModule === 'dashboard' ? 'active' : ''}" href="index.html"><span class="nav-icon">${icon('home')}</span><span class="nav-label">Dashboard</span></a>
       <div class="nav-groups" role="group" aria-label="Modul">
         ${moduleGroup('tukin', activeModule, activeView)}
         ${moduleGroup('lembur', activeModule, activeView)}
+        ${trainingGroup}
       </div>
       ${adminLink}
     </nav>`;
@@ -70,6 +102,7 @@
   function breadcrumb(module, viewLabel) {
     if (module === 'dashboard') return '<strong>Generator Dokumen</strong><span>/ Dashboard</span>';
     if (module === 'admin') return '<strong>Generator Dokumen</strong><span>/ Administrasi / Master Data</span>';
+    if (module === 'training') return `<strong>Pusdatin PKP</strong><span>/ Pelatihan Pegawai / ${viewLabel || ''}</span>`;
     const moduleLabel = module === 'tukin' ? 'Tunjangan Kinerja' : 'Lembur';
     return `<strong>Generator Dokumen</strong><span>/ ${moduleLabel} / ${viewLabel || ''}</span>`;
   }

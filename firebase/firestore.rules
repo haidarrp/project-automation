@@ -54,6 +54,11 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // Arsip pelatihan bersifat internal Pusdatin dan dikelola oleh administrator aplikasi.
+    match /trainings/{trainingId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
     // Audit log bersifat append-only dari halaman admin.
     match /adminAudit/{auditId} {
       allow read: if isAdmin();

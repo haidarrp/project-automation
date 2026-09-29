@@ -13,6 +13,7 @@
     directory: new Map(),
     settings: { lembur: {}, tukin: {} },
     audits: [],
+    trainings: [],
     modal: null,
     importOpen: false,
     importFile: null
@@ -82,12 +83,13 @@
     state.error = '';
     render();
     try {
-      const [masterSnap, directorySnap, lemburSnap, tukinSnap, auditSnap] = await Promise.all([
+      const [masterSnap, directorySnap, lemburSnap, tukinSnap, auditSnap, trainingSnap] = await Promise.all([
         db().collection('masterEmployees').get(),
         db().collection('masterDirectory').get(),
         db().collection('appSettings').doc('lembur').get(),
         db().collection('appSettings').doc('tukin').get(),
-        db().collection('adminAudit').orderBy('createdAt', 'desc').limit(20).get()
+        db().collection('adminAudit').orderBy('createdAt', 'desc').limit(20).get(),
+        db().collection('trainings').get()
       ]);
       state.employees = masterSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       state.directory = new Map(directorySnap.docs.map((doc) => [doc.id, { id: doc.id, ...doc.data() }]));
@@ -96,6 +98,7 @@
         tukin: tukinSnap.exists ? tukinSnap.data() : {}
       };
       state.audits = auditSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      state.trainings = trainingSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       state.employees.sort((a, b) => Number(a.order || 9999) - Number(b.order || 9999) || docLabel(a).title.localeCompare(docLabel(b).title, 'id'));
     } catch (error) {
       state.error = error.message || String(error);
@@ -407,6 +410,7 @@
       if (payload.masterDirectory && typeof payload.masterDirectory === 'object') {
         Object.entries(payload.masterDirectory).forEach(([id, item]) => writes.push({ type: 'directory', id, item }));
       }
+      if (Array.isArray(payload.trainings)) payload.trainings.forEach((item) => writes.push({ type: 'training', item }));
       if (payload.appSettings?.lembur) writes.push({ type: 'setting', id: 'lembur', item: payload.appSettings.lembur });
       if (payload.appSettings?.tukin) writes.push({ type: 'setting', id: 'tukin', item: payload.appSettings.tukin });
 
@@ -431,6 +435,20 @@
               name: String(entry.item?.name || ''),
               nip: String(entry.item?.nip || '').replace(/\D/g, ''),
               updatedAt: serverTimestamp(), updatedBy: user()?.email || ''
+            }, { merge: true });
+          } else if (entry.type === 'training') {
+            const item = entry.item || {};
+            const id = String(item.id || '').trim();
+            if (!id) return;
+            batch.set(db().collection('trainings').doc(id), {
+              name: String(item.name || ''),
+              organizer: String(item.organizer || ''),
+              startDate: String(item.startDate || ''),
+              endDate: String(item.endDate || ''),
+              participantIds: [...new Set((Array.isArray(item.participantIds) ? item.participantIds : []).map(String).filter(Boolean))],
+              schemaVersion: 1,
+              updatedAt: serverTimestamp(),
+              updatedBy: user()?.email || ''
             }, { merge: true });
           } else {
             batch.set(db().collection('appSettings').doc(entry.id), { ...entry.item, schemaVersion: 3, updatedAt: serverTimestamp(), updatedBy: user()?.email || '' }, { merge: true });
@@ -457,6 +475,7 @@
         schemaVersion: 3,
         masterEmployees: state.employees.map((item) => ({ ...item, updatedAt: undefined })),
         masterDirectory: Object.fromEntries([...state.directory.entries()].map(([id, value]) => [id, { name: value.name || '', nip: value.nip || '' }])),
+        trainings: state.trainings.map((item) => ({ id: item.id, name: item.name || '', organizer: item.organizer || '', startDate: item.startDate || '', endDate: item.endDate || '', participantIds: Array.isArray(item.participantIds) ? item.participantIds : [] })),
         appSettings: { lembur: state.settings.lembur || {}, tukin: state.settings.tukin || {} }
       };
       const replacer = (key, value) => {
