@@ -5,12 +5,33 @@
   const DB_VERSION = 1;
   const STORE_NAME = 'tukinRuns';
   const HISTORY_LIMIT = Number(window.FIREBASE_APP_SETTINGS?.historyLimit || 24);
+  const SHARED_COLLECTION = 'tukinRuns';
+  const LEGACY_COLLECTION = 'tukinRuns';
   const client = window.FirebaseClient;
   const common = window.FirebaseStorageCommon;
   const rules = window.TukinRules;
 
   function cloudCollection() {
-    return client.userCollection('tukinRuns');
+    return client.sharedCollection(SHARED_COLLECTION);
+  }
+
+  function legacyCloudCollection() {
+    return client.userCollection(LEGACY_COLLECTION);
+  }
+
+  function actor() {
+    const user = client.getCurrentUser();
+    return {
+      uid: user?.uid || '',
+      email: user?.email || '',
+      name: user?.displayName || ''
+    };
+  }
+
+  function canManage(run) {
+    const user = client.getCurrentUser();
+    if (!user || !run) return false;
+    return client.isAdmin() || (run.ownerUid && run.ownerUid === user.uid);
   }
 
   function openDb() {
@@ -69,6 +90,11 @@
       updatedAt: run.updatedAt || null,
       generatedName: run.generatedName || '',
       summary: run.summary || {},
+      ownerUid: run.ownerUid || '',
+      ownerEmail: run.ownerEmail || '',
+      ownerName: run.ownerName || '',
+      updatedByUid: run.updatedByUid || '',
+      updatedByEmail: run.updatedByEmail || '',
       cloudOnly: Boolean(run.cloudOnly)
     };
   }
@@ -111,12 +137,22 @@
 
   async function cloudSave(run) {
     const ref = cloudCollection().doc(run.id);
-    const processedAt = run.processedAt || new Date().toISOString();
+    const existingSnap = await ref.get();
+    const existing = existingSnap.exists ? existingSnap.data() : null;
+    if (existing && !canManage(existing)) {
+      throw new Error('Riwayat ini dibuat oleh akun lain dan hanya dapat diubah oleh pembuat atau administrator.');
+    }
+
+    const currentActor = actor();
+    const processedAt = run.processedAt || existing?.processedAt || new Date().toISOString();
     const updatedAt = run.updatedAt || null;
     const employees = Array.isArray(run.employees) ? run.employees : [];
     const hasLocalBinary = employees.some((employee) =>
       (employee.sourceFiles || []).length || Object.values(employee.records || {}).some((record) => (record.evidence || []).some((item) => item?.file))
     );
+    const ownerUid = existing?.ownerUid || currentActor.uid;
+    const ownerEmail = existing?.ownerEmail || currentActor.email;
+    const ownerName = existing?.ownerName || currentActor.name;
 
     await ref.set(common.sanitize({
       id: run.id,
@@ -130,13 +166,29 @@
       sortAt: updatedAt || processedAt,
       employeeCount: employees.length,
       hasLocalBinary,
-      schemaVersion: 2
+      ownerUid,
+      ownerEmail,
+      ownerName,
+      updatedByUid: currentActor.uid,
+      updatedByEmail: currentActor.email,
+      schemaVersion: 3
     }));
 
     await common.replaceSubcollection(ref, 'employees', employees.map((employee, index) => ({
       id: `employee-${String(index + 1).padStart(4, '0')}`,
       data: serializeEmployeeForCloud(employee, index)
     })));
+
+    return {
+      ...run,
+      processedAt,
+      updatedAt,
+      ownerUid,
+      ownerEmail,
+      ownerName,
+      updatedByUid: currentActor.uid,
+      updatedByEmail: currentActor.email
+    };
   }
 
   async function cloudList() {
@@ -144,8 +196,8 @@
     return snap.docs.map((doc) => summaryOnly(doc.data()));
   }
 
-  async function cloudGet(id) {
-    const ref = cloudCollection().doc(id);
+  async function cloudGetFrom(collection, id, cloudOnly) {
+    const ref = collection.doc(id);
     const [metaSnap, empSnap] = await Promise.all([
       ref.get(),
       ref.collection('employees').orderBy('order', 'asc').get()
@@ -155,9 +207,13 @@
     return {
       ...meta,
       employees: empSnap.docs.map((doc) => hydrateCloudEmployee(doc.data())),
-      cloudOnly: true,
+      cloudOnly: Boolean(cloudOnly),
       binaryFilesAvailable: false
     };
+  }
+
+  async function cloudGet(id) {
+    return cloudGetFrom(cloudCollection(), id, true);
   }
 
   async function listRuns() {
@@ -185,7 +241,18 @@
       const cloudData = cloudMeta.data();
       const localTime = common.latestTimestamp(local);
       const cloudTime = common.latestTimestamp(cloudData);
-      if (local && localTime >= cloudTime) return { ...local, cloudOnly: false, binaryFilesAvailable: true };
+      if (local && localTime >= cloudTime) {
+        return {
+          ...local,
+          ownerUid: cloudData.ownerUid || local.ownerUid || '',
+          ownerEmail: cloudData.ownerEmail || local.ownerEmail || '',
+          ownerName: cloudData.ownerName || local.ownerName || '',
+          updatedByUid: cloudData.updatedByUid || local.updatedByUid || '',
+          updatedByEmail: cloudData.updatedByEmail || local.updatedByEmail || '',
+          cloudOnly: false,
+          binaryFilesAvailable: true
+        };
+      }
       return cloudGet(id);
     } catch (cloudError) {
       if (local) return { ...local, cloudOnly: false, binaryFilesAvailable: true };
@@ -195,37 +262,52 @@
 
   async function saveRun(run) {
     if (!run || !run.id) throw new Error('Data riwayat Tukin tidak valid.');
-    // Full binary tetap lokal agar Spark tidak memerlukan Cloud Storage.
-    await localSave(run);
-    await cloudSave(run);
-    await trimHistory();
-    return run;
+    const enriched = await cloudSave(run);
+    await localSave(enriched);
+    await trimLocalHistory();
+    return enriched;
   }
 
   async function deleteRun(id) {
     if (!id) return false;
-    try { await localDelete(id); } catch (error) { console.warn(error); }
     const ref = cloudCollection().doc(id);
     const snap = await ref.get();
-    if (snap.exists) await common.deleteRunWithChildren(ref, ['employees']);
+    if (!snap.exists) return false;
+    const meta = snap.data();
+    if (!canManage(meta)) {
+      throw new Error('Riwayat ini dibuat oleh akun lain dan hanya dapat dihapus oleh pembuat atau administrator.');
+    }
+    try { await localDelete(id); } catch (error) { console.warn(error); }
+    await common.deleteRunWithChildren(ref, ['employees']);
     return true;
   }
 
-  async function trimHistory() {
+  async function trimLocalHistory() {
     try {
       const local = (await localListFull()).sort((a, b) => common.latestTimestamp(b) - common.latestTimestamp(a));
       for (const run of local.slice(HISTORY_LIMIT)) await localDelete(run.id);
     } catch (error) { console.warn('Trim lokal gagal:', error); }
-
-    const snap = await cloudCollection().orderBy('sortAt', 'desc').get();
-    for (const doc of snap.docs.slice(HISTORY_LIMIT)) await common.deleteRunWithChildren(doc.ref, ['employees']);
   }
 
-  async function migrateLegacyOnce() {
-    const user = client.getCurrentUser();
-    if (!user) return;
-    const marker = `tukin-firebase-migrated:${user.uid}`;
-    if (localStorage.getItem(marker) === '1') return;
+  async function migrateLegacyCloud() {
+    let snap;
+    try {
+      snap = await legacyCloudCollection().get();
+    } catch (error) {
+      console.warn('Riwayat Tukin privat lama tidak dapat dibaca untuk migrasi:', error);
+      return;
+    }
+
+    for (const doc of snap.docs) {
+      const target = cloudCollection().doc(doc.id);
+      const exists = await target.get();
+      if (exists.exists) continue;
+      const legacy = await cloudGetFrom(legacyCloudCollection(), doc.id, true);
+      if (legacy) await cloudSave(legacy);
+    }
+  }
+
+  async function migrateLegacyLocal() {
     let local = [];
     try { local = await localListFull(); } catch (error) { console.warn(error); }
     for (const run of local.slice(0, HISTORY_LIMIT)) {
@@ -234,8 +316,29 @@
       const existing = await ref.get();
       if (!existing.exists) await cloudSave(run);
     }
+  }
+
+  async function migrateLegacyOnce() {
+    const user = client.getCurrentUser();
+    if (!user) return;
+    const marker = `tukin-shared-history-migrated-v1:${user.uid}`;
+    if (localStorage.getItem(marker) === '1') return;
+
+    await migrateLegacyCloud();
+    await migrateLegacyLocal();
     localStorage.setItem(marker, '1');
   }
 
-  window.TukinStorage = Object.freeze({ listRuns, getRun, saveRun, deleteRun, migrateLegacyOnce });
+
+  function subscribeRuns(onChange, onError) {
+    return cloudCollection().orderBy('sortAt', 'desc').limit(HISTORY_LIMIT).onSnapshot((snap) => {
+      const history = snap.docs.map((doc) => summaryOnly(doc.data()));
+      if (typeof onChange === 'function') onChange(history);
+    }, (error) => {
+      if (typeof onError === 'function') onError(error);
+      else console.warn('Sinkronisasi realtime riwayat Tukin terputus:', error);
+    });
+  }
+
+  window.TukinStorage = Object.freeze({ listRuns, getRun, saveRun, deleteRun, migrateLegacyOnce, canManage, subscribeRuns });
 })();

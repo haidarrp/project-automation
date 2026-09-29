@@ -306,6 +306,11 @@
     return userRoot().collection(name);
   }
 
+  function sharedCollection(name) {
+    if (!currentUser) throw new Error('Pengguna belum login.');
+    return db.collection(name);
+  }
+
   function getCurrentUser() { return currentUser; }
   function getDb() { return db; }
   function getAuth() { return auth; }
@@ -318,6 +323,7 @@
     signOut,
     userRoot,
     userCollection,
+    sharedCollection,
     getCurrentUser,
     getDb,
     getAuth,

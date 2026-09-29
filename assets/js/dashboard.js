@@ -7,6 +7,8 @@
   const tukinStorage = window.TukinStorage;
 
   const state = { loading: true, lembur: [], tukin: [], error: '' };
+  let unsubscribeLembur = null;
+  let unsubscribeTukin = null;
 
   function esc(value) {
     return String(value === null || value === undefined ? '' : value)
@@ -106,7 +108,7 @@
       const href = isTukin ? 'tukin.html#history' : 'lembur.html#history';
       return `<div class="main-recent-row">
         <div class="main-recent-module"><span class="main-recent-module-mark">${icon(isTukin ? 'tukin' : 'overtime')}</span><span>${isTukin ? 'Tunjangan Kinerja' : 'Lembur'}</span></div>
-        <div><div class="main-recent-period">${esc(periodLabel(run.period))}</div><div class="main-recent-meta">${isTukin ? 'Periode Tukin' : 'Periode lembur'}</div></div>
+        <div><div class="main-recent-period">${esc(periodLabel(run.period))}</div><div class="main-recent-meta">${isTukin ? 'Periode Tukin' : 'Periode lembur'}${run.ownerEmail ? ` · ${esc(run.ownerEmail)}` : ''}</div></div>
         <div>${esc(result)}</div>
         <div>${esc(formatDateTime(run.updatedAt || run.processedAt))}</div>
         <a class="chev-btn" href="${href}" aria-label="Buka riwayat ${isTukin ? 'Tunjangan Kinerja' : 'Lembur'}">${icon('chevron')}</a>
@@ -140,7 +142,7 @@
 
       <div class="main-module-grid">${moduleCard('tukin', latestTukin)}${moduleCard('lembur', latestLembur)}</div>
 
-      <div class="card main-recent"><div class="main-recent-head"><div><div class="card-title">Aktivitas Terbaru</div><div class="card-subtitle">Riwayat proses kedua modul pada akun Firebase ini.</div></div><div class="main-updated">${latestActivity ? `Terakhir ${esc(formatDateTime(latestActivity.updatedAt || latestActivity.processedAt))}` : 'Belum ada aktivitas'}</div></div>
+      <div class="card main-recent"><div class="main-recent-head"><div><div class="card-title">Aktivitas Terbaru</div><div class="card-subtitle">Riwayat proses bersama seluruh akun untuk kedua modul.</div></div><div class="main-updated">${latestActivity ? `Terakhir ${esc(formatDateTime(latestActivity.updatedAt || latestActivity.processedAt))}` : 'Belum ada aktivitas'}</div></div>
         ${(state.tukin.length || state.lembur.length) ? '<div class="main-recent-table-head"><div>Modul</div><div>Periode</div><div>Ringkasan</div><div>Diproses</div><div></div></div>' : ''}
         ${recentRows()}
       </div>
@@ -170,8 +172,11 @@
       state.error = [state.error, `Riwayat Tukin: ${error.message || error}`].filter(Boolean).join(' · ');
     }
     state.loading = false;
+    unsubscribeLembur = lemburStorage?.subscribeHistory?.((history) => { state.lembur = history; render(); }, (error) => console.warn('Sinkronisasi dashboard Lembur gagal:', error)) || null;
+    unsubscribeTukin = tukinStorage?.subscribeRuns?.((history) => { state.tukin = history; render(); }, (error) => console.warn('Sinkronisasi dashboard Tukin gagal:', error)) || null;
     render();
   }
 
+  window.addEventListener('beforeunload', () => { unsubscribeLembur?.(); unsubscribeTukin?.(); });
   init();
 })();

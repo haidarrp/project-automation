@@ -8,6 +8,8 @@
   const storage = window.AppStorage;
   const app = document.getElementById('app');
 
+  let historyUnsubscribe = null;
+
   const state = {
     started: false,
     view: 'dashboard',
@@ -353,17 +355,28 @@
     const title = state.resultMode === 'updated' ? 'Perubahan Berhasil Disimpan' : state.resultMode === 'history' ? 'Hasil Proses Tersimpan' : 'Dokumen Berhasil Dibuat';
     const timeValue = run?.updatedAt || run?.processedAt;
     const timeLabel = run?.updatedAt ? 'Diperbarui' : 'Diproses';
+    const canManageRun = !run?.id || storage.canManage?.(run);
     return `<div class="card result-hero"><div class="success-mark">✓</div><h3>${title}</h3><p>${esc(periodLabel(period))}${timeValue ? ` - ${timeLabel} ${esc(formatDateTime(timeValue))}` : ''}</p>
       <div class="grid-4 section-gap" style="text-align:left">${metric(summary.employees,'Pegawai')}${metric(summary.overtimeEmployees,'Pegawai Lembur')}${metric(summary.totalHours,'Total Jam Lembur')}${metric(summary.mealDays,'Hari Uang Makan')}</div>
       ${holidays.length ? `<div class="result-holidays"><strong>Tanggal merah:</strong> ${holidays.map((key)=>esc(holidayLabel(key))).join(', ')}</div>` : ''}
       <div class="download-list"><div class="download-row"><div class="file-icon">▤</div><div><div class="download-name">Rekapitulasi Lembur</div><div class="download-meta">${esc(periodLabel(period))}</div></div><button class="btn btn-secondary btn-sm" data-download="recap">Download</button></div><div class="download-row"><div class="file-icon">▦</div><div><div class="download-name">Daftar Hadir Kerja Lembur</div><div class="download-meta">Workbook dengan selector tanggal</div></div><button class="btn btn-secondary btn-sm" data-download="daily">Download</button></div><div class="download-row"><div class="file-icon">▧</div><div><div class="download-name">SPKL ${esc(periodLabel(period))}.xlsx</div><div class="download-meta">Sheet Hari Kerja + WEEKEND</div></div><button class="btn btn-secondary btn-sm" data-download="spkl">Download</button></div></div>
-      <div class="actions"><button class="btn btn-secondary" data-action="go-history">Lihat Riwayat</button><div class="actions-right">${run?.id ? '<button class="btn btn-secondary" data-action="edit-current-run">Edit Data</button>' : ''}<button class="btn btn-primary" data-action="new-period">Proses Periode Baru</button></div></div></div>`;
+      <div class="actions"><button class="btn btn-secondary" data-action="go-history">Lihat Riwayat</button><div class="actions-right">${run?.id && canManageRun ? '<button class="btn btn-secondary" data-action="edit-current-run">Edit Data</button>' : ''}<button class="btn btn-primary" data-action="new-period">Proses Periode Baru</button></div></div></div>`;
   }
 
   function renderHistory() {
     const history = state.history;
-    const rows = history.map((item) => { const changedAt=item.updatedAt || item.processedAt; const changedLabel=item.updatedAt ? 'Diubah' : 'Diproses'; return `<tr><td>${esc(periodLabel(item.period))}</td><td>${item.summary.employees}</td><td>${item.summary.totalHours} jam</td><td>${(item.holidays || []).length}</td><td><span class="history-time-label">${changedLabel}</span><br>${esc(formatDateTime(changedAt))}</td><td><span class="status-pill">Selesai</span></td><td><div class="history-actions"><button class="btn btn-secondary btn-sm" data-history-id="${esc(item.id)}">Lihat</button><button class="btn btn-secondary btn-sm" data-edit-history-id="${esc(item.id)}">Verifikasi/Edit</button><button class="btn btn-danger btn-sm" data-delete-history-id="${esc(item.id)}">Hapus</button></div></td></tr>`; }).join('');
-    const content = `<div class="page-title"><div><h2>Riwayat Lembur</h2><p>Dokumen lembur yang tersimpan pada akun Firebase Anda. Data dapat dilihat, diverifikasi/diedit, digenerate ulang melalui hasil tersimpan, atau dihapus per periode.</p></div></div><div class="card table-wrap"><table class="data-table history-table"><thead><tr><th>Periode</th><th>Pegawai</th><th>Total Lembur</th><th>Tanggal Merah</th><th>Terakhir Diubah</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="text-center" style="padding:36px;color:#6b7c93">Belum ada riwayat.</td></tr>'}</tbody></table></div><div class="footer-note">Riwayat Lembur tersinkron melalui Cloud Firestore pada akun yang sedang login. Penghapusan riwayat tidak dapat dibatalkan.</div>`;
+    const rows = history.map((item) => {
+      const changedAt = item.updatedAt || item.processedAt;
+      const changedLabel = item.updatedAt ? 'Diubah' : 'Diproses';
+      const manageable = Boolean(storage.canManage?.(item));
+      const actorName = item.ownerName || item.ownerEmail || 'Akun lama';
+      const actorSub = item.ownerName && item.ownerEmail ? `<div class="card-subtitle">${esc(item.ownerEmail)}</div>` : '';
+      const manageActions = manageable
+        ? `<button class="btn btn-secondary btn-sm" data-edit-history-id="${esc(item.id)}">Verifikasi/Edit</button><button class="btn btn-danger btn-sm" data-delete-history-id="${esc(item.id)}">Hapus</button>`
+        : '';
+      return `<tr><td>${esc(periodLabel(item.period))}</td><td>${item.summary.employees}</td><td>${item.summary.totalHours} jam</td><td>${(item.holidays || []).length}</td><td><strong>${esc(actorName)}</strong>${actorSub}</td><td><span class="history-time-label">${changedLabel}</span><br>${esc(formatDateTime(changedAt))}</td><td><span class="status-pill">Selesai</span></td><td><div class="history-actions"><button class="btn btn-secondary btn-sm" data-history-id="${esc(item.id)}">Lihat</button>${manageActions}</div></td></tr>`;
+    }).join('');
+    const content = `<div class="page-title"><div><h2>Riwayat Lembur</h2><p>Riwayat bersama seluruh akun aplikasi. Proses yang dibuat oleh akun lain dapat dilihat, sedangkan perubahan dan penghapusan dibatasi untuk pembuat riwayat atau administrator.</p></div></div><div class="card table-wrap"><table class="data-table history-table"><thead><tr><th>Periode</th><th>Pegawai</th><th>Total Lembur</th><th>Tanggal Merah</th><th>Diproses Oleh</th><th>Terakhir Diubah</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="text-center" style="padding:36px;color:#6b7c93">Belum ada riwayat.</td></tr>'}</tbody></table></div><div class="footer-note">Riwayat Lembur tersinkron melalui koleksi bersama Cloud Firestore. Semua akun terverifikasi dapat melihat riwayat yang sama.</div>`;
     app.innerHTML = shell(content); bindEvents();
   }
 
@@ -466,9 +479,9 @@
             employees: state.employees,
             holidays
           };
-      await storage.saveRun(run);
+      const savedMeta = await storage.saveRun(run);
       await refreshHistory(false);
-      state.currentRun = run;
+      state.currentRun = { ...run, ...savedMeta };
       state.resultFromHistory = Boolean(state.editingHistoryId);
       state.resultMode = state.editingHistoryId ? 'updated' : 'new';
       state.editingHistoryId = null;
@@ -519,6 +532,7 @@
     try {
       const run = await storage.getRun(id);
       if (!run) throw new Error('Riwayat tidak ditemukan atau sudah dihapus.');
+      if (!storage.canManage?.(run)) throw new Error('Riwayat ini dibuat oleh akun lain. Anda dapat melihat hasilnya, tetapi hanya pembuat atau administrator yang dapat mengedit.');
       state.view='process';
       state.processStep='review';
       state.period={...run.period};
@@ -553,6 +567,7 @@
     try {
       const run = await storage.getRun(id);
       if (!run) throw new Error('Riwayat tidak ditemukan atau sudah dihapus.');
+      if (!storage.canManage?.(run)) throw new Error('Riwayat ini dibuat oleh akun lain dan hanya dapat dihapus oleh pembuat atau administrator.');
       const label = periodLabel(run.period);
       const approved = window.confirm(`Hapus riwayat proses ${label}?\n\nData hasil proses periode ini akan dihapus dari Firestore dan tindakan ini tidak dapat dibatalkan.`);
       if (!approved) return;
@@ -628,8 +643,13 @@
     await window.MasterDataService?.getEmployees?.(false);
     applyHashRoute();
     await refreshHistory(false);
+    historyUnsubscribe = storage.subscribeHistory?.((history) => {
+      state.history = history;
+      if (state.view === 'history' || state.view === 'dashboard') render();
+    }, (error) => console.warn('Sinkronisasi realtime Lembur gagal:', error)) || null;
     render();
   }
 
+  window.addEventListener('beforeunload', () => historyUnsubscribe?.());
   init();
 })();

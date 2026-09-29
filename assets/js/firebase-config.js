@@ -22,10 +22,11 @@
     enableGoogleSignIn: false,
     enableEmailPasswordSignIn: true,
 
-    // Data riwayat dibuat privat per Firebase UID.
-    dataScope: 'per-user',
+    // Riwayat Tukin dan Lembur menggunakan koleksi bersama lintas akun terverifikasi.
+    dataScope: 'shared',
 
-    // Maksimum item riwayat yang ditampilkan/disimpan per modul.
+    // Maksimum item riwayat terbaru yang dimuat ke tabel/listener per modul.
+    // Dokumen cloud yang lebih lama tidak dihapus otomatis.
     historyLimit: 24
   });
 })();

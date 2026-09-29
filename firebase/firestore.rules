@@ -19,6 +19,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
     }
 
+    function canManageSharedRun(data) {
+      return isAllowedUser()
+        && (data.ownerUid == request.auth.uid || isAdmin());
+    }
+
     // Dokumen penanda administrator dibuat manual melalui Firebase Console.
     // Pengguna biasa hanya boleh membaca status admin miliknya sendiri.
     match /admins/{userId} {
@@ -26,13 +31,53 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Profil dan seluruh data proses tetap privat per Firebase UID.
+    // Area privat lama tetap dipertahankan agar data riwayat versi sebelumnya
+    // dapat dimigrasikan oleh pemilik akun ke koleksi riwayat bersama.
     match /users/{userId} {
       allow read, create, update: if isOwner(userId);
       allow delete: if false;
 
       match /{document=**} {
         allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Riwayat Lembur bersama.
+    // Semua akun instansi yang terverifikasi dapat membaca seluruh riwayat.
+    // Riwayat hanya dapat dibuat oleh akun yang sedang login dan hanya dapat
+    // diubah/dihapus oleh pembuatnya atau administrator.
+    match /lemburRuns/{runId} {
+      allow read: if isAllowedUser();
+      allow create: if isAllowedUser()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if canManageSharedRun(resource.data)
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if canManageSharedRun(resource.data);
+
+      match /employees/{employeeId} {
+        allow read: if isAllowedUser();
+        allow create, update, delete: if isAllowedUser()
+          && canManageSharedRun(
+            get(/databases/$(database)/documents/lemburRuns/$(runId)).data
+          );
+      }
+    }
+
+    // Riwayat Tunjangan Kinerja bersama, dengan model akses yang sama.
+    match /tukinRuns/{runId} {
+      allow read: if isAllowedUser();
+      allow create: if isAllowedUser()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if canManageSharedRun(resource.data)
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if canManageSharedRun(resource.data);
+
+      match /employees/{employeeId} {
+        allow read: if isAllowedUser();
+        allow create, update, delete: if isAllowedUser()
+          && canManageSharedRun(
+            get(/databases/$(database)/documents/tukinRuns/$(runId)).data
+          );
       }
     }
 

@@ -9,6 +9,8 @@
   const app = document.getElementById('app');
   const now = new Date();
 
+  let historyUnsubscribe = null;
+
   const state = {
     view: 'process',
     step: 'period',
@@ -210,19 +212,25 @@
 
   function renderHistory() {
     if (state.historyBusy && !state.historyLoaded) {
-      return '<div class="page-title"><div><h2>Riwayat Tunjangan Kinerja</h2><p>Memuat riwayat proses dari Cloud Firestore.</p></div></div><div class="card card-pad text-center">Memuat riwayat...</div>';
+      return '<div class="page-title"><div><h2>Riwayat Tunjangan Kinerja</h2><p>Memuat riwayat proses bersama dari Cloud Firestore.</p></div></div><div class="card card-pad text-center">Memuat riwayat...</div>';
     }
     const rows = state.history.map((item) => {
       const rg = attendanceRange(item.period);
       const summary = item.summary || {};
       const changedAt = item.updatedAt || item.processedAt;
       const changedLabel = item.updatedAt ? 'Diubah' : 'Diproses';
-      return `<tr><td><strong>${esc(periodLabel(item.period))}</strong><div class="card-subtitle">${esc(rules.formatPeriodRange(rg))}</div></td><td>${Number(summary.employees || 0)}</td><td class="tukin-money">${money(summary.totalCutAmount || 0)}</td><td>${Number(summary.adjustedRecords || 0)}</td><td><span class="history-time-label">${changedLabel}</span><br>${esc(formatDateTime(changedAt))}</td><td><span class="status-pill">Selesai</span></td><td><div class="history-actions tukin-history-actions"><button class="btn btn-secondary btn-sm" data-view-tukin-history="${esc(item.id)}" type="button">Lihat</button><button class="btn btn-secondary btn-sm" data-edit-tukin-history="${esc(item.id)}" type="button">Verifikasi/Edit</button><button class="btn btn-secondary btn-sm" data-regenerate-tukin-history="${esc(item.id)}" type="button">Generate Ulang</button><button class="btn btn-danger btn-sm" data-delete-tukin-history="${esc(item.id)}" type="button">Hapus</button></div></td></tr>`;
+      const manageable = Boolean(storage.canManage?.(item));
+      const actorName = item.ownerName || item.ownerEmail || 'Akun lama';
+      const actorSub = item.ownerName && item.ownerEmail ? `<div class="card-subtitle">${esc(item.ownerEmail)}</div>` : '';
+      const manageActions = manageable
+        ? `<button class="btn btn-secondary btn-sm" data-edit-tukin-history="${esc(item.id)}" type="button">Verifikasi/Edit</button><button class="btn btn-danger btn-sm" data-delete-tukin-history="${esc(item.id)}" type="button">Hapus</button>`
+        : '';
+      return `<tr><td><strong>${esc(periodLabel(item.period))}</strong><div class="card-subtitle">${esc(rules.formatPeriodRange(rg))}</div></td><td>${Number(summary.employees || 0)}</td><td class="tukin-money">${money(summary.totalCutAmount || 0)}</td><td>${Number(summary.adjustedRecords || 0)}</td><td><strong>${esc(actorName)}</strong>${actorSub}</td><td><span class="history-time-label">${changedLabel}</span><br>${esc(formatDateTime(changedAt))}</td><td><span class="status-pill">Selesai</span></td><td><div class="history-actions tukin-history-actions"><button class="btn btn-secondary btn-sm" data-view-tukin-history="${esc(item.id)}" type="button">Lihat</button>${manageActions}<button class="btn btn-secondary btn-sm" data-regenerate-tukin-history="${esc(item.id)}" type="button">Generate Ulang</button></div></td></tr>`;
     }).join('');
 
-    return `<div class="page-title"><div><h2>Riwayat Tunjangan Kinerja</h2><p>Hasil proses Tukin yang tersimpan pada akun Firebase. Data perhitungan tersinkron antarperangkat; file absensi asli dan isi bukti dukung tetap lokal pada perangkat tempat file tersebut diproses.</p></div><button class="btn btn-primary" data-action="new-process-from-history" type="button">+ Proses Tukin Baru</button></div>
-      <div class="card table-wrap"><table class="data-table history-table"><thead><tr><th>Periode Tukin / Dasar Absensi</th><th>Pegawai</th><th>Total Potongan</th><th>Koreksi</th><th>Terakhir Diubah</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="text-center" style="padding:36px;color:#6b7c93">Belum ada riwayat Tunjangan Kinerja.</td></tr>'}</tbody></table></div>
-      <div class="footer-note">Data perhitungan Tukin tersinkron melalui Cloud Firestore. File Excel asli dan isi bukti dukung tetap disimpan lokal di IndexedDB pada perangkat asal.</div>`;
+    return `<div class="page-title"><div><h2>Riwayat Tunjangan Kinerja</h2><p>Riwayat bersama seluruh akun aplikasi. Data perhitungan dapat dilihat lintas akun; file absensi asli dan isi bukti dukung tetap lokal pada perangkat tempat file tersebut diproses.</p></div><button class="btn btn-primary" data-action="new-process-from-history" type="button">+ Proses Tukin Baru</button></div>
+      <div class="card table-wrap"><table class="data-table history-table"><thead><tr><th>Periode Tukin / Dasar Absensi</th><th>Pegawai</th><th>Total Potongan</th><th>Koreksi</th><th>Diproses Oleh</th><th>Terakhir Diubah</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="text-center" style="padding:36px;color:#6b7c93">Belum ada riwayat Tunjangan Kinerja.</td></tr>'}</tbody></table></div>
+      <div class="footer-note">Data perhitungan Tukin tersinkron melalui koleksi bersama Cloud Firestore. Semua akun terverifikasi melihat riwayat yang sama; file biner tetap disimpan lokal di IndexedDB pada perangkat asal.</div>`;
   }
 
   function renderDrawer() {
@@ -264,10 +272,11 @@
     const totalCut = summaries.reduce((sum, item) => sum + item.summary.cutAmount, 0);
     const adjusted = summaries.reduce((sum, item) => sum + item.summary.adjustedRecords, 0);
     const rg = attendanceRange(run.period);
+    const manageable = Boolean(storage.canManage?.(run));
     return `<div class="drawer-backdrop" data-action="close-history-preview"></div><aside class="drawer tukin-drawer"><div class="tukin-drawer-header"><div class="drawer-header"><div><h3>Riwayat Tukin ${esc(periodLabel(run.period))}</h3><div class="card-subtitle">Dasar absensi ${esc(rules.formatPeriodRange(rg))}</div></div><button class="icon-btn" data-action="close-history-preview" type="button">×</button></div></div>
       <div class="tukin-detail-summary"><div><span>Pegawai</span><strong>${summaries.length}</strong></div><div><span>Total Potongan</span><strong>${money(totalCut)}</strong></div><div><span>Koreksi</span><strong>${adjusted}</strong></div><div><span>Terakhir Diubah</span><strong>${esc(formatDateTime(run.updatedAt || run.processedAt))}</strong></div></div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>No</th><th>Nama / NIP</th><th>Pot. Absensi</th><th>Pot. Final</th><th>Potongan Rp</th></tr></thead><tbody>${summaries.map((item, i) => `<tr><td>${i + 1}</td><td><strong>${esc(item.employee.name)}</strong><div class="card-subtitle">${esc(item.employee.nip || '-')}</div></td><td>${pct(item.summary.attendancePercent)}</td><td>${pct(item.summary.finalPercent)}</td><td>${money(item.summary.cutAmount)}</td></tr>`).join('')}</tbody></table></div>
-      <div class="actions"><button class="btn btn-secondary" data-edit-tukin-history="${esc(run.id)}" type="button">Verifikasi / Edit</button><div class="actions-right"><button class="btn btn-primary" data-regenerate-tukin-history="${esc(run.id)}" type="button">Generate Ulang</button></div></div></aside>`;
+      <div class="actions">${manageable ? `<button class="btn btn-secondary" data-edit-tukin-history="${esc(run.id)}" type="button">Verifikasi / Edit</button>` : '<span class="card-subtitle">Hanya pembuat atau administrator yang dapat mengedit.</span>'}<div class="actions-right"><button class="btn btn-primary" data-regenerate-tukin-history="${esc(run.id)}" type="button">Generate Ulang</button></div></div></aside>`;
   }
 
   function validateRamadan() {
@@ -383,13 +392,13 @@
       processedAt: state.editingProcessedAt || timestamp,
       updatedAt: isEdit ? timestamp : null
     };
-    await storage.saveRun(run);
-    state.editingHistoryId = run.id;
-    state.editingProcessedAt = run.processedAt;
-    state.lastSavedRunId = run.id;
+    const savedRun = await storage.saveRun(run);
+    state.editingHistoryId = savedRun.id;
+    state.editingProcessedAt = savedRun.processedAt;
+    state.lastSavedRunId = savedRun.id;
     state.resultMode = isEdit ? 'updated' : 'new';
     await refreshHistory(false);
-    return run;
+    return savedRun;
   }
 
   async function generate() {
@@ -467,6 +476,7 @@
     try {
       const run = await storage.getRun(id);
       if (!run) throw new Error('Riwayat tidak ditemukan.');
+      if (!storage.canManage?.(run)) throw new Error('Riwayat ini dibuat oleh akun lain. Anda dapat melihat atau generate ulang hasilnya, tetapi hanya pembuat atau administrator yang dapat mengedit.');
       if (run.cloudOnly) {
         alert('Riwayat ini dimuat dari Firestore pada perangkat lain. Data perhitungan tersedia, tetapi file Excel asli dan isi bukti dukung tidak tersimpan di Spark/Firestore. Jika digenerate ulang, paket ZIP tidak akan memuat file biner tersebut.');
       }
@@ -525,6 +535,10 @@
 
   async function deleteHistory(id) {
     const item = state.history.find((run) => run.id === id);
+    if (item && !storage.canManage?.(item)) {
+      alert('Riwayat ini dibuat oleh akun lain dan hanya dapat dihapus oleh pembuat atau administrator.');
+      return;
+    }
     const label = item ? periodLabel(item.period) : 'ini';
     if (!window.confirm(`Hapus riwayat Tunjangan Kinerja ${label}?\n\nData riwayat Firestore akan dihapus. Salinan file biner lokal pada perangkat ini juga akan dihapus.`)) return;
     state.historyBusy = true;
@@ -788,9 +802,17 @@
       render();
       await refreshHistory(false);
       state.historyBusy = false;
+    } else {
+      await storage.migrateLegacyOnce?.();
     }
+    historyUnsubscribe = storage.subscribeRuns?.((history) => {
+      state.history = history;
+      state.historyLoaded = true;
+      if (state.view === 'history') render();
+    }, (error) => console.warn('Sinkronisasi realtime Tukin gagal:', error)) || null;
     render();
   }
 
+  window.addEventListener('beforeunload', () => historyUnsubscribe?.());
   init();
 })();
