@@ -262,7 +262,7 @@
     if (!state.editEmployeeKey) return '';
     const employee = employeeByKey(state.editEmployeeKey);
     if (!employee) return '';
-    return `<div class="tukin-modal-backdrop"><div class="tukin-modal"><div class="tukin-modal-head"><div><h3>Data Pegawai</h3><p>${esc(employee.name)} · ${esc(employee.nip || '-')}</p></div><button class="icon-btn" data-action="close-employee-edit" type="button">×</button></div><div class="tukin-form-grid"><div class="field"><label>Anak Satker</label><input id="employee-anak" value="${esc(employee.anakSatker || '')}" maxlength="2"></div><div class="field"><label>Besaran Tukin</label><input id="employee-tukin" type="number" min="0" step="1000" value="${Number(employee.tukin || cfg.DEFAULT_TUKIN)}"></div></div><div class="actions"><span></span><div class="actions-right"><button class="btn btn-secondary" data-action="close-employee-edit" type="button">Batal</button><button class="btn btn-primary" data-action="save-employee" type="button">Simpan</button></div></div></div></div>`;
+    return `<div class="tukin-modal-backdrop"><div class="tukin-modal"><div class="tukin-modal-head"><div><h3>Data Pegawai</h3><p>${esc(employee.name)} · ${esc(employee.nip || '-')}</p></div><button class="icon-btn" data-action="close-employee-edit" type="button">×</button></div><div class="tukin-form-grid"><div class="field"><label>Anak Satker</label><input id="employee-anak" value="${esc(employee.anakSatker || '')}" maxlength="20"></div><div class="field"><label>Besaran Tukin</label><input id="employee-tukin" type="number" min="0" step="1000" value="${Number(employee.tukin || cfg.DEFAULT_TUKIN)}"></div></div><div class="actions"><span></span><div class="actions-right"><button class="btn btn-secondary" data-action="close-employee-edit" type="button">Batal</button><button class="btn btn-primary" data-action="save-employee" type="button">Simpan</button></div></div></div></div>`;
   }
 
   function renderHistoryPreview() {
@@ -745,7 +745,8 @@
     document.querySelector('[data-action="save-employee"]')?.addEventListener('click', () => {
       const employee = employeeByKey(state.editEmployeeKey);
       if (!employee) return;
-      const anakSatker = String(document.getElementById('employee-anak')?.value || '').replace(/\D/g, '').padStart(2, '0').slice(-2);
+      const rawAnakSatker = String(document.getElementById('employee-anak')?.value || '').trim();
+      const anakSatker = /^\d$/.test(rawAnakSatker) ? rawAnakSatker.padStart(2, '0') : rawAnakSatker;
       const tukin = Number(document.getElementById('employee-tukin')?.value);
       if (!anakSatker || !Number.isFinite(tukin) || tukin < 0) {
         alert('Anak Satker dan besaran Tukin harus valid.');

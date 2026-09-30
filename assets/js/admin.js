@@ -27,6 +27,13 @@
 
   const money = (value) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(value || 0));
 
+  function normalizeAnakSatker(value) {
+    const code = String(value == null ? '' : value).trim();
+    // Pertahankan kompatibilitas kode numerik lama (mis. 1 -> 01),
+    // tetapi jangan menghapus huruf pada kode alfanumerik seperti P1/P2/P3.
+    return /^\d$/.test(code) ? code.padStart(2, '0') : code;
+  }
+
   function db() {
     return window.FirebaseClient.getDb();
   }
@@ -168,12 +175,23 @@
     </div>`;
   }
 
+  const UNIT_OPTIONS = [
+    'Pemeliharaan Infrastruktur Teknologi Informasi',
+    'Manajemen Data dan Pengembangan Sistem Informasi',
+    'Umum dan Tata Usaha'
+  ];
+
   function field(label, id, value, opts) {
     const o = opts || {};
     const cls = o.span2 ? 'field span-2' : 'field';
     const type = o.type || 'text';
     const attrs = [o.min != null ? `min="${o.min}"` : '', o.step != null ? `step="${o.step}"` : '', o.maxlength ? `maxlength="${o.maxlength}"` : ''].filter(Boolean).join(' ');
     return `<div class="${cls}"><label for="${id}">${esc(label)}</label><input id="${id}" type="${type}" value="${esc(value ?? '')}" ${attrs}></div>`;
+  }
+
+  function unitField(value) {
+    const selected = String(value || '').trim();
+    return `<div class="field span-2"><label for="m-unit">Unit/Bidang/Bagian</label><select id="m-unit" required><option value="">Pilih Unit/Bidang/Bagian</option>${UNIT_OPTIONS.map((unit) => `<option value="${esc(unit)}" ${selected === unit ? 'selected' : ''}>${esc(unit)}</option>`).join('')}</select></div>`;
   }
 
   function settingsView() {
@@ -228,10 +246,10 @@
       <div class="admin-form">
         ${field('Nama Pegawai', 'm-name', privateData.name || '', { span2: true })}
         ${field('NIP', 'm-nip', privateData.nip || '', { span2: true, maxlength: 30 })}
-        ${field('Unit/Bidang/Bagian', 'm-unit', privateData.unit || '', { span2: true })}
-        ${field('Kode Satker Lembur', 'm-lembur-code', existing?.lemburSatkerCode ?? '', { type: 'number', min: 0 })}
+        ${unitField(privateData.unit || '')}
+        ${field('Kode Satker Lembur', 'm-lembur-code', existing?.lemburSatkerCode ?? '', { maxlength: 20 })}
         ${field('Kode Satker Tukin', 'm-satker', existing?.satker || window.TUKIN_CONFIG.SATKER || '')}
-        ${field('Anak Satker', 'm-anak', existing?.anakSatker || '', { maxlength: 2 })}
+        ${field('Anak Satker', 'm-anak', existing?.anakSatker || '', { maxlength: 20 })}
         ${field('Besaran Tukin', 'm-tukin', existing?.tukin || window.TUKIN_CONFIG.DEFAULT_TUKIN || 0, { type: 'number', min: 0, step: 1000 })}
         ${field('Urutan', 'm-order', existing?.order || state.employees.length + 1, { type: 'number', min: 1 })}
         <div class="field"><label>Status</label><label class="admin-check"><input id="m-active" type="checkbox" ${existing?.active === false ? '' : 'checked'}><span>Aktif digunakan aplikasi</span></label></div>
@@ -290,6 +308,9 @@
       const name = String(document.getElementById('m-name')?.value || '').trim();
       const nip = String(document.getElementById('m-nip')?.value || '').replace(/\D/g, '');
       const unit = String(document.getElementById('m-unit')?.value || '').trim();
+      if (!UNIT_OPTIONS.includes(unit)) {
+        throw new Error('Pilih Unit/Bidang/Bagian dari daftar yang tersedia.');
+      }
       const hashes = await window.MasterDataService.hashIdentity({ name, nip });
       let id = existing?.id || hashes.nipHash || hashes.nameHash;
       if (!id) throw new Error('Isi minimal Nama Pegawai atau NIP.');
@@ -303,15 +324,15 @@
       const operational = {
         nipHash: existing?.nipHash || hashes.nipHash || '',
         nameHashes: [...new Set(existingNameHashes.filter(Boolean))],
-        lemburSatkerCode: Number(document.getElementById('m-lembur-code')?.value || 0),
+        lemburSatkerCode: String(document.getElementById('m-lembur-code')?.value || '').trim(),
         satker: String(document.getElementById('m-satker')?.value || '').trim(),
-        anakSatker: String(document.getElementById('m-anak')?.value || '').replace(/\D/g, '').padStart(2, '0').slice(-2),
+        anakSatker: normalizeAnakSatker(document.getElementById('m-anak')?.value),
         tukin: Number(document.getElementById('m-tukin')?.value || 0),
         order: Number(document.getElementById('m-order')?.value || 9999),
         active: Boolean(document.getElementById('m-active')?.checked),
         updatedAt: serverTimestamp(),
         updatedBy: user()?.email || '',
-        schemaVersion: 3
+        schemaVersion: 4
       };
       if (!operational.lemburSatkerCode || !operational.satker || !operational.anakSatker || !Number.isFinite(operational.tukin) || operational.tukin < 0) {
         throw new Error('Kode Satker Lembur, Satker Tukin, Anak Satker, dan Besaran Tukin harus valid.');
@@ -446,10 +467,10 @@
             const clean = {
               nipHash: String(item.nipHash || ''),
               nameHashes: [...new Set((item.nameHashes || (item.nameHash ? [item.nameHash] : [])).map(String).filter(Boolean))],
-              lemburSatkerCode: Number(item.lemburSatkerCode ?? item.code ?? 0),
-              satker: String(item.satker || ''), anakSatker: String(item.anakSatker || ''), tukin: Number(item.tukin || 0),
+              lemburSatkerCode: String(item.lemburSatkerCode ?? item.code ?? '').trim(),
+              satker: String(item.satker || ''), anakSatker: normalizeAnakSatker(item.anakSatker), tukin: Number(item.tukin || 0),
               order: Number(item.order || 9999), active: item.active !== false,
-              schemaVersion: 3, updatedAt: serverTimestamp(), updatedBy: user()?.email || ''
+              schemaVersion: 4, updatedAt: serverTimestamp(), updatedBy: user()?.email || ''
             };
             batch.set(db().collection('masterEmployees').doc(id), clean, { merge: true });
           } else if (entry.type === 'directory') {
