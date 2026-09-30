@@ -25,6 +25,11 @@
     // Riwayat Tukin dan Lembur menggunakan koleksi bersama lintas akun terverifikasi.
     dataScope: 'shared',
 
+    // Cache Firestore persisten menyimpan data pada IndexedDB antar sesi. Karena aplikasi
+    // memuat NIP/cuti/pelatihan, biarkan false pada perangkat bersama. Aktifkan hanya
+    // bila seluruh pengguna memakai perangkat kerja tepercaya yang dikelola organisasi.
+    enablePersistentFirestoreCache: false,
+
     // Maksimum item riwayat terbaru yang dimuat ke tabel/listener per modul.
     // Dokumen cloud yang lebih lama tidak dihapus otomatis.
     historyLimit: 24

@@ -10,6 +10,9 @@
   let adminUser = false;
   let authReadyPromise = null;
   let configured = false;
+  let persistenceReady = Promise.resolve();
+  const ADMIN_CACHE_TTL_MS = 5 * 60 * 1000;
+  const PROFILE_TOUCH_TTL_MS = 30 * 60 * 1000;
 
   function esc(value) {
     return String(value == null ? '' : value)
@@ -54,12 +57,23 @@
       // Beberapa versi SDK tidak memerlukan/menolak settings setelah Firestore mulai dipakai.
     }
 
+    // Cache IndexedDB mempercepat kunjungan berikutnya dan perpindahan antarhalaman pada GitHub Pages.
+    // Jika browser/private mode tidak mengizinkan persistence, aplikasi tetap berjalan menggunakan cache memory.
+    if (settings.enablePersistentFirestoreCache === true && typeof db.enablePersistence === 'function') {
+      persistenceReady = db.enablePersistence({ synchronizeTabs: true }).catch((error) => {
+        if (!['failed-precondition', 'unimplemented'].includes(String(error?.code || ''))) {
+          console.warn('Cache persisten Firestore tidak dapat diaktifkan:', error);
+        }
+      });
+    }
+
     authReadyPromise = new Promise((resolve) => {
       const unsubscribe = auth.onAuthStateChanged(async (user) => {
+        await persistenceReady;
         currentUser = user || null;
         if (user && accessAllowed(user)) {
-          try { await ensureUserProfile(user); } catch (error) { console.warn('Profil pengguna gagal diperbarui:', error); }
-          await refreshAdminStatus(user);
+          touchUserProfile(user);
+          await refreshAdminStatus(user, false);
         } else {
           adminUser = false;
         }
@@ -67,6 +81,37 @@
         resolve(currentUser);
       });
     });
+  }
+
+  function adminCacheKey(uid) {
+    return `pusdatin-admin-status:${String(uid || '')}`;
+  }
+
+  function readAdminCache(uid) {
+    try {
+      const raw = sessionStorage.getItem(adminCacheKey(uid));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || Date.now() - Number(parsed.at || 0) > ADMIN_CACHE_TTL_MS) return null;
+      return Boolean(parsed.value);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writeAdminCache(uid, value) {
+    try { sessionStorage.setItem(adminCacheKey(uid), JSON.stringify({ value: Boolean(value), at: Date.now() })); } catch (_) {}
+  }
+
+  function touchUserProfile(user) {
+    if (!user?.uid) return;
+    const key = `pusdatin-profile-touch:${user.uid}`;
+    try {
+      const last = Number(sessionStorage.getItem(key) || 0);
+      if (last && Date.now() - last < PROFILE_TOUCH_TTL_MS) return;
+      sessionStorage.setItem(key, String(Date.now()));
+    } catch (_) {}
+    ensureUserProfile(user).catch((error) => console.warn('Profil pengguna gagal diperbarui:', error));
   }
 
   async function ensureUserProfile(user) {
@@ -80,15 +125,24 @@
     }, { merge: true });
   }
 
-  async function refreshAdminStatus(user) {
+  async function refreshAdminStatus(user, force) {
     adminUser = false;
     if (!db || !user || !accessAllowed(user)) return false;
+    if (!force) {
+      const cached = readAdminCache(user.uid);
+      if (cached !== null) {
+        adminUser = cached;
+        return adminUser;
+      }
+    }
     try {
       const snap = await db.collection('admins').doc(user.uid).get();
       adminUser = Boolean(snap.exists && snap.data()?.active === true);
+      writeAdminCache(user.uid, adminUser);
     } catch (error) {
       console.warn('Status admin tidak dapat diperiksa:', error);
-      adminUser = false;
+      const cached = readAdminCache(user.uid);
+      adminUser = cached === null ? false : cached;
     }
     return adminUser;
   }
@@ -96,7 +150,7 @@
   function renderAdminRequired() {
     const root = document.getElementById('app') || document.body;
     root.innerHTML = `<section class="firebase-auth-page"><div class="firebase-auth-card firebase-setup-card">
-      <img src="assets/img/logo-pkp.png" alt="Kementerian PKP" class="firebase-auth-logo">
+      <img src="assets/img/logo-pkp.png?v=2" alt="Kementerian PKP" class="firebase-auth-logo">
       <div class="firebase-auth-kicker">Akses Administrasi</div>
       <h1>Akses admin diperlukan</h1>
       <p>Akun ini dapat menggunakan aplikasi, tetapi belum terdaftar sebagai administrator master data.</p>
@@ -107,7 +161,7 @@
   function renderSetupRequired() {
     const root = document.getElementById('app') || document.body;
     root.innerHTML = `<section class="firebase-auth-page"><div class="firebase-auth-card firebase-setup-card">
-      <img src="assets/img/logo-pkp.png" alt="Kementerian PKP" class="firebase-auth-logo">
+      <img src="assets/img/logo-pkp.png?v=2" alt="Kementerian PKP" class="firebase-auth-logo">
       <h1>Firebase belum dikonfigurasi</h1>
       <p>Isi <code>assets/js/firebase-config.js</code> menggunakan konfigurasi Web App dari Firebase Console, kemudian deploy ulang ke GitHub Pages.</p>
       <div class="firebase-auth-note">Petunjuk lengkap tersedia pada <strong>README_FIREBASE.md</strong> di root project.</div>
@@ -139,7 +193,7 @@
         </form>`
       : '';
     return `<section class="firebase-auth-page"><div class="firebase-auth-card">
-      <img src="assets/img/logo-pkp.png" alt="Kementerian PKP" class="firebase-auth-logo">
+      <img src="assets/img/logo-pkp.png?v=2" alt="Kementerian PKP" class="firebase-auth-logo">
       <div class="firebase-auth-kicker">Generator Dokumen Pusdatin</div>
       <h1>Selamat Datang</h1>
       <p>Gunakan akun pegawai atau akun institusi Anda</p>
@@ -151,7 +205,7 @@
   function renderVerification(user, message) {
     const root = document.getElementById('app') || document.body;
     root.innerHTML = `<section class="firebase-auth-page"><div class="firebase-auth-card">
-      <img src="assets/img/logo-pkp.png" alt="Kementerian PKP" class="firebase-auth-logo">
+      <img src="assets/img/logo-pkp.png?v=2" alt="Kementerian PKP" class="firebase-auth-logo">
       <div class="firebase-auth-kicker">Verifikasi akun</div>
       <h1>Verifikasi email diperlukan</h1>
       <p>Akun <strong>${esc(user?.email || '')}</strong> sudah login, tetapi alamat email belum terverifikasi. Verifikasi diperlukan sebelum Firestore dapat diakses.</p>
@@ -273,8 +327,8 @@
           renderVerification(user);
           return;
         }
-        try { await ensureUserProfile(user); } catch (error) { console.warn(error); }
-        await refreshAdminStatus(user);
+        touchUserProfile(user);
+        await refreshAdminStatus(user, false);
         resolve(user);
       });
     });
@@ -289,7 +343,7 @@
 
   async function requireAdmin() {
     const user = await requireAuth();
-    if (!adminUser) await refreshAdminStatus(user);
+    await refreshAdminStatus(user, true);
     if (!adminUser) {
       renderAdminRequired();
       return new Promise(() => {});

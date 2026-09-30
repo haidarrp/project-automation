@@ -139,7 +139,7 @@
     const account = user ? `<div class="topbar-account"><div class="topbar-account-copy"><strong>${displayName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</strong><span>${email.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span></div><button class="btn btn-secondary btn-sm" type="button" onclick="window.FirebaseClient.signOut()">Keluar</button></div>` : '';
     return `<div class="app-shell">
       <aside class="sidebar">
-        <div class="sidebar-brand"><a href="tukin.html#dashboard" aria-label="Buka Dashboard Tukin"><img src="assets/img/logo-pkp.png" alt="Kementerian PKP"></a></div>
+        <div class="sidebar-brand"><a href="tukin.html#dashboard" aria-label="Buka Dashboard Tukin"><img src="assets/img/logo-pkp.png?v=2" alt="Kementerian PKP"></a></div>
         ${navigation(module, view)}
         <div class="sidebar-footer"><div class="sidebar-avatar">${initials}</div><div class="sidebar-footer-copy"><strong>${displayName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</strong>${email ? email.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : 'Kementerian PKP'}</div></div>
       </aside>
@@ -150,5 +150,26 @@
     </div>${overlays}`;
   }
 
-  window.AppShell = Object.freeze({ render, navigation, icon, toggleModule });
+
+  const prefetchedPages = new Set();
+  function prefetchPage(href) {
+    const raw = String(href || '');
+    const file = raw.split('#')[0];
+    if (!file || !/\.html$/i.test(file) || prefetchedPages.has(file)) return;
+    prefetchedPages.add(file);
+    const link = document.createElement('link');
+    link.rel = 'prefetch';
+    link.href = file;
+    document.head.appendChild(link);
+  }
+
+  document.addEventListener('mouseover', (event) => {
+    const anchor = event.target.closest?.('a[href]');
+    if (!anchor) return;
+    const href = anchor.getAttribute('href') || '';
+    if (/^(https?:|mailto:|tel:)/i.test(href)) return;
+    prefetchPage(href);
+  }, { passive: true });
+
+  window.AppShell = Object.freeze({ render, navigation, icon, toggleModule, prefetchPage });
 })();

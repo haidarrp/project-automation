@@ -6,6 +6,7 @@
   const parser = window.TukinParser;
   const generator = window.TukinGenerator;
   const storage = window.TukinStorage;
+  const resources = window.ResourceLoader;
   const app = document.getElementById('app');
   const now = new Date();
 
@@ -370,6 +371,10 @@
     state.validationResults = [];
     state.employees = [];
     state.generated = null;
+    if (state.files.length) {
+      resources?.warm?.('xlsx');
+      window.MasterDataService?.getEmployees?.(false).catch(() => {});
+    }
     render();
   }
 
@@ -379,10 +384,12 @@
     state.busy = true;
     render();
     try {
+      await resources?.ensure?.('xlsx');
       const result = await parser.parseFiles(state.files, state.period, state.settings);
       state.validationResults = result.results;
       state.employees = result.employees;
       state.step = 'validation';
+      resources?.warm?.(['exceljs', 'jszip', 'filesaver']);
     } catch (error) {
       alert(`Gagal memproses data: ${error.message || error}`);
     } finally {
@@ -431,7 +438,6 @@
     state.editingProcessedAt = savedRun.processedAt;
     state.lastSavedRunId = savedRun.id;
     state.resultMode = isEdit ? 'updated' : 'new';
-    await refreshHistory(false);
     return savedRun;
   }
 
@@ -440,6 +446,7 @@
     state.busy = true;
     render();
     try {
+      await resources?.ensure?.(['exceljs', 'jszip', 'filesaver']);
       state.generated = await generator.generateZip(state.employees, state.period);
       generator.download(state.generated);
       try {
@@ -557,6 +564,7 @@
         const approved = window.confirm('Riwayat ini berasal dari Firestore dan tidak memiliki file Excel asli/bukti biner pada perangkat ini. Generate ulang hanya akan menggunakan data perhitungan yang tersinkron. Lanjutkan?');
         if (!approved) return;
       }
+      await resources?.ensure?.(['exceljs', 'jszip', 'filesaver']);
       const generated = await generator.generateZip(run.employees || [], run.period);
       generator.download(generated);
     } catch (error) {
@@ -584,7 +592,7 @@
         state.editingHistoryId = null;
         state.editingProcessedAt = null;
       }
-      await refreshHistory(false);
+      state.history = state.history.filter((run) => run.id !== id);
     } catch (error) {
       alert(`Riwayat gagal dihapus: ${error.message || error}`);
     } finally {
@@ -658,7 +666,6 @@
     state.historyPreview = null;
     history.replaceState(null, '', 'tukin.html#history');
     render();
-    refreshHistory(true);
   }
 
   function bind() {
@@ -827,12 +834,8 @@
     const previous = state.view;
     setViewFromHash();
     state.historyPreview = null;
-    if (state.view === 'history') {
+    if (state.view === 'history' || state.view === 'dashboard') {
       render();
-      refreshHistory(true);
-    } else if (state.view === 'dashboard') {
-      render();
-      if (!state.historyLoaded) refreshHistory(true);
     } else if (previous !== 'process') {
       render();
     }
@@ -841,22 +844,21 @@
   async function init() {
     await window.FirebaseClient.requireAuth();
     await window.AppSettingsService?.loadAndApply?.();
-    await window.MasterDataService?.getEmployees?.(false);
     setViewFromHash();
     if (!location.hash) history.replaceState(null, '', 'tukin.html#dashboard');
-    if (state.view === 'history' || state.view === 'dashboard') {
-      state.historyBusy = true;
-      render();
-      await refreshHistory(false);
-      state.historyBusy = false;
-    } else {
-      await storage.migrateLegacyOnce?.();
-    }
+    state.historyBusy = state.view === 'history' || state.view === 'dashboard';
+    render();
+    await storage.migrateLegacyOnce?.();
     historyUnsubscribe = storage.subscribeRuns?.((history) => {
       state.history = history;
       state.historyLoaded = true;
+      state.historyBusy = false;
       if (state.view === 'history' || state.view === 'dashboard') render();
-    }, (error) => console.warn('Sinkronisasi realtime Tukin gagal:', error)) || null;
+    }, async (error) => {
+      console.warn('Sinkronisasi realtime Tukin gagal:', error);
+      await refreshHistory(false);
+      if (state.view === 'history' || state.view === 'dashboard') render();
+    }) || null;
     render();
   }
 

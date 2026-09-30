@@ -546,13 +546,12 @@
     state.error = '';
     render();
     try {
-      const [masterSnap, directorySnap, trainingSnap] = await Promise.all([
-        db().collection('masterEmployees').get(),
-        db().collection('masterDirectory').get(),
+      const [masterBundle, trainingSnap] = await Promise.all([
+        window.MasterDataService.getBundle(false),
         db().collection('trainings').get()
       ]);
-      state.employees = masterSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      state.directory = new Map(directorySnap.docs.map((doc) => [doc.id, { id: doc.id, ...doc.data() }]));
+      state.employees = [...masterBundle.employees];
+      state.directory = new Map(masterBundle.directory);
       state.trainings = trainingSnap.docs.map((doc) => normalizeTraining(doc.data(), doc.id));
     } catch (error) {
       state.error = error.message || String(error);
@@ -754,9 +753,12 @@
   app.addEventListener('input', (event) => {
     if (event.target?.id === 'training-search') {
       state.filters.search = String(event.target.value || '');
-      render();
-      const input = document.getElementById('training-search');
-      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      clearTimeout(window.__trainingSearchTimer);
+      window.__trainingSearchTimer = setTimeout(() => {
+        render();
+        const input = document.getElementById('training-search');
+        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      }, 240);
       return;
     }
     if (event.target?.id === 'participant-search') {

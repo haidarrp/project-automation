@@ -4,20 +4,28 @@
   const TABLE_SELECTOR = 'table.data-table, table.file-table, table.admin-table, table.training-table, table.leave-table';
   const SKIP_HEADER_RE = /^(aksi|action|opsi|tindakan|)$/i;
   const NUMBER_HEADER_RE = /^(no\.?|nomor)$/i;
+  const DEFAULT_PAGE_SIZE = 25;
+  const PAGE_SIZES = [25, 50, 100];
+  const FILTER_DEBOUNCE_MS = 260;
   const MONTHS = {
     januari: 0, februari: 1, maret: 2, april: 3, mei: 4, juni: 5,
     juli: 6, agustus: 7, september: 8, oktober: 9, november: 10, desember: 11,
     jan: 0, feb: 1, mar: 2, apr: 3, jun: 5, jul: 6, agu: 7, ags: 7, sep: 8, okt: 9, nov: 10, des: 11
   };
 
+  const pendingRoots = new Set();
   let scanQueued = false;
-  let internalMutation = false;
 
   function normalize(value) {
-    return String(value ?? '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLocaleLowerCase('id-ID');
+    return String(value ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('id-ID');
+  }
+
+  function debounce(fn, delay) {
+    let timer = null;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), delay);
+    };
   }
 
   function cleanHeaderText(th) {
@@ -30,9 +38,7 @@
     if (!cell) return '';
     const controls = Array.from(cell.querySelectorAll('select, input, textarea'));
     const controlValues = controls.map((control) => {
-      if (control.tagName === 'SELECT') {
-        return control.options[control.selectedIndex]?.textContent || control.value || '';
-      }
+      if (control.tagName === 'SELECT') return control.options[control.selectedIndex]?.textContent || control.value || '';
       return control.value || '';
     });
     const clone = cell.cloneNode(true);
@@ -43,23 +49,18 @@
   function parseDate(value) {
     const raw = normalize(value).replace(/,/g, '');
     if (!raw) return null;
-
     let match = raw.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})\b/);
     if (match) {
       const date = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
       return Number.isNaN(date.getTime()) ? null : date.getTime();
     }
-
     match = raw.match(/\b(\d{1,2})\s+([a-z]+)\s+(\d{4})\b/);
     if (match && Object.prototype.hasOwnProperty.call(MONTHS, match[2])) {
       const date = new Date(Number(match[3]), MONTHS[match[2]], Number(match[1]));
       return Number.isNaN(date.getTime()) ? null : date.getTime();
     }
-
     match = raw.match(/\b([a-z]+)\s+(\d{4})\b/);
-    if (match && Object.prototype.hasOwnProperty.call(MONTHS, match[1])) {
-      return new Date(Number(match[2]), MONTHS[match[1]], 1).getTime();
-    }
+    if (match && Object.prototype.hasOwnProperty.call(MONTHS, match[1])) return new Date(Number(match[2]), MONTHS[match[1]], 1).getTime();
     return null;
   }
 
@@ -68,10 +69,8 @@
     if (!raw) return null;
     const hasNumericSignal = /\d/.test(raw) && (/^(rp\s*)?[+-]?[\d.,]+\s*(%|jam|hari|pegawai|orang)?$/i.test(raw) || /^(rp|[+-]?\d)/i.test(raw));
     if (!hasNumericSignal) return null;
-
     let token = raw.replace(/rp\s*/gi, '').replace(/[^\d,.-]/g, '');
     if (!token || token === '-' || token === '.' || token === ',') return null;
-
     const comma = token.lastIndexOf(',');
     const dot = token.lastIndexOf('.');
     if (comma > -1 && dot > -1) {
@@ -109,9 +108,7 @@
 
   function originalEmptyRows(table) {
     if (!table.tBodies.length) return [];
-    return Array.from(table.tBodies[0].rows).filter((row) => {
-      return !row.classList.contains('table-tools-empty-row') && row.cells.length === 1 && row.cells[0].hasAttribute('colspan');
-    });
+    return Array.from(table.tBodies[0].rows).filter((row) => !row.classList.contains('table-tools-empty-row') && row.cells.length === 1 && row.cells[0].hasAttribute('colspan'));
   }
 
   function getColumns(table) {
@@ -119,13 +116,7 @@
     if (!headerRow) return [];
     return Array.from(headerRow.cells).map((th, index) => {
       const label = cleanHeaderText(th);
-      return {
-        index,
-        th,
-        label,
-        isNumber: NUMBER_HEADER_RE.test(label),
-        isAction: SKIP_HEADER_RE.test(label)
-      };
+      return { index, th, label, isNumber: NUMBER_HEADER_RE.test(label), isAction: SKIP_HEADER_RE.test(label) };
     });
   }
 
@@ -139,7 +130,9 @@
       </label>
       <div class="table-tools-actions">
         <span class="table-tools-count" aria-live="polite"></span>
-        <button class="table-tools-reset" type="button">Reset filter</button>
+        <label class="table-tools-page-size-wrap"><span>Tampil</span><select class="table-tools-page-size" aria-label="Jumlah baris per halaman">${PAGE_SIZES.map((size) => `<option value="${size}" ${size === DEFAULT_PAGE_SIZE ? 'selected' : ''}>${size}</option>`).join('')}</select></label>
+        <div class="table-tools-pager" aria-label="Navigasi halaman tabel"><button class="table-tools-page-prev" type="button" aria-label="Halaman sebelumnya">‹</button><span class="table-tools-page-label">1 / 1</span><button class="table-tools-page-next" type="button" aria-label="Halaman berikutnya">›</button></div>
+        <button class="table-tools-reset" type="button">Reset</button>
       </div>`;
     table.parentNode.insertBefore(toolbar, table);
     return toolbar;
@@ -184,24 +177,6 @@
     });
   }
 
-  function updateCount(table, visible, total) {
-    const count = table.__tableTools?.count;
-    if (!count) return;
-    count.textContent = total ? `${visible} dari ${total} baris` : '0 baris';
-  }
-
-  function renumber(table) {
-    const columns = getColumns(table);
-    const numberColumn = columns.find((column) => column.isNumber);
-    if (!numberColumn) return;
-    let number = 0;
-    dataRows(table).forEach((row) => {
-      if (row.hidden) return;
-      number += 1;
-      if (row.cells[numberColumn.index]) row.cells[numberColumn.index].textContent = String(number);
-    });
-  }
-
   function removeToolsEmptyRow(table) {
     table.tBodies[0]?.querySelector('.table-tools-empty-row')?.remove();
   }
@@ -215,9 +190,30 @@
     cell.innerHTML = '<div class="table-tools-empty"><strong>Tidak ada data yang sesuai filter.</strong><span>Ubah kata pencarian atau reset filter tabel.</span></div>';
   }
 
-  function applyFilters(table) {
+  function pageState(table, filteredCount) {
+    const tools = table.__tableTools;
+    const pageSize = Math.max(1, Number(tools.pageSize.value || DEFAULT_PAGE_SIZE));
+    const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
+    tools.page = Math.max(1, Math.min(Number(tools.page || 1), totalPages));
+    return { pageSize, totalPages, page: tools.page };
+  }
+
+  function updateToolbar(table, filteredCount, totalCount, start, end, totalPages) {
     const tools = table.__tableTools;
     if (!tools) return;
+    if (!filteredCount) tools.count.textContent = totalCount ? `0 hasil dari ${totalCount} baris` : '0 baris';
+    else if (filteredCount === totalCount) tools.count.textContent = `${start + 1}-${end} dari ${totalCount} baris`;
+    else tools.count.textContent = `${start + 1}-${end} dari ${filteredCount} hasil (${totalCount} baris)`;
+    tools.pageLabel.textContent = `${tools.page} / ${totalPages}`;
+    tools.prev.disabled = tools.page <= 1;
+    tools.next.disabled = tools.page >= totalPages;
+    tools.pager.hidden = filteredCount <= Number(tools.pageSize.value || DEFAULT_PAGE_SIZE);
+  }
+
+  function applyFilters(table, options) {
+    const tools = table.__tableTools;
+    if (!tools) return;
+    if (options?.resetPage) tools.page = 1;
     const rows = dataRows(table);
     const originalEmpty = originalEmptyRows(table);
     const globalQuery = normalize(tools.search.value);
@@ -228,27 +224,34 @@
     });
 
     removeToolsEmptyRow(table);
-    let visible = 0;
+    const matched = [];
     rows.forEach((row) => {
       const allText = normalize(Array.from(row.cells).map(cellText).join(' '));
       let matches = !globalQuery || allText.includes(globalQuery);
       if (matches && columnQueries.size) {
         for (const [columnIndex, query] of columnQueries.entries()) {
-          if (!normalize(cellText(row.cells[columnIndex])).includes(query)) {
-            matches = false;
-            break;
-          }
+          if (!normalize(cellText(row.cells[columnIndex])).includes(query)) { matches = false; break; }
         }
       }
-      row.hidden = !matches;
-      if (matches) visible += 1;
+      row.dataset.tableFilteredOut = matches ? 'false' : 'true';
+      if (matches) matched.push(row);
+    });
+
+    const { pageSize, totalPages, page } = pageState(table, matched.length);
+    const start = (page - 1) * pageSize;
+    const end = Math.min(start + pageSize, matched.length);
+    const visibleSet = new Set(matched.slice(start, end));
+
+    rows.forEach((row) => { row.hidden = !visibleSet.has(row); });
+    const numberColumn = getColumns(table).find((column) => column.isNumber);
+    if (numberColumn) matched.forEach((row, index) => {
+      if (row.cells[numberColumn.index]) row.cells[numberColumn.index].textContent = String(index + 1);
     });
 
     const filtering = Boolean(globalQuery || columnQueries.size);
     originalEmpty.forEach((row) => { row.hidden = filtering && rows.length > 0; });
-    if (rows.length > 0 && visible === 0) renderToolsEmptyRow(table, getColumns(table).length);
-    updateCount(table, visible, rows.length);
-    renumber(table);
+    if (rows.length > 0 && matched.length === 0) renderToolsEmptyRow(table, getColumns(table).length);
+    updateToolbar(table, matched.length, rows.length, start, end, totalPages);
   }
 
   function sortTable(table, columnIndex, direction) {
@@ -256,9 +259,8 @@
     if (!tbody) return;
     const rows = dataRows(table);
     rows.forEach((row, index) => {
-      if (!row.dataset.tableOriginalOrder) row.dataset.tableOriginalOrder = String(index);
+      if (row.dataset.tableOriginalOrder == null || row.dataset.tableOriginalOrder === '') row.dataset.tableOriginalOrder = String(index);
     });
-
     rows.sort((rowA, rowB) => {
       const a = comparable(cellText(rowA.cells[columnIndex]));
       const b = comparable(cellText(rowB.cells[columnIndex]));
@@ -268,13 +270,9 @@
       if (result === 0) result = Number(rowA.dataset.tableOriginalOrder) - Number(rowB.dataset.tableOriginalOrder);
       return direction === 'desc' ? -result : result;
     });
-
-    internalMutation = true;
     rows.forEach((row) => tbody.appendChild(row));
-    internalMutation = false;
 
-    const columns = getColumns(table);
-    columns.forEach((column) => {
+    getColumns(table).forEach((column) => {
       if (column.isAction || column.isNumber) return;
       const active = column.index === columnIndex;
       column.th.setAttribute('aria-sort', active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none');
@@ -285,6 +283,7 @@
     });
     table.dataset.tableSortColumn = String(columnIndex);
     table.dataset.tableSortDirection = direction;
+    table.__tableTools.page = 1;
     applyFilters(table);
   }
 
@@ -293,14 +292,13 @@
     if (!tools) return;
     tools.search.value = '';
     tools.filterRow?.querySelectorAll('.table-tools-column-filter').forEach((input) => { input.value = ''; });
-
+    tools.pageSize.value = String(DEFAULT_PAGE_SIZE);
+    tools.page = 1;
     const tbody = table.tBodies[0];
     if (tbody) {
       const rows = dataRows(table);
       rows.sort((a, b) => Number(a.dataset.tableOriginalOrder || 0) - Number(b.dataset.tableOriginalOrder || 0));
-      internalMutation = true;
       rows.forEach((row) => tbody.appendChild(row));
-      internalMutation = false;
     }
     delete table.dataset.tableSortColumn;
     delete table.dataset.tableSortDirection;
@@ -326,20 +324,30 @@
     const toolbar = createToolbar(table);
     const filterRow = createFilterRow(table, columns);
     addSortControls(columns);
-
-    table.__tableTools = {
+    const tools = {
       toolbar,
       search: toolbar.querySelector('.table-tools-search'),
       count: toolbar.querySelector('.table-tools-count'),
       reset: toolbar.querySelector('.table-tools-reset'),
-      filterRow
+      pageSize: toolbar.querySelector('.table-tools-page-size'),
+      pager: toolbar.querySelector('.table-tools-pager'),
+      prev: toolbar.querySelector('.table-tools-page-prev'),
+      next: toolbar.querySelector('.table-tools-page-next'),
+      pageLabel: toolbar.querySelector('.table-tools-page-label'),
+      filterRow,
+      page: 1
     };
+    table.__tableTools = tools;
 
-    table.__tableTools.search.addEventListener('input', () => applyFilters(table));
+    const debouncedFilter = debounce(() => applyFilters(table, { resetPage: true }), FILTER_DEBOUNCE_MS);
+    tools.search.addEventListener('input', debouncedFilter);
     filterRow?.addEventListener('input', (event) => {
-      if (event.target.classList.contains('table-tools-column-filter')) applyFilters(table);
+      if (event.target.classList.contains('table-tools-column-filter')) debouncedFilter();
     });
-    table.__tableTools.reset.addEventListener('click', () => resetTable(table));
+    tools.pageSize.addEventListener('change', () => { tools.page = 1; applyFilters(table); });
+    tools.prev.addEventListener('click', () => { tools.page = Math.max(1, tools.page - 1); applyFilters(table); });
+    tools.next.addEventListener('click', () => { tools.page += 1; applyFilters(table); });
+    tools.reset.addEventListener('click', () => resetTable(table));
 
     columns.forEach((column) => {
       if (column.isAction || column.isNumber) return;
@@ -351,10 +359,7 @@
       };
       column.th.addEventListener('click', activateSort);
       column.th.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          activateSort();
-        }
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateSort(); }
       });
     });
 
@@ -364,50 +369,52 @@
   function refreshPreparedTable(table) {
     if (!table.__tableTools) return;
     dataRows(table).forEach((row, index) => {
-      if (!row.dataset.tableOriginalOrder) row.dataset.tableOriginalOrder = String(index);
+      if (row.dataset.tableOriginalOrder == null || row.dataset.tableOriginalOrder === '') row.dataset.tableOriginalOrder = String(index);
     });
     applyFilters(table);
   }
 
   function scan(root = document) {
+    if (!root || !root.isConnected && root !== document) return;
     const tables = [];
     if (root.matches?.(TABLE_SELECTOR)) tables.push(root);
     root.querySelectorAll?.(TABLE_SELECTOR).forEach((table) => tables.push(table));
-    tables.forEach((table) => {
-      if (table.dataset.tableToolsReady === 'true') refreshPreparedTable(table);
-      else bindTable(table);
-    });
+    const ownerTable = root.closest?.(TABLE_SELECTOR);
+    if (ownerTable && !tables.includes(ownerTable)) tables.push(ownerTable);
+    tables.forEach((table) => table.dataset.tableToolsReady === 'true' ? refreshPreparedTable(table) : bindTable(table));
   }
 
   function queueScan(root) {
+    if (root) pendingRoots.add(root);
     if (scanQueued) return;
     scanQueued = true;
     requestAnimationFrame(() => {
       scanQueued = false;
-      scan(root || document);
+      const roots = [...pendingRoots];
+      pendingRoots.clear();
+      if (!roots.length) return;
+      roots.forEach(scan);
     });
+  }
+
+  function isHelperNode(node) {
+    return node?.classList?.contains('table-tools-empty-row') || node?.classList?.contains('table-tools-filter-row') || node?.classList?.contains('table-tools-bar');
   }
 
   function start() {
     scan(document);
     const observer = new MutationObserver((mutations) => {
-      if (internalMutation) return;
-      let shouldScan = false;
-      for (const mutation of mutations) {
-        if (mutation.type !== 'childList' || (!mutation.addedNodes.length && !mutation.removedNodes.length)) continue;
+      mutations.forEach((mutation) => {
+        if (mutation.type !== 'childList') return;
+        const targetTable = mutation.target?.closest?.(TABLE_SELECTOR);
         const changed = [...mutation.addedNodes, ...mutation.removedNodes].filter((node) => node.nodeType === Node.ELEMENT_NODE);
-        if (!changed.length) continue;
-        const helperOnly = changed.every((node) =>
-          node.classList?.contains('table-tools-empty-row') ||
-          node.classList?.contains('table-tools-filter-row') ||
-          node.classList?.contains('table-tools-bar')
-        );
-        if (!helperOnly) {
-          shouldScan = true;
-          break;
-        }
-      }
-      if (shouldScan) queueScan(document);
+        if (changed.length && changed.every(isHelperNode)) return;
+        if (targetTable) queueScan(targetTable);
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType !== Node.ELEMENT_NODE || isHelperNode(node)) return;
+          if (node.matches?.(TABLE_SELECTOR) || node.querySelector?.(TABLE_SELECTOR)) queueScan(node);
+        });
+      });
     });
     observer.observe(document.body, { childList: true, subtree: true });
   }

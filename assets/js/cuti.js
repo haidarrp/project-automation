@@ -27,6 +27,8 @@
     directory: new Map(),
     leaves: [],
     balances: [],
+    loadedYears: new Set(),
+    loadingYear: null,
     filters: {
       year: CURRENT_YEAR,
       search: '',
@@ -241,7 +243,7 @@
   }
 
   function yearOptions(selected) {
-    const values = new Set([CURRENT_YEAR - 2, CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1, Number(selected)]);
+    const values = new Set([...Array.from({ length: 11 }, (_, index) => CURRENT_YEAR - index), CURRENT_YEAR + 1, Number(selected)]);
     state.leaves.forEach((item) => values.add(Number(item.leaveYear)));
     state.balances.forEach((item) => values.add(Number(item.year)));
     return [...values].filter((value) => Number.isFinite(value) && value > 2000 && value < 2200).sort((a, b) => b - a);
@@ -613,7 +615,8 @@
       });
       return;
     }
-    const content = `${state.error ? `<div class="alert alert-warning"><div class="alert-title">Data belum dapat dimuat sempurna</div>${esc(state.error)}</div>` : ''}${viewMarkup()}`;
+    const yearLoading = state.loadingYear ? `<div class="alert alert-info"><div class="alert-title">Memuat data tahun ${esc(state.loadingYear)}</div>Riwayat dan saldo cuti sedang diambil dari cache/Cloud Firestore.</div>` : '';
+    const content = `${state.error ? `<div class="alert alert-warning"><div class="alert-title">Data belum dapat dimuat sempurna</div>${esc(state.error)}</div>` : ''}${yearLoading}${viewMarkup()}`;
     app.innerHTML = window.AppShell.render({ module: 'leave', view: state.view, viewLabel: VIEW_LABELS[state.view], content, overlays: overlays() });
   }
 
@@ -632,21 +635,59 @@
     }
   }
 
+  async function fetchYearData(year) {
+    const numericYear = Number(year || CURRENT_YEAR);
+    const [leaveSnap, balanceSnap] = await Promise.all([
+      db().collection('leaveRecords').where('leaveYear', '==', numericYear).get(),
+      db().collection('leaveBalances').where('year', '==', numericYear).get()
+    ]);
+    return {
+      year: numericYear,
+      leaves: leaveSnap.docs.map((doc) => normalizeLeave(doc.data(), doc.id)),
+      balances: balanceSnap.docs.map((doc) => normalizeBalance(doc.data(), doc.id))
+    };
+  }
+
+  function mergeYearData(payload) {
+    const year = Number(payload.year);
+    state.leaves = state.leaves.filter((item) => Number(item.leaveYear) !== year).concat(payload.leaves || []);
+    state.balances = state.balances.filter((item) => Number(item.year) !== year).concat(payload.balances || []);
+    state.loadedYears.add(year);
+  }
+
+  async function ensureYearData(year, options) {
+    const numericYear = Number(year || CURRENT_YEAR);
+    const force = Boolean(options?.force);
+    if (!force && state.loadedYears.has(numericYear)) return;
+    if (options?.showLoading) {
+      state.loadingYear = numericYear;
+      render();
+    }
+    try {
+      mergeYearData(await fetchYearData(numericYear));
+    } catch (error) {
+      state.error = error.message || String(error);
+    } finally {
+      if (state.loadingYear === numericYear) state.loadingYear = null;
+      if (options?.showLoading) render();
+    }
+  }
+
   async function loadData() {
     state.loading = true;
     state.error = '';
     render();
     try {
-      const [masterSnap, directorySnap, leaveSnap, balanceSnap] = await Promise.all([
-        db().collection('masterEmployees').get(),
-        db().collection('masterDirectory').get(),
-        db().collection('leaveRecords').get(),
-        db().collection('leaveBalances').get()
+      const [masterBundle, currentYearData] = await Promise.all([
+        window.MasterDataService.getBundle(false),
+        fetchYearData(CURRENT_YEAR)
       ]);
-      state.employees = masterSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      state.directory = new Map(directorySnap.docs.map((doc) => [doc.id, { id: doc.id, ...doc.data() }]));
-      state.leaves = leaveSnap.docs.map((doc) => normalizeLeave(doc.data(), doc.id));
-      state.balances = balanceSnap.docs.map((doc) => normalizeBalance(doc.data(), doc.id));
+      state.employees = [...masterBundle.employees];
+      state.directory = new Map(masterBundle.directory);
+      state.leaves = [];
+      state.balances = [];
+      state.loadedYears = new Set();
+      mergeYearData(currentYearData);
     } catch (error) {
       state.error = error.message || String(error);
     } finally {
@@ -775,7 +816,9 @@
       }
       await audit(existingId ? 'UPDATE_LEAVE' : 'CREATE_LEAVE', `leaveRecords/${ref.id}`, `${employeeIdentity(employeeId).name || employeeId} · ${leaveType} · ${startDate} s.d. ${endDate}`);
       state.modal = null;
-      await loadData();
+      const yearsToReload = [...new Set([Number(oldRecord?.leaveYear || 0), Number(leaveYear)].filter(Boolean))];
+      await Promise.all(yearsToReload.map((year) => ensureYearData(year, { force: true })));
+      render();
       showToast(existingId ? 'Data cuti berhasil diperbarui.' : 'Data cuti berhasil ditambahkan.');
     } catch (error) {
       button.disabled = false;
@@ -796,7 +839,8 @@
       }
       await audit('DELETE_LEAVE', `leaveRecords/${id}`, `${employeeIdentity(item.employeeId).name || item.employeeId} · ${item.leaveType}`);
       state.drawer = null;
-      await loadData();
+      await ensureYearData(item.leaveYear, { force: true });
+      render();
       showToast('Data cuti berhasil dihapus.');
     } catch (error) {
       alert(`Data cuti gagal dihapus: ${error.message || error}`);
@@ -843,7 +887,8 @@
       }, { merge: true });
       await audit('UPDATE_LEAVE_BALANCE', `leaveBalances/${balanceDocId(ctx.employeeId, ctx.year)}`, `${employeeIdentity(ctx.employeeId).name || ctx.employeeId} · ${ctx.year}`);
       state.balanceModal = null;
-      await loadData();
+      await ensureYearData(ctx.year, { force: true });
+      render();
       showToast('Saldo cuti berhasil diperbarui.');
     } catch (error) {
       button.disabled = false;
@@ -881,8 +926,9 @@
       await db().collection('leaveRecords').doc(item.id).set({ documents, updatedAt: serverTimestamp(), updatedBy: user()?.email || '' }, { merge: true });
       await audit(existingId ? 'UPDATE_LEAVE_DOCUMENT' : 'CREATE_LEAVE_DOCUMENT', `leaveRecords/${item.id}`, `${employeeIdentity(item.employeeId).name || item.employeeId} · ${name}`);
       state.documentModal = null;
-      await loadData();
+      await ensureYearData(item.leaveYear, { force: true });
       state.drawer = { type: 'leave', id: item.id };
+      render();
       showToast(existingId ? 'Metadata dokumen diperbarui.' : 'Metadata dokumen ditambahkan.');
     } catch (error) {
       button.disabled = false;
@@ -900,8 +946,9 @@
       const documents = (item.documents || []).filter((row) => row.id !== documentId);
       await db().collection('leaveRecords').doc(item.id).set({ documents, updatedAt: serverTimestamp(), updatedBy: user()?.email || '' }, { merge: true });
       await audit('DELETE_LEAVE_DOCUMENT', `leaveRecords/${item.id}`, `${employeeIdentity(item.employeeId).name || item.employeeId} · ${doc.name || doc.type}`);
-      await loadData();
+      await ensureYearData(item.leaveYear, { force: true });
       state.drawer = { type: 'leave', id: item.id };
+      render();
       showToast('Metadata dokumen dihapus.');
     } catch (error) {
       alert(`Metadata dokumen gagal dihapus: ${error.message || error}`);
@@ -931,10 +978,13 @@
   app.addEventListener('input', (event) => {
     if (event.target?.id === 'leave-search' || event.target?.id === 'leave-employee-search') {
       state.filters.search = String(event.target.value || '');
-      render();
       const id = event.target.id;
-      const input = document.getElementById(id);
-      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      clearTimeout(window.__leaveSearchTimer);
+      window.__leaveSearchTimer = setTimeout(() => {
+        render();
+        const input = document.getElementById(id);
+        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      }, 240);
       return;
     }
     if (event.target?.id === 'leave-days' && state.modal) {
@@ -949,13 +999,14 @@
     if (id === 'leave-dashboard-year' || id === 'leave-data-year' || id === 'leave-employee-year' || id === 'leave-balance-year') {
       state.filters.year = Number(event.target.value || CURRENT_YEAR);
       render();
+      ensureYearData(state.filters.year, { showLoading: true });
       return;
     }
     if (id === 'leave-data-month') { state.filters.month = String(event.target.value || ''); render(); return; }
     if (id === 'leave-data-unit') { state.filters.unit = String(event.target.value || ''); render(); return; }
     if (id === 'leave-data-type') { state.filters.type = String(event.target.value || ''); render(); return; }
     if (id === 'leave-calendar-month') { state.calendarFilters.month = Number(event.target.value || CURRENT_MONTH); render(); return; }
-    if (id === 'leave-calendar-year') { state.calendarFilters.year = Number(event.target.value || CURRENT_YEAR); render(); return; }
+    if (id === 'leave-calendar-year') { state.calendarFilters.year = Number(event.target.value || CURRENT_YEAR); render(); ensureYearData(state.calendarFilters.year, { showLoading: true }); return; }
     if (id === 'leave-calendar-unit') { state.calendarFilters.unit = String(event.target.value || ''); render(); return; }
     if (id === 'leave-calendar-type') { state.calendarFilters.type = String(event.target.value || ''); render(); return; }
     if (id === 'leave-report-year') {
@@ -964,6 +1015,7 @@
       state.reportFilters.startDate = `${year}-01-01`;
       state.reportFilters.endDate = `${year}-12-31`;
       render();
+      ensureYearData(year, { showLoading: true });
       return;
     }
     if (id === 'leave-report-start') { state.reportFilters.startDate = String(event.target.value || ''); render(); return; }

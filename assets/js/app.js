@@ -6,6 +6,7 @@
   const parser = window.ExcelParser;
   const generator = window.DocumentGenerator;
   const storage = window.AppStorage;
+  const resources = window.ResourceLoader;
   const app = document.getElementById('app');
 
   let historyUnsubscribe = null;
@@ -169,7 +170,7 @@
     app.innerHTML = `
       <section class="welcome-shell">
         <div class="welcome-minimal">
-          <img class="welcome-logo" src="assets/img/logo-pkp.png" alt="Kementerian Perumahan dan Kawasan Permukiman">
+          <img class="welcome-logo" src="assets/img/logo-pkp.png?v=2" alt="Kementerian Perumahan dan Kawasan Permukiman">
           <h1 class="welcome-title">Generator Dokumen Lembur</h1>
           <button class="welcome-start" type="button" data-action="enter-app">Mulai ${icon('arrowRight')}</button>
         </div>
@@ -514,13 +515,19 @@
     const incoming = Array.from(fileList || []).filter(f=>/\.(xlsx|xls)$/i.test(f.name));
     const existing = new Map(state.files.map(f=>[`${f.name}|${f.size}|${f.lastModified}`,f]));
     incoming.forEach(f=>existing.set(`${f.name}|${f.size}|${f.lastModified}`,f));
-    state.files = [...existing.values()]; state.validation = null; render();
+    state.files = [...existing.values()]; state.validation = null;
+    if (state.files.length) {
+      resources?.warm?.('xlsx');
+      window.MasterDataService?.getEmployees?.(false).catch(() => {});
+    }
+    render();
   }
 
   async function validateFiles() {
     if (!state.files.length || state.busy) return;
     state.busy = true;
     try {
+      await resources?.ensure?.('xlsx');
       const result = await parser.parseFiles(state.files, state.period, state.holidays);
       state.validation = result; state.processStep = 'validation';
     } catch (error) {
@@ -537,6 +544,7 @@
       if (i===1) await rules.assignSatkerCodes(state.validation.employees);
     }
     state.employees = state.validation.employees;
+    resources?.warm?.(['exceljs', 'filesaver']);
     state.processing = {percent:100,active:5}; render(); await new Promise(r=>setTimeout(r,220));
     state.processStep = 'review'; render();
   }
@@ -554,6 +562,7 @@
     if (state.busy) return;
     state.busy = true; render();
     try {
+      await resources?.ensure?.('exceljs');
       const holidays = rules.normalizeHolidays(state.holidays);
       state.generated = await generator.generateAll(state.employees, state.period, holidays);
       const now = new Date().toISOString();
@@ -578,7 +587,6 @@
             holidays
           };
       const savedMeta = await storage.saveRun(run);
-      await refreshHistory(false);
       state.currentRun = { ...run, ...savedMeta };
       state.resultFromHistory = Boolean(state.editingHistoryId);
       state.resultMode = state.editingHistoryId ? 'updated' : 'new';
@@ -597,6 +605,7 @@
     const run = state.currentRun || {period:state.period,employees:state.employees,holidays:state.holidays};
     if (!run.employees?.length) return;
     try {
+      await resources?.ensure?.(['exceljs', 'filesaver']);
       let file = state.generated && state.generated[kind];
       const holidays = rules.normalizeHolidays(run.holidays || state.holidays);
       if (!file) {
@@ -682,7 +691,7 @@
       const approved = window.confirm(`Hapus riwayat proses ${label}?\n\nData hasil proses periode ini akan dihapus dari Firestore dan tindakan ini tidak dapat dibatalkan.`);
       if (!approved) return;
       await storage.deleteRun(id);
-      await refreshHistory(false);
+      state.history = state.history.filter((item) => item.id !== id);
       if (state.currentRun?.id === id) {
         state.currentRun = null;
         state.generated = null;
@@ -759,13 +768,18 @@
   async function init() {
     await window.FirebaseClient.requireAuth();
     await window.AppSettingsService?.loadAndApply?.();
-    await window.MasterDataService?.getEmployees?.(false);
     applyHashRoute();
-    await refreshHistory(false);
+    await storage.migrateLegacyOnce?.();
+    state.historyBusy = state.view === 'history' || state.view === 'dashboard';
     historyUnsubscribe = storage.subscribeHistory?.((history) => {
       state.history = history;
+      state.historyBusy = false;
       if (state.view === 'history' || state.view === 'dashboard') render();
-    }, (error) => console.warn('Sinkronisasi realtime Lembur gagal:', error)) || null;
+    }, async (error) => {
+      console.warn('Sinkronisasi realtime Lembur gagal:', error);
+      await refreshHistory(false);
+      if (state.view === 'history' || state.view === 'dashboard') render();
+    }) || null;
     render();
   }
 

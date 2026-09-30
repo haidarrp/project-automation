@@ -104,26 +104,24 @@
     state.error = '';
     render();
     try {
-      const [masterSnap, directorySnap, lemburSnap, tukinSnap, auditSnap, trainingSnap, leaveSnap, balanceSnap] = await Promise.all([
-        db().collection('masterEmployees').get(),
-        db().collection('masterDirectory').get(),
+      const [masterBundle, lemburSnap, tukinSnap, auditSnap] = await Promise.all([
+        window.MasterDataService.getBundle(false),
         db().collection('appSettings').doc('lembur').get(),
         db().collection('appSettings').doc('tukin').get(),
-        db().collection('adminAudit').orderBy('createdAt', 'desc').limit(20).get(),
-        db().collection('trainings').get(),
-        db().collection('leaveRecords').get(),
-        db().collection('leaveBalances').get()
+        db().collection('adminAudit').orderBy('createdAt', 'desc').limit(20).get()
       ]);
-      state.employees = masterSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      state.directory = new Map(directorySnap.docs.map((doc) => [doc.id, { id: doc.id, ...doc.data() }]));
+      state.employees = [...masterBundle.employees];
+      state.directory = new Map(masterBundle.directory);
       state.settings = {
         lembur: lemburSnap.exists ? lemburSnap.data() : {},
         tukin: tukinSnap.exists ? tukinSnap.data() : {}
       };
       state.audits = auditSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      state.trainings = trainingSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      state.leaveRecords = leaveSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      state.leaveBalances = balanceSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      // Data Pelatihan/Cuti tidak dibutuhkan untuk render halaman Admin. Koleksi tersebut
+      // baru dibaca ketika pengguna benar-benar mengekspor backup lengkap.
+      state.trainings = [];
+      state.leaveRecords = [];
+      state.leaveBalances = [];
       state.employees.sort((a, b) => Number(a.order || 9999) - Number(b.order || 9999) || docLabel(a).title.localeCompare(docLabel(b).title, 'id'));
     } catch (error) {
       state.error = error.message || String(error);
@@ -294,7 +292,7 @@
     document.getElementById('admin-search')?.addEventListener('input', (event) => {
       state.search = event.target.value;
       clearTimeout(window.__adminSearchTimer);
-      window.__adminSearchTimer = setTimeout(render, 140);
+      window.__adminSearchTimer = setTimeout(render, 240);
     });
     document.querySelector('[data-action="save-lembur-settings"]')?.addEventListener('click', saveLemburSettings);
     document.querySelector('[data-action="save-tukin-settings"]')?.addEventListener('click', saveTukinSettings);
@@ -536,14 +534,23 @@
 
   async function exportBackup() {
     try {
+      showToast('Menyiapkan backup lengkap...');
+      const [trainingSnap, leaveSnap, balanceSnap] = await Promise.all([
+        db().collection('trainings').get(),
+        db().collection('leaveRecords').get(),
+        db().collection('leaveBalances').get()
+      ]);
+      const trainings = trainingSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const leaveRecords = leaveSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const leaveBalances = balanceSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       const payload = {
         exportedAt: new Date().toISOString(),
         schemaVersion: 4,
         masterEmployees: state.employees.map((item) => ({ ...item, updatedAt: undefined })),
         masterDirectory: Object.fromEntries([...state.directory.entries()].map(([id, value]) => [id, { name: value.name || '', nip: value.nip || '', unit: value.unit || '' }])),
-        trainings: state.trainings.map((item) => ({ id: item.id, name: item.name || '', organizer: item.organizer || '', startDate: item.startDate || '', endDate: item.endDate || '', participantIds: Array.isArray(item.participantIds) ? item.participantIds : [], participants: Array.isArray(item.participants) ? item.participants : [] })),
-        leaveRecords: state.leaveRecords.map((item) => ({ ...item, updatedAt: undefined, createdAt: undefined })),
-        leaveBalances: state.leaveBalances.map((item) => ({ ...item, updatedAt: undefined, createdAt: undefined })),
+        trainings: trainings.map((item) => ({ id: item.id, name: item.name || '', organizer: item.organizer || '', startDate: item.startDate || '', endDate: item.endDate || '', participantIds: Array.isArray(item.participantIds) ? item.participantIds : [], participants: Array.isArray(item.participants) ? item.participants : [] })),
+        leaveRecords: leaveRecords.map((item) => ({ ...item, updatedAt: undefined, createdAt: undefined })),
+        leaveBalances: leaveBalances.map((item) => ({ ...item, updatedAt: undefined, createdAt: undefined })),
         appSettings: { lembur: state.settings.lembur || {}, tukin: state.settings.tukin || {} }
       };
       const replacer = (key, value) => {
