@@ -27,6 +27,10 @@
     holidays: [],
     editingHistoryId: null,
     resultMode: 'new',
+    resultTab: 'summary',
+    resultSearch: '',
+    resultCategory: 'all',
+    resultDate: 'all',
     busy: false,
     history: [],
     historyBusy: false
@@ -347,20 +351,108 @@
       <div class="actions"><button class="btn btn-secondary" data-action="back-review">← Kembali ke Review</button><button class="btn btn-primary" data-action="generate" ${state.busy?'disabled':''}>${state.busy?'Membuat Dokumen...':'Generate Dokumen'}</button></div></div>`;
   }
 
+  function resultCategory(record, holidays) {
+    const holiday = rules.isHoliday(record.date, holidays);
+    const weekend = rules.isWeekend(record.date);
+    if (holiday) return { key: 'holiday', label: 'Tanggal Merah', rest: true };
+    if (weekend) return { key: 'weekend', label: 'Weekend', rest: true };
+    return { key: 'workday', label: 'Hari Kerja', rest: false };
+  }
+
+  function resultEmployeeRecap(employees) {
+    return (employees || []).map((employee) => {
+      const records = Object.values(employee.records || {}).filter((record) => Number(record.overtimeHours || 0) > 0);
+      return {
+        employee,
+        totalHours: records.reduce((sum, record) => sum + Number(record.overtimeHours || 0), 0),
+        overtimeDays: records.length,
+        mealDays: records.filter((record) => Number(record.overtimeHours || 0) >= Number(cfg.RULES.MEAL_ALLOWANCE_MIN_HOURS || 2)).length
+      };
+    }).filter((item) => item.totalHours > 0);
+  }
+
+  function resultDetailRows(employees, holidays) {
+    return rules.collectOvertimeRows(employees || []).map((item) => ({
+      ...item,
+      category: resultCategory(item.record, holidays),
+      meal: Number(item.record.overtimeHours || 0) >= Number(cfg.RULES.MEAL_ALLOWANCE_MIN_HOURS || 2)
+    }));
+  }
+
+  function renderResultTabs() {
+    const tabs = [
+      ['summary', 'Ringkasan'],
+      ['employees', 'Rekap Pegawai'],
+      ['details', 'Rincian Lembur']
+    ];
+    return `<div class="result-tabs" role="tablist">${tabs.map(([key, label]) => `<button class="result-tab ${state.resultTab === key ? 'active' : ''}" type="button" data-result-tab="${key}" role="tab" aria-selected="${state.resultTab === key ? 'true' : 'false'}">${label}</button>`).join('')}</div>`;
+  }
+
+  function renderResultSummary(run, period, summary, holidays) {
+    return `<div class="result-panel">
+      <div class="grid-4">${metric(summary.employees,'Pegawai')}${metric(summary.overtimeEmployees,'Pegawai Lembur')}${metric(summary.totalHours,'Total Jam Lembur')}${metric(summary.mealDays,'Hari Uang Makan')}</div>
+      ${holidays.length ? `<div class="result-holidays"><strong>Tanggal merah:</strong> ${holidays.map((key)=>esc(holidayLabel(key))).join(', ')}</div>` : ''}
+      <div class="result-section-head"><div><div class="card-title">Dokumen Hasil Generate</div><div class="card-subtitle">Data rekap dapat diperiksa langsung di tab Rekap Pegawai dan Rincian Lembur sebelum dokumen diunduh.</div></div></div>
+      <div class="download-list"><div class="download-row"><div class="file-icon">▤</div><div><div class="download-name">Rekapitulasi Lembur</div><div class="download-meta">${esc(periodLabel(period))}</div></div><button class="btn btn-secondary btn-sm" data-download="recap">Download</button></div><div class="download-row"><div class="file-icon">▦</div><div><div class="download-name">Daftar Hadir Kerja Lembur</div><div class="download-meta">Workbook dengan selector tanggal</div></div><button class="btn btn-secondary btn-sm" data-download="daily">Download</button></div><div class="download-row"><div class="file-icon">▧</div><div><div class="download-name">SPKL ${esc(periodLabel(period))}.xlsx</div><div class="download-meta">Sheet Hari Kerja + WEEKEND</div></div><button class="btn btn-secondary btn-sm" data-download="spkl">Download</button></div></div>
+    </div>`;
+  }
+
+  function renderResultEmployees(employees) {
+    const q = state.resultSearch.trim().toLowerCase();
+    const recap = resultEmployeeRecap(employees).filter(({ employee }) => {
+      if (!q) return true;
+      return String(employee.name || '').toLowerCase().includes(q)
+        || String(employee.nip || '').toLowerCase().includes(q)
+        || String(employee.satkerCode || '').toLowerCase().includes(q);
+    });
+    return `<div class="result-panel">
+      <div class="result-toolbar"><div class="search"><input id="result-search" placeholder="Cari nama, NIP, atau kode satker..." value="${esc(state.resultSearch)}"></div><span class="result-count">${recap.length} pegawai lembur</span></div>
+      <div class="card table-wrap result-table-wrap"><table class="data-table result-table"><thead><tr><th>No.</th><th>Pegawai</th><th>NIP</th><th>Kode Satker</th><th>Total Jam</th><th>Hari Lembur</th><th>Uang Makan</th><th>Aksi</th></tr></thead><tbody>${recap.length ? recap.map((item, index) => `<tr><td>${index + 1}</td><td><strong>${esc(item.employee.name)}</strong></td><td class="nowrap">${esc(item.employee.nip || '-')}</td><td>${esc(item.employee.satkerCode || '-')}</td><td><strong>${item.totalHours} jam</strong></td><td>${item.overtimeDays} hari</td><td>${item.mealDays} hari</td><td><button class="btn btn-secondary btn-sm" type="button" data-result-employee="${esc(rules.employeeKey(item.employee))}">Detail</button></td></tr>`).join('') : '<tr><td colspan="8" class="text-center result-empty">Tidak ada pegawai yang sesuai pencarian.</td></tr>'}</tbody></table></div>
+      <div class="footer-note">Rekap ini bersifat read-only. Gunakan tombol Edit Data apabila diperlukan koreksi terhadap hasil perhitungan.</div>
+    </div>`;
+  }
+
+  function renderResultDetails(employees, holidays) {
+    const allRows = resultDetailRows(employees, holidays);
+    const dateOptions = [...new Map(allRows.map((item) => [item.key, item.record.date])).entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const q = state.resultSearch.trim().toLowerCase();
+    const rows = allRows.filter((item) => {
+      if (q && !String(item.employee.name || '').toLowerCase().includes(q) && !String(item.employee.nip || '').toLowerCase().includes(q) && !String(item.employee.satkerCode || '').toLowerCase().includes(q)) return false;
+      if (state.resultCategory !== 'all' && item.category.key !== state.resultCategory) return false;
+      if (state.resultDate !== 'all' && item.key !== state.resultDate) return false;
+      return true;
+    });
+    return `<div class="result-panel">
+      <div class="result-toolbar result-toolbar-multi">
+        <div class="search"><input id="result-search" placeholder="Cari pegawai, NIP, atau kode satker..." value="${esc(state.resultSearch)}"></div>
+        <select id="result-category" class="result-filter"><option value="all" ${state.resultCategory === 'all' ? 'selected' : ''}>Semua Kategori</option><option value="workday" ${state.resultCategory === 'workday' ? 'selected' : ''}>Hari Kerja</option><option value="weekend" ${state.resultCategory === 'weekend' ? 'selected' : ''}>Weekend</option><option value="holiday" ${state.resultCategory === 'holiday' ? 'selected' : ''}>Tanggal Merah</option></select>
+        <select id="result-date" class="result-filter"><option value="all">Semua Tanggal</option>${dateOptions.map(([key, date]) => `<option value="${esc(key)}" ${state.resultDate === key ? 'selected' : ''}>${esc(rules.formatIndonesianDate(date, false))}</option>`).join('')}</select>
+        <span class="result-count">${rows.length} kejadian</span>
+      </div>
+      <div class="card table-wrap result-table-wrap"><table class="data-table result-table result-detail-table"><thead><tr><th>No.</th><th>Pegawai</th><th>Tanggal</th><th>Kategori</th><th>Jam Masuk</th><th>Mulai Lembur</th><th>Jam Pulang</th><th>Jam Lembur</th><th>Uang Makan</th></tr></thead><tbody>${rows.length ? rows.map((item, index) => `<tr><td>${index + 1}</td><td><button class="employee-link" type="button" data-result-employee="${esc(rules.employeeKey(item.employee))}">${esc(item.employee.name)}</button><div class="result-row-meta">${esc(item.employee.nip || '-')} · ${esc(item.employee.satkerCode || '-')}</div></td><td class="nowrap">${esc(rules.formatIndonesianDate(item.record.date, false))}</td><td><span class="category-pill ${item.category.rest ? 'rest-day' : ''}">${esc(item.category.label)}</span></td><td>${rules.formatMinutes(item.record.inMinutes)}</td><td>${rules.formatMinutes(item.record.overtimeStartMinutes)}</td><td>${rules.formatMinutes(item.record.outMinutes)}</td><td><strong>${Number(item.record.overtimeHours || 0)} jam</strong></td><td><span class="status ${item.meal ? 'ok' : ''}">${item.meal ? 'Ya' : 'Tidak'}</span></td></tr>`).join('') : '<tr><td colspan="9" class="text-center result-empty">Tidak ada rincian lembur yang sesuai filter.</td></tr>'}</tbody></table></div>
+      <div class="footer-note">Rincian ini merupakan hasil final dari data yang sudah direview. Perubahan hanya dilakukan melalui Edit Data lalu Generate Ulang.</div>
+    </div>`;
+  }
+
   function renderResult() {
     const run = state.currentRun;
     const period = run?.period || state.period;
-    const summary = run?.summary || rules.summarize(run?.employees || state.employees);
+    const employees = run?.employees || state.employees || [];
+    const summary = run?.summary || rules.summarize(employees);
     const holidays = rules.normalizeHolidays(run?.holidays || state.holidays);
     const title = state.resultMode === 'updated' ? 'Perubahan Berhasil Disimpan' : state.resultMode === 'history' ? 'Hasil Proses Tersimpan' : 'Dokumen Berhasil Dibuat';
     const timeValue = run?.updatedAt || run?.processedAt;
     const timeLabel = run?.updatedAt ? 'Diperbarui' : 'Diproses';
     const canManageRun = !run?.id || storage.canManage?.(run);
-    return `<div class="card result-hero"><div class="success-mark">✓</div><h3>${title}</h3><p>${esc(periodLabel(period))}${timeValue ? ` - ${timeLabel} ${esc(formatDateTime(timeValue))}` : ''}</p>
-      <div class="grid-4 section-gap" style="text-align:left">${metric(summary.employees,'Pegawai')}${metric(summary.overtimeEmployees,'Pegawai Lembur')}${metric(summary.totalHours,'Total Jam Lembur')}${metric(summary.mealDays,'Hari Uang Makan')}</div>
-      ${holidays.length ? `<div class="result-holidays"><strong>Tanggal merah:</strong> ${holidays.map((key)=>esc(holidayLabel(key))).join(', ')}</div>` : ''}
-      <div class="download-list"><div class="download-row"><div class="file-icon">▤</div><div><div class="download-name">Rekapitulasi Lembur</div><div class="download-meta">${esc(periodLabel(period))}</div></div><button class="btn btn-secondary btn-sm" data-download="recap">Download</button></div><div class="download-row"><div class="file-icon">▦</div><div><div class="download-name">Daftar Hadir Kerja Lembur</div><div class="download-meta">Workbook dengan selector tanggal</div></div><button class="btn btn-secondary btn-sm" data-download="daily">Download</button></div><div class="download-row"><div class="file-icon">▧</div><div><div class="download-name">SPKL ${esc(periodLabel(period))}.xlsx</div><div class="download-meta">Sheet Hari Kerja + WEEKEND</div></div><button class="btn btn-secondary btn-sm" data-download="spkl">Download</button></div></div>
-      <div class="actions"><button class="btn btn-secondary" data-action="go-history">Lihat Riwayat</button><div class="actions-right">${run?.id && canManageRun ? '<button class="btn btn-secondary" data-action="edit-current-run">Edit Data</button>' : ''}<button class="btn btn-primary" data-action="new-period">Proses Periode Baru</button></div></div></div>`;
+    const panel = state.resultTab === 'employees'
+      ? renderResultEmployees(employees)
+      : state.resultTab === 'details'
+        ? renderResultDetails(employees, holidays)
+        : renderResultSummary(run, period, summary, holidays);
+    return `<div class="card result-head"><div class="result-head-main"><div class="success-mark">✓</div><div><h3>${title}</h3><p>${esc(periodLabel(period))}${timeValue ? ` - ${timeLabel} ${esc(formatDateTime(timeValue))}` : ''}</p></div></div><div class="result-head-note">Hasil generate dapat diperiksa langsung pada aplikasi sebelum dokumen diunduh.</div></div>
+      ${renderResultTabs()}
+      ${panel}
+      <div class="result-actions actions"><button class="btn btn-secondary" data-action="go-history">Lihat Riwayat</button><div class="actions-right">${run?.id && canManageRun ? '<button class="btn btn-secondary" data-action="edit-current-run">Edit Data</button>' : ''}<button class="btn btn-primary" data-action="new-period">Proses Periode Baru</button></div></div>`;
   }
 
   function renderHistory() {
@@ -384,9 +476,11 @@
     if (!state.drawerKey) return '';
     const employee = state.employees.find(e=>rules.employeeKey(e)===state.drawerKey);
     if (!employee) return '';
-    const records = Object.keys(employee.records || {}).sort().map(k=>({key:k,record:employee.records[k]})).filter(x=>Number(x.record.overtimeHours||0)>0);
-    const total = records.reduce((s,x)=>s+Number(x.record.overtimeHours||0),0);
-    return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer"><div class="drawer-header"><h3>Detail Pegawai</h3><button class="icon-btn" data-action="close-drawer">×</button></div><div class="profile"><div class="profile-avatar">◉</div><div><div class="profile-name">${esc(employee.name)}</div><div class="profile-meta">NIP ${esc(employee.nip || '-')}</div></div></div><div class="detail-grid"><div><div class="detail-label">Kode Satker</div><div class="detail-value">${esc(employee.satkerCode || '-')}</div></div><div><div class="detail-label">Total Lembur</div><div class="detail-value">${total} jam</div></div></div><div class="card-title">Data Lembur</div><div class="table-wrap section-gap"><table class="data-table"><thead><tr><th>Tanggal</th><th>Masuk</th><th>Pulang</th><th>Lembur</th></tr></thead><tbody>${records.map(x=>`<tr><td>${esc(rules.formatIndonesianDate(x.record.date,false))}</td><td>${rules.formatMinutes(x.record.inMinutes)}</td><td>${rules.formatMinutes(x.record.outMinutes)}</td><td>${x.record.overtimeHours} jam</td></tr>`).join('')}</tbody></table></div></aside>`;
+    const holidays = rules.normalizeHolidays(state.currentRun?.holidays || state.holidays);
+    const records = Object.keys(employee.records || {}).sort().map((key) => ({ key, record: employee.records[key] })).filter((item) => Number(item.record.overtimeHours || 0) > 0);
+    const total = records.reduce((sum, item) => sum + Number(item.record.overtimeHours || 0), 0);
+    const mealDays = records.filter((item) => Number(item.record.overtimeHours || 0) >= Number(cfg.RULES.MEAL_ALLOWANCE_MIN_HOURS || 2)).length;
+    return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer"><div class="drawer-header"><h3>Detail Pegawai</h3><button class="icon-btn" data-action="close-drawer">×</button></div><div class="profile"><div class="profile-avatar">◉</div><div><div class="profile-name">${esc(employee.name)}</div><div class="profile-meta">NIP ${esc(employee.nip || '-')}</div></div></div><div class="detail-grid"><div><div class="detail-label">Kode Satker</div><div class="detail-value">${esc(employee.satkerCode || '-')}</div></div><div><div class="detail-label">Total Lembur</div><div class="detail-value">${total} jam</div></div><div><div class="detail-label">Hari Lembur</div><div class="detail-value">${records.length} hari</div></div><div><div class="detail-label">Uang Makan</div><div class="detail-value">${mealDays} hari</div></div></div><div class="card-title">Data Lembur</div><div class="table-wrap section-gap"><table class="data-table drawer-overtime-table"><thead><tr><th>Tanggal</th><th>Kategori</th><th>Masuk</th><th>Mulai</th><th>Pulang</th><th>Lembur</th><th>Uang Makan</th></tr></thead><tbody>${records.map((item) => { const category = resultCategory(item.record, holidays); const meal = Number(item.record.overtimeHours || 0) >= Number(cfg.RULES.MEAL_ALLOWANCE_MIN_HOURS || 2); return `<tr><td>${esc(rules.formatIndonesianDate(item.record.date,false))}</td><td><span class="category-pill ${category.rest ? 'rest-day' : ''}">${esc(category.label)}</span></td><td>${rules.formatMinutes(item.record.inMinutes)}</td><td>${rules.formatMinutes(item.record.overtimeStartMinutes)}</td><td>${rules.formatMinutes(item.record.outMinutes)}</td><td>${item.record.overtimeHours} jam</td><td>${meal ? 'Ya' : 'Tidak'}</td></tr>`; }).join('')}</tbody></table></div></aside>`;
   }
 
   function render() {
@@ -409,6 +503,10 @@
     state.holidays = [];
     state.editingHistoryId = null;
     state.resultMode = 'new';
+    state.resultTab = 'summary';
+    state.resultSearch = '';
+    state.resultCategory = 'all';
+    state.resultDate = 'all';
     state.drawerKey = null;
   }
 
@@ -484,6 +582,10 @@
       state.currentRun = { ...run, ...savedMeta };
       state.resultFromHistory = Boolean(state.editingHistoryId);
       state.resultMode = state.editingHistoryId ? 'updated' : 'new';
+      state.resultTab = 'summary';
+      state.resultSearch = '';
+      state.resultCategory = 'all';
+      state.resultDate = 'all';
       state.editingHistoryId = null;
       state.processStep = 'result';
     } catch (error) {
@@ -520,6 +622,10 @@
       state.resultFromHistory=true;
       state.editingHistoryId=null;
       state.resultMode='history';
+      state.resultTab='summary';
+      state.resultSearch='';
+      state.resultCategory='all';
+      state.resultDate='all';
       state.filter='';
       state.drawerKey=null;
       render();
@@ -543,6 +649,10 @@
       state.resultFromHistory=true;
       state.editingHistoryId=run.id;
       state.resultMode='history';
+      state.resultTab='summary';
+      state.resultSearch='';
+      state.resultCategory='all';
+      state.resultDate='all';
       state.filter='';
       state.drawerKey=null;
       render();
@@ -619,6 +729,11 @@
     document.querySelectorAll('[data-edit-history-id]').forEach(btn=>btn.addEventListener('click',()=>editHistory(btn.dataset.editHistoryId)));
     document.querySelectorAll('[data-delete-history-id]').forEach(btn=>btn.addEventListener('click',()=>deleteHistory(btn.dataset.deleteHistoryId)));
     document.querySelectorAll('[data-download]').forEach(btn=>btn.addEventListener('click',()=>download(btn.dataset.download)));
+    document.querySelectorAll('[data-result-tab]').forEach((btn) => btn.addEventListener('click', () => { state.resultTab = btn.dataset.resultTab || 'summary'; state.resultSearch = ''; state.resultCategory = 'all'; state.resultDate = 'all'; state.drawerKey = null; render(); }));
+    document.querySelectorAll('[data-result-employee]').forEach((btn) => btn.addEventListener('click', () => { state.drawerKey = btn.dataset.resultEmployee; render(); }));
+    document.getElementById('result-search')?.addEventListener('input', (event) => { state.resultSearch = event.target.value; clearTimeout(window.__resultSearchTimer); window.__resultSearchTimer = setTimeout(render, 180); });
+    document.getElementById('result-category')?.addEventListener('change', (event) => { state.resultCategory = event.target.value || 'all'; render(); });
+    document.getElementById('result-date')?.addEventListener('change', (event) => { state.resultDate = event.target.value || 'all'; render(); });
     document.querySelectorAll('[data-employee-key]').forEach(btn=>btn.addEventListener('click',()=>{state.drawerKey=btn.dataset.employeeKey;render();}));
     document.querySelectorAll('[data-action="close-drawer"]').forEach(btn=>btn.addEventListener('click',()=>{state.drawerKey=null;render();}));
     document.querySelectorAll('[data-overtime-key]').forEach(sel=>sel.addEventListener('change',()=>updateOvertime(sel.dataset.overtimeKey,sel.value)));

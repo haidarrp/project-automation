@@ -450,3 +450,43 @@ a{color:inherit}
 .topbar-account{margin-left:auto;display:flex;align-items:center;gap:12px}
 .topbar-account-copy{display:flex;flex-direction:column;align-items:flex-end;max-width:260px;min-width:0}.topbar-account-copy strong{font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.topbar-account-copy span{font-size:9px;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:780px){.topbar-account-copy{display:none}.firebase-auth-card{padding:26px 20px}.topbar-account{gap:6px}}
+
+/* Lembur - hasil generate dan rekap di layar */
+.result-head{padding:20px 22px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.result-head-main{display:flex;align-items:center;gap:14px;text-align:left}
+.result-head .success-mark{width:44px;height:44px;border-radius:14px;margin:0;font-size:21px;flex:0 0 auto}
+.result-head h3{margin:0 0 4px;font-size:17px}
+.result-head p{margin:0;color:var(--muted);font-size:10px}
+.result-head-note{max-width:380px;color:var(--muted);font-size:10px;line-height:1.55;text-align:right}
+.result-tabs{display:flex;align-items:center;gap:4px;margin-top:16px;padding:5px;background:#eceeeb;border:1px solid var(--line);border-radius:13px;width:max-content;max-width:100%;overflow:auto}
+.result-tab{border:0;background:transparent;color:#667078;border-radius:9px;padding:9px 14px;font-size:10px;font-weight:700;white-space:nowrap;cursor:pointer}
+.result-tab.active{background:#fff;color:var(--ink);box-shadow:0 1px 5px rgba(20,25,30,.08)}
+.result-panel{margin-top:12px;padding:20px 0 0}
+.result-panel>.grid-4{margin-bottom:0}
+.result-section-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-top:20px;text-align:left}
+.result-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.result-toolbar .search{max-width:420px}
+.result-toolbar-multi{justify-content:flex-start;flex-wrap:wrap}
+.result-toolbar-multi .search{min-width:260px;flex:1}
+.result-filter{height:40px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);padding:0 30px 0 11px;font-size:10px;min-width:145px}
+.result-count{font-size:10px;color:var(--muted);white-space:nowrap;margin-left:auto}
+.result-table-wrap{margin:0}
+.result-table td,.result-table th{white-space:nowrap}
+.result-table td:nth-child(2){white-space:normal;min-width:180px}
+.result-detail-table td:nth-child(2){min-width:190px}
+.result-row-meta{font-size:9px;color:var(--muted);margin-top:3px}
+.result-empty{padding:30px!important;color:var(--muted)}
+.result-actions{margin-top:18px}
+
+@media (max-width:780px){
+  .result-head{align-items:flex-start;display:block}
+  .result-head-main{align-items:flex-start}
+  .result-head-note{max-width:none;text-align:left;margin-top:12px}
+  .result-tabs{width:100%}
+  .result-tab{flex:1}
+  .result-toolbar{align-items:stretch;flex-direction:column}
+  .result-toolbar .search,.result-toolbar-multi .search{max-width:none;min-width:0;width:100%}
+  .result-filter{width:100%}
+  .result-count{margin-left:0}
+}
+.drawer-overtime-table td,.drawer-overtime-table th{white-space:nowrap}
