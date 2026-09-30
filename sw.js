@@ -1,4 +1,4 @@
-const STATIC_CACHE = 'pusdatin-static-v7';
+const STATIC_CACHE = 'pusdatin-static-v8';
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(caches.keys().then((keys) => Promise.all(
@@ -12,6 +12,10 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (!['script', 'style', 'image', 'font'].includes(request.destination)) return;
+
+  // Berkas autentikasi/konfigurasi Microsoft tidak boleh dilayani dari cache lama.
+  // Redirect bridge MSAL harus selalu konsisten dengan bundle yang sedang dideploy.
+  if (url.pathname.includes('/assets/vendor/msal-') || url.pathname.endsWith('/assets/js/microsoft-config.js')) return;
 
   event.respondWith(caches.open(STATIC_CACHE).then(async (cache) => {
     const cached = await cache.match(request);

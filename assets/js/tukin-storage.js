@@ -11,6 +11,7 @@
   const client = window.FirebaseClient;
   const common = window.FirebaseStorageCommon;
   const rules = window.TukinRules;
+  const sharePoint = window.SharePointStorage;
 
   function cloudCollection() {
     return client.sharedCollection(SHARED_COLLECTION);
@@ -139,30 +140,40 @@
       ownerName: run.ownerName || '',
       updatedByUid: run.updatedByUid || '',
       updatedByEmail: run.updatedByEmail || '',
+      sharePoint: run.sharePoint || null,
       cloudOnly: Boolean(run.cloudOnly)
     };
   }
 
   function serializeEmployeeForCloud(employee, index) {
+    sharePoint?.normalizeEmployeeAttachments?.(employee);
     const safe = common.sanitize(employee, { omitKeys: new Set(['sourceFiles', 'file']) });
     safe.order = index;
-    safe.sourceFileMeta = (employee.sourceFiles || []).map((file) => ({
-      name: file?.name || '',
-      size: Number(file?.size || 0),
-      type: file?.type || '',
-      lastModified: Number(file?.lastModified || 0),
-      localOnly: true
-    }));
+    safe.sourceFileMeta = (employee.sourceFiles || []).map((item) => {
+      if (sharePoint?.serializableAttachment) return sharePoint.serializableAttachment(item);
+      const file = item?.file || item;
+      return {
+        id: item?.id || '',
+        name: item?.name || file?.name || '',
+        size: Number(item?.size || file?.size || 0),
+        type: item?.type || file?.type || '',
+        lastModified: Number(item?.lastModified || file?.lastModified || 0),
+        localOnly: true
+      };
+    });
     safe.sourceFiles = [];
     Object.entries(safe.records || {}).forEach(([key, record]) => {
       record.date = key;
-      record.evidence = (record.evidence || []).map((item) => ({
-        id: item?.id || '',
-        name: item?.name || item?.file?.name || '',
-        size: Number(item?.size || item?.file?.size || 0),
-        type: item?.type || item?.file?.type || '',
-        localOnly: true
-      }));
+      record.evidence = (employee.records?.[key]?.evidence || []).map((item) => {
+        if (sharePoint?.serializableAttachment) return sharePoint.serializableAttachment(item);
+        return {
+          id: item?.id || '',
+          name: item?.name || item?.file?.name || '',
+          size: Number(item?.size || item?.file?.size || 0),
+          type: item?.type || item?.file?.type || '',
+          localOnly: true
+        };
+      });
     });
     return safe;
   }
@@ -170,12 +181,21 @@
   function hydrateCloudEmployee(data) {
     const employee = { ...data };
     delete employee.order;
-    employee.sourceFiles = [];
+    employee.sourceFiles = (employee.sourceFileMeta || []).map((item) => ({
+      ...item,
+      file: null,
+      localOnly: !(item?.driveId && item?.itemId)
+    }));
     employee.records = Object.fromEntries(Object.entries(employee.records || {}).map(([key, record]) => [key, {
       ...record,
       date: rules.dateFromKey(key),
-      evidence: (record.evidence || []).map((item) => ({ ...item, file: null, localOnly: true }))
+      evidence: (record.evidence || []).map((item) => ({
+        ...item,
+        file: null,
+        localOnly: !(item?.driveId && item?.itemId)
+      }))
     }]));
+    sharePoint?.normalizeEmployeeAttachments?.(employee);
     return employee;
   }
 
@@ -192,7 +212,12 @@
     const updatedAt = run.updatedAt || null;
     const employees = Array.isArray(run.employees) ? run.employees : [];
     const hasLocalBinary = employees.some((employee) =>
-      (employee.sourceFiles || []).length || Object.values(employee.records || {}).some((record) => (record.evidence || []).some((item) => item?.file))
+      (employee.sourceFiles || []).some((item) => item?.file || (typeof File !== 'undefined' && item instanceof File)) ||
+      Object.values(employee.records || {}).some((record) => (record.evidence || []).some((item) => item?.file))
+    );
+    const hasSharePointFiles = employees.some((employee) =>
+      (employee.sourceFiles || []).some((item) => item?.driveId && item?.itemId) ||
+      Object.values(employee.records || {}).some((record) => (record.evidence || []).some((item) => item?.driveId && item?.itemId))
     );
     const ownerUid = existing?.ownerUid || currentActor.uid;
     const ownerEmail = existing?.ownerEmail || currentActor.email;
@@ -210,12 +235,14 @@
       sortAt: updatedAt || processedAt,
       employeeCount: employees.length,
       hasLocalBinary,
+      hasSharePointFiles,
+      sharePoint: run.sharePoint || null,
       ownerUid,
       ownerEmail,
       ownerName,
       updatedByUid: currentActor.uid,
       updatedByEmail: currentActor.email,
-      schemaVersion: 3
+      schemaVersion: 4
     }));
 
     await common.replaceSubcollection(ref, 'employees', employees.map((employee, index) => ({
@@ -248,12 +275,17 @@
     ]);
     if (!metaSnap.exists) return null;
     const meta = metaSnap.data();
+    const employees = empSnap.docs.map((doc) => hydrateCloudEmployee(doc.data()));
+    const remoteAvailable = employees.some((employee) =>
+      (employee.sourceFiles || []).some((item) => item?.driveId && item?.itemId) ||
+      Object.values(employee.records || {}).some((record) => (record.evidence || []).some((item) => item?.driveId && item?.itemId))
+    );
     return {
       ...meta,
       id: metaSnap.id,
-      employees: empSnap.docs.map((doc) => hydrateCloudEmployee(doc.data())),
+      employees,
       cloudOnly: Boolean(cloudOnly),
-      binaryFilesAvailable: false
+      binaryFilesAvailable: Boolean(remoteAvailable)
     };
   }
 

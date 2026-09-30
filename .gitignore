@@ -4,3 +4,5 @@ Thumbs.db
 /firebase/private/
 *service-account*.json
 *serviceAccount*.json
+node_modules/
+.pages/

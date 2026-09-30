@@ -3,6 +3,7 @@
 
   const cfg = window.TUKIN_CONFIG;
   const rules = window.TukinRules;
+  const sharePoint = window.SharePointStorage;
   const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const BORDER_COLOR = 'FF000000';
   const HEADER_FILL = 'FFDDEBF7';
@@ -214,6 +215,27 @@
     };
   }
 
+
+  async function resolveAttachmentBinary(item) {
+    if (!item) return null;
+    // Bila sudah tersinkron, SharePoint diperlakukan sebagai source of truth.
+    // Ini memastikan perubahan yang dilakukan melalui Excel Online/SharePoint
+    // ikut masuk saat ZIP digenerate ulang, termasuk pada perangkat asal.
+    if (item.driveId && item.itemId && sharePoint?.downloadAttachment) {
+      return sharePoint.downloadAttachment(item, true);
+    }
+    if (typeof File !== 'undefined' && item instanceof File) return item;
+    if (typeof Blob !== 'undefined' && item instanceof Blob) return item;
+    if (item.file) return item.file;
+    return null;
+  }
+
+  function attachmentName(item, fallback) {
+    if (!item) return fallback || 'file';
+    if (typeof File !== 'undefined' && item instanceof File) return item.name || fallback || 'file';
+    return item.name || item.remoteName || item.file?.name || fallback || 'file';
+  }
+
   function uniqueName(used, name) {
     const base = String(name || 'file').replace(/[\\/]/g, '-');
     let candidate = base;
@@ -237,11 +259,13 @@
       const folder = root.folder(rules.safeFolderName(employee.name));
       const used = new Set();
       for (const source of employee.sourceFiles || []) {
-        if (source) folder.file(uniqueName(used, source.name), source);
+        const binary = await resolveAttachmentBinary(source);
+        if (binary) folder.file(uniqueName(used, attachmentName(source, 'Absensi.xlsx')), binary);
       }
       for (const record of Object.values(employee.records || {})) {
         for (const evidence of record.evidence || []) {
-          if (evidence?.file) folder.file(uniqueName(used, evidence.name || evidence.file.name), evidence.file);
+          const binary = await resolveAttachmentBinary(evidence);
+          if (binary) folder.file(uniqueName(used, attachmentName(evidence, 'Bukti')), binary);
         }
       }
     }
