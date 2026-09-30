@@ -4,6 +4,22 @@
   const app = document.getElementById('app');
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const TRAINING_STATUSES = Object.freeze([
+    'Diusulkan',
+    'Mendaftar/Terdaftar',
+    'Lolos Seleksi',
+    'Tidak Lolos Seleksi',
+    'Mengikuti',
+    'Lulus',
+    'Tidak Lulus'
+  ]);
+  const DOCUMENT_TYPES = Object.freeze([
+    'Sertifikat',
+    'Surat Tugas',
+    'Bukti Keikutsertaan',
+    'Bukti Kelulusan',
+    'Dokumen Lainnya'
+  ]);
 
   const state = {
     loading: true,
@@ -19,7 +35,8 @@
       endMonth: currentMonth
     },
     modal: null,
-    drawer: null
+    drawer: null,
+    documentModal: null
   };
 
   const esc = (value) => String(value == null ? '' : value)
@@ -50,7 +67,8 @@
     const row = state.directory.get(String(id || '')) || {};
     return {
       name: String(row.name || '').trim(),
-      nip: String(row.nip || '').replace(/\D/g, '')
+      nip: String(row.nip || '').replace(/\D/g, ''),
+      unit: String(row.unit || '').trim()
     };
   }
 
@@ -138,13 +156,66 @@
       .sort((a, b) => String(b.startDate || '').localeCompare(String(a.startDate || '')) || String(a.name || '').localeCompare(String(b.name || ''), 'id'));
   }
 
+  function normalizeDocument(raw, index) {
+    const row = raw && typeof raw === 'object' ? raw : {};
+    return {
+      id: String(row.id || `doc-${index + 1}`),
+      type: DOCUMENT_TYPES.includes(String(row.type || '')) ? String(row.type) : String(row.type || 'Dokumen Lainnya'),
+      name: String(row.name || ''),
+      number: String(row.number || ''),
+      note: String(row.note || '')
+    };
+  }
+
+  function normalizeParticipant(raw, fallbackId) {
+    const row = raw && typeof raw === 'object' ? raw : {};
+    const employeeId = String(row.employeeId || row.id || fallbackId || '');
+    const status = TRAINING_STATUSES.includes(String(row.status || '')) ? String(row.status) : 'Diusulkan';
+    return {
+      employeeId,
+      status,
+      note: String(row.note || ''),
+      documents: (Array.isArray(row.documents) ? row.documents : []).map(normalizeDocument)
+    };
+  }
+
+  function normalizeTraining(data, id) {
+    const source = data || {};
+    const participantIds = [...new Set((Array.isArray(source.participantIds) ? source.participantIds : []).map(String).filter(Boolean))];
+    const participantMap = new Map();
+    (Array.isArray(source.participants) ? source.participants : []).forEach((item) => {
+      const participant = normalizeParticipant(item);
+      if (participant.employeeId) participantMap.set(participant.employeeId, participant);
+    });
+    participantIds.forEach((employeeId) => {
+      if (!participantMap.has(employeeId)) participantMap.set(employeeId, normalizeParticipant({}, employeeId));
+    });
+    const allIds = [...new Set([...participantIds, ...participantMap.keys()])];
+    return {
+      ...source,
+      id,
+      name: String(source.name || ''),
+      organizer: String(source.organizer || ''),
+      startDate: String(source.startDate || ''),
+      endDate: String(source.endDate || ''),
+      participantIds: allIds,
+      participants: allIds.map((employeeId) => participantMap.get(employeeId) || normalizeParticipant({}, employeeId))
+    };
+  }
+
+  function participantFor(training, employeeId) {
+    const id = String(employeeId || '');
+    return (training?.participants || []).find((item) => item.employeeId === id) || normalizeParticipant({}, id);
+  }
+
   function filteredTrainings() {
     const q = state.filters.search.trim().toLowerCase();
     const rows = trainingsInPeriod();
     if (!q) return rows;
     return rows.filter((training) => {
       const participantNames = (training.participantIds || []).map(employeeName).join(' ');
-      return [training.name, training.organizer, participantNames]
+      const statuses = (training.participants || []).map((item) => item.status).join(' ');
+      return [training.name, training.organizer, participantNames, statuses]
         .some((value) => String(value || '').toLowerCase().includes(q));
     });
   }
@@ -157,7 +228,25 @@
     const q = state.filters.search.trim().toLowerCase();
     const rows = activeEmployees();
     if (!q) return rows;
-    return rows.filter((employee) => employee.name.toLowerCase().includes(q));
+    return rows.filter((employee) => [employee.name, employee.nip, employee.unit].some((value) => String(value || '').toLowerCase().includes(q)));
+  }
+
+  function statusClass(status) {
+    const map = {
+      'Diusulkan': 'neutral',
+      'Mendaftar/Terdaftar': 'info',
+      'Lolos Seleksi': 'success',
+      'Tidak Lolos Seleksi': 'warning',
+      'Mengikuti': 'active',
+      'Lulus': 'success',
+      'Tidak Lulus': 'danger'
+    };
+    return map[status] || 'neutral';
+  }
+
+  function statusBadge(status) {
+    const value = TRAINING_STATUSES.includes(String(status || '')) ? String(status) : 'Diusulkan';
+    return `<span class="training-status-badge ${statusClass(value)}">${esc(value)}</span>`;
   }
 
   function identityNotice() {
@@ -171,7 +260,7 @@
   }
 
   function filterCard() {
-    const placeholder = state.view === 'pegawai' ? 'Cari nama pegawai...' : 'Cari pelatihan, penyelenggara, atau peserta...';
+    const placeholder = state.view === 'pegawai' ? 'Cari nama/NIP pegawai...' : 'Cari pelatihan, penyelenggara, peserta, atau status...';
     return `<section class="card training-filter-card">
       <div class="training-filter-row">
         <div class="search"><input id="training-search" type="search" placeholder="${placeholder}" value="${esc(state.filters.search)}" autocomplete="off"></div>
@@ -189,9 +278,9 @@
     const participation = [...histories.values()].reduce((sum, items) => sum + items.length, 0);
     return `<div class="training-metrics">
       ${metric('Total Pegawai', employees.length, 'Pegawai aktif pada master')}
-      ${metric('Sudah Pelatihan', trained, periodLabel())}
-      ${metric('Belum Pelatihan', Math.max(0, employees.length - trained), periodLabel())}
-      ${metric('Keikutsertaan', participation, 'Total riwayat pada periode')}
+      ${metric('Memiliki Riwayat', trained, periodLabel())}
+      ${metric('Belum Ada Riwayat', Math.max(0, employees.length - trained), periodLabel())}
+      ${metric('Keikutsertaan', participation, 'Total relasi peserta-pelatihan')}
     </div>`;
   }
 
@@ -199,12 +288,12 @@
     const rows = trainingsInPeriod();
     const participantIds = new Set(rows.flatMap((item) => item.participantIds || []));
     const participation = rows.reduce((sum, item) => sum + (item.participantIds || []).length, 0);
-    const organizers = new Set(rows.map((item) => String(item.organizer || '').trim()).filter(Boolean));
+    const completed = rows.reduce((sum, item) => sum + (item.participants || []).filter((row) => row.status === 'Lulus').length, 0);
     return `<div class="training-metrics">
       ${metric('Pelatihan Tercatat', rows.length, periodLabel())}
       ${metric('Pegawai Terlibat', participantIds.size, 'Peserta unik pada periode')}
       ${metric('Keikutsertaan', participation, 'Total peserta seluruh pelatihan')}
-      ${metric('Penyelenggara', organizers.size, 'Penyelenggara unik')}
+      ${metric('Status Lulus', completed, 'Relasi peserta berstatus Lulus')}
     </div>`;
   }
 
@@ -212,18 +301,20 @@
     const rows = filteredEmployees();
     return `<section class="card training-card">
       <div class="training-card-head"><div><h2>Data Pegawai</h2><p>Klik nama pegawai untuk melihat riwayat pelatihan pada rentang bulan yang dipilih.</p></div><span class="card-subtitle">${rows.length} pegawai</span></div>
-      <div class="training-table-wrap"><table class="data-table training-table"><thead><tr><th>Nama Pegawai</th><th>Jumlah Pelatihan</th><th>Pelatihan Terakhir</th><th>Tanggal Terakhir</th><th>Aksi</th></tr></thead><tbody>
+      <div class="training-table-wrap"><table class="data-table training-table"><thead><tr><th>Nama Pegawai</th><th>Jumlah Pelatihan</th><th>Pelatihan Terakhir</th><th>Status Terakhir</th><th>Tanggal Terakhir</th><th>Aksi</th></tr></thead><tbody>
         ${rows.length ? rows.map((employee) => {
           const history = employeeHistory(employee.id);
           const latest = history[0] || null;
+          const participant = latest ? participantFor(latest, employee.id) : null;
           return `<tr>
-            <td><button class="training-name-button" type="button" data-employee-detail="${esc(employee.id)}">${esc(employee.name)}</button></td>
+            <td><button class="training-name-button" type="button" data-employee-detail="${esc(employee.id)}">${esc(employee.name)}</button><span class="training-sub">${employee.nip ? `NIP ${esc(employee.nip)}` : 'NIP belum tersedia'}</span></td>
             <td><span class="training-count ${history.length ? '' : 'zero'}">${history.length}</span></td>
             <td>${latest ? `${esc(latest.name)}<span class="training-sub">${esc(latest.organizer || '—')}</span>` : '<span class="training-sub">Belum ada pelatihan pada periode ini</span>'}</td>
+            <td>${participant ? statusBadge(participant.status) : '—'}</td>
             <td class="nowrap">${latest ? esc(formatDateRange(latest)) : '—'}</td>
             <td><button class="btn btn-secondary btn-sm" type="button" data-employee-detail="${esc(employee.id)}">Detail</button></td>
           </tr>`;
-        }).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Pegawai tidak ditemukan</strong>Ubah kata kunci atau rentang bulan yang digunakan.</div></td></tr>'}
+        }).join('') : '<tr><td colspan="6"><div class="empty-state"><strong>Pegawai tidak ditemukan</strong>Ubah kata kunci atau rentang bulan yang digunakan.</div></td></tr>'}
       </tbody></table></div>
       <div class="training-period-note">Periode aktif: ${esc(periodLabel())}. Pelatihan yang melintasi batas bulan tetap dihitung apabila tanggalnya beririsan dengan periode.</div>
     </section>`;
@@ -232,7 +323,7 @@
   function trainingTable() {
     const rows = filteredTrainings();
     return `<section class="card training-card">
-      <div class="training-card-head"><div><h2>Data Pelatihan</h2><p>Satu pelatihan dicatat satu kali dan dapat memiliki beberapa peserta pegawai.</p></div><span class="card-subtitle">${rows.length} pelatihan</span></div>
+      <div class="training-card-head"><div><h2>Data Pelatihan</h2><p>Satu pelatihan dicatat satu kali dan memiliki status/catatan yang melekat pada masing-masing peserta.</p></div><span class="card-subtitle">${rows.length} pelatihan</span></div>
       <div class="training-table-wrap"><table class="data-table training-table"><thead><tr><th>Nama Pelatihan</th><th>Tanggal</th><th>Penyelenggara</th><th>Peserta</th><th>Aksi</th></tr></thead><tbody>
         ${rows.length ? rows.map((training) => `<tr>
           <td><button class="training-name-button" type="button" data-training-detail="${esc(training.id)}">${esc(training.name || 'Tanpa nama')}</button></td>
@@ -258,7 +349,7 @@
 
   function trainingView() {
     return `<div class="training-page">
-      <div class="training-head"><div><h1>Data Pelatihan</h1><p>Pencatatan dan arsip pelatihan yang telah diikuti oleh pegawai Pusat Data dan Informasi.</p></div><div class="training-head-actions"><a class="btn btn-secondary" href="pelatihan.html#pegawai">Data Pegawai</a><button class="btn btn-primary" type="button" data-action="add-training">+ Tambah Pelatihan</button></div></div>
+      <div class="training-head"><div><h1>Data Pelatihan</h1><p>Pencatatan dan arsip pelatihan pegawai dengan status, catatan, dan metadata dokumen per peserta.</p></div><div class="training-head-actions"><a class="btn btn-secondary" href="pelatihan.html#pegawai">Data Pegawai</a><button class="btn btn-primary" type="button" data-action="add-training">+ Tambah Pelatihan</button></div></div>
       ${filterCard()}
       ${identityNotice()}
       ${trainingMetrics()}
@@ -272,60 +363,116 @@
       .slice()
       .sort((a, b) => employeeOrder(a) - employeeOrder(b) || employeeName(a).localeCompare(employeeName(b), 'id'));
     return `<div class="training-drawer-backdrop" data-action="close-drawer"></div><aside class="training-drawer" role="dialog" aria-modal="true" aria-label="Detail pelatihan">
-      <div class="training-drawer-head"><div><h3>${esc(training.name || 'Pelatihan')}</h3><p>Detail arsip pelatihan dan daftar pegawai yang mengikuti.</p></div><button class="icon-btn" type="button" data-action="close-drawer" aria-label="Tutup">×</button></div>
+      <div class="training-drawer-head"><div><h3>${esc(training.name || 'Pelatihan')}</h3><p>Detail arsip pelatihan dan status masing-masing peserta.</p></div><button class="icon-btn" type="button" data-action="close-drawer" aria-label="Tutup">×</button></div>
       <div class="training-detail-meta">
         <div class="training-detail-box"><div class="training-detail-label">Tanggal</div><div class="training-detail-value">${esc(formatDateRange(training))}</div></div>
         <div class="training-detail-box"><div class="training-detail-label">Penyelenggara</div><div class="training-detail-value">${esc(training.organizer || '—')}</div></div>
       </div>
       <div class="training-list-title">Peserta (${participants.length})</div>
-      <div class="training-history-list">${participants.length ? participants.map((id) => `<div class="training-person-row"><strong>${esc(employeeName(id))}</strong></div>`).join('') : '<div class="training-participant-empty">Belum ada peserta tercatat.</div>'}</div>
+      <div class="training-history-list">${participants.length ? participants.map((id) => {
+        const participant = participantFor(training, id);
+        return `<button class="training-person-row training-person-button" type="button" data-participant-detail="${esc(id)}" data-participant-training="${esc(training.id)}"><span><strong>${esc(employeeName(id))}</strong>${participant.note ? `<small>${esc(participant.note)}</small>` : ''}</span>${statusBadge(participant.status)}</button>`;
+      }).join('') : '<div class="training-participant-empty">Belum ada peserta tercatat.</div>'}</div>
       <div class="training-modal-actions"><button class="btn btn-secondary" type="button" data-training-edit="${esc(training.id)}">Edit</button><button class="btn btn-danger" type="button" data-training-delete="${esc(training.id)}">Hapus</button></div>
     </aside>`;
   }
 
   function employeeDrawer(employeeId) {
-    const name = employeeName(employeeId) || 'Nama pegawai belum tersedia';
+    const identity = employeeIdentity(employeeId);
+    const name = identity.name || 'Nama pegawai belum tersedia';
     const history = employeeHistory(employeeId);
     return `<div class="training-drawer-backdrop" data-action="close-drawer"></div><aside class="training-drawer" role="dialog" aria-modal="true" aria-label="Riwayat pelatihan pegawai">
-      <div class="training-drawer-head"><div><h3>${esc(name)}</h3><p>Riwayat pelatihan pada ${esc(periodLabel())}.</p></div><button class="icon-btn" type="button" data-action="close-drawer" aria-label="Tutup">×</button></div>
+      <div class="training-drawer-head"><div><h3>${esc(name)}</h3><p>${identity.nip ? `NIP ${esc(identity.nip)} · ` : ''}Riwayat pelatihan pada ${esc(periodLabel())}.</p></div><button class="icon-btn" type="button" data-action="close-drawer" aria-label="Tutup">×</button></div>
       <div class="training-detail-meta">
         <div class="training-detail-box"><div class="training-detail-label">Jumlah Pelatihan</div><div class="training-detail-value">${history.length}</div></div>
         <div class="training-detail-box"><div class="training-detail-label">Pelatihan Terakhir</div><div class="training-detail-value">${history[0] ? esc(formatDateRange(history[0])) : '—'}</div></div>
       </div>
       <div class="training-list-title">Riwayat Pelatihan</div>
-      <div class="training-history-list">${history.length ? history.map((training) => `<div class="training-history-item"><strong>${esc(training.name)}</strong><span>${esc(formatDateRange(training))} · ${esc(training.organizer || '—')}</span></div>`).join('') : '<div class="training-participant-empty">Belum ada pelatihan pada periode ini.</div>'}</div>
+      <div class="training-history-list">${history.length ? history.map((training) => {
+        const participant = participantFor(training, employeeId);
+        return `<button class="training-history-item training-history-button" type="button" data-participant-detail="${esc(employeeId)}" data-participant-training="${esc(training.id)}"><span><strong>${esc(training.name)}</strong><small>${esc(formatDateRange(training))} · ${esc(training.organizer || '—')}</small></span>${statusBadge(participant.status)}</button>`;
+      }).join('') : '<div class="training-participant-empty">Belum ada pelatihan pada periode ini.</div>'}</div>
+    </aside>`;
+  }
+
+  function participantTrainingDrawer(training, employeeId) {
+    const identity = employeeIdentity(employeeId);
+    const participant = participantFor(training, employeeId);
+    const documents = participant.documents || [];
+    return `<div class="training-drawer-backdrop" data-action="close-drawer"></div><aside class="training-drawer" role="dialog" aria-modal="true" aria-label="Detail pelatihan pegawai">
+      <div class="training-drawer-head"><div><h3>${esc(training.name || 'Pelatihan')}</h3><p>${esc(identity.name || 'Pegawai')} · Detail relasi pegawai dan pelatihan.</p></div><button class="icon-btn" type="button" data-action="close-drawer" aria-label="Tutup">×</button></div>
+      <div class="training-detail-meta">
+        <div class="training-detail-box"><div class="training-detail-label">Penyelenggara</div><div class="training-detail-value">${esc(training.organizer || '—')}</div></div>
+        <div class="training-detail-box"><div class="training-detail-label">Periode</div><div class="training-detail-value">${esc(formatDateRange(training))}</div></div>
+        <div class="training-detail-box"><div class="training-detail-label">Status Peserta</div><div class="training-detail-value">${statusBadge(participant.status)}</div></div>
+        <div class="training-detail-box"><div class="training-detail-label">Pegawai</div><div class="training-detail-value">${esc(identity.name || '—')}${identity.nip ? `<span class="training-sub">NIP ${esc(identity.nip)}</span>` : ''}</div></div>
+      </div>
+      <div class="training-list-title">Catatan Peserta</div>
+      <div class="training-note-box">${participant.note ? esc(participant.note) : '<span>Belum ada catatan peserta.</span>'}</div>
+      <div class="training-document-head"><div><div class="training-list-title">Dokumen Pelatihan</div><p>Metadata dokumen melekat pada pegawai dan pelatihan. File fisik belum disimpan oleh modul ini.</p></div><button class="btn btn-secondary btn-sm" type="button" data-add-training-document="${esc(training.id)}" data-employee-id="${esc(employeeId)}">+ Tambah Dokumen</button></div>
+      <div class="training-history-list">${documents.length ? documents.map((doc) => `<div class="training-document-row"><div><strong>${esc(doc.name || doc.type || 'Dokumen')}</strong><span>${esc(doc.type || 'Dokumen Lainnya')}${doc.number ? ` · No. ${esc(doc.number)}` : ''}${doc.note ? `<br>${esc(doc.note)}` : ''}</span></div><div class="training-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-edit-training-document="${esc(doc.id)}" data-training-id="${esc(training.id)}" data-employee-id="${esc(employeeId)}">Edit</button><button class="btn btn-danger btn-sm" type="button" data-delete-training-document="${esc(doc.id)}" data-training-id="${esc(training.id)}" data-employee-id="${esc(employeeId)}">Hapus</button></div></div>`).join('') : '<div class="training-participant-empty">Belum ada metadata dokumen pelatihan.</div>'}</div>
+      <div class="training-modal-actions"><button class="btn btn-secondary" type="button" data-training-edit="${esc(training.id)}">Edit Status/Catatan</button></div>
     </aside>`;
   }
 
   function trainingModal() {
     if (!state.modal) return '';
     const training = state.modal.training || {};
-    const selected = state.modal.selected || new Set();
+    const participants = state.modal.participants || new Map();
     const employees = activeEmployees();
-    return `<div class="training-modal-backdrop" data-action="close-modal"><div class="training-modal" role="dialog" aria-modal="true" aria-label="${training.id ? 'Edit' : 'Tambah'} pelatihan" data-modal-panel>
-      <div class="training-modal-head"><div><h3>${training.id ? 'Edit Data Pelatihan' : 'Tambah Data Pelatihan'}</h3><p>Isi informasi utama pelatihan dan pilih satu atau beberapa pegawai sebagai peserta.</p></div><button class="icon-btn" type="button" data-action="close-modal" aria-label="Tutup">×</button></div>
+    return `<div class="training-modal-backdrop" data-action="close-modal"><div class="training-modal training-modal-wide" role="dialog" aria-modal="true" aria-label="${training.id ? 'Edit' : 'Tambah'} pelatihan" data-modal-panel>
+      <div class="training-modal-head"><div><h3>${training.id ? 'Edit Data Pelatihan' : 'Tambah Data Pelatihan'}</h3><p>Isi informasi pelatihan, pilih peserta, lalu tetapkan status dan catatan yang spesifik untuk masing-masing peserta.</p></div><button class="icon-btn" type="button" data-action="close-modal" aria-label="Tutup">×</button></div>
       <div class="training-modal-grid">
         <div class="field span-2"><label for="training-name">Nama Pelatihan</label><input id="training-name" type="text" value="${esc(training.name || '')}" autocomplete="off" required></div>
         <div class="field span-2"><label for="training-organizer">Penyelenggara</label><input id="training-organizer" type="text" value="${esc(training.organizer || '')}" autocomplete="off" required></div>
         <div class="field"><label for="training-start-date">Tanggal Mulai</label><input id="training-start-date" type="date" value="${esc(training.startDate || '')}" required></div>
-        <div class="field"><label for="training-end-date">Tanggal Selesai <span style="text-transform:none;font-weight:520;color:var(--muted)">(opsional)</span></label><input id="training-end-date" type="date" value="${esc(training.endDate || '')}"></div>
+        <div class="field"><label for="training-end-date">Tanggal Selesai <span class="training-optional">(opsional)</span></label><input id="training-end-date" type="date" value="${esc(training.endDate || '')}"></div>
       </div>
       <div class="training-participants">
-        <div class="training-participant-head"><strong>Peserta Pelatihan</strong><span><span data-selected-count>${selected.size}</span> pegawai dipilih</span></div>
+        <div class="training-participant-head"><strong>Peserta Pelatihan</strong><span><span data-selected-count>${participants.size}</span> pegawai dipilih</span></div>
         <div class="training-participant-search"><div class="search"><input id="participant-search" type="search" placeholder="Cari nama pegawai..." autocomplete="off"></div></div>
-        <div class="training-participant-list" data-participant-list>
-          ${employees.length ? employees.map((employee) => `<label class="training-participant-option" data-participant-row data-search-name="${esc(employee.name.toLowerCase())}"><input type="checkbox" data-participant-id="${esc(employee.id)}" ${selected.has(employee.id) ? 'checked' : ''}><strong>${esc(employee.name)}</strong><span class="${selected.has(employee.id) ? 'training-selected' : ''}" data-participant-status>${selected.has(employee.id) ? 'Dipilih' : ''}</span></label>`).join('') : '<div class="training-participant-empty">Master pegawai belum tersedia.</div>'}
+        <div class="training-participant-list training-participant-list-rich" data-participant-list>
+          ${employees.length ? employees.map((employee) => {
+            const participant = participants.get(employee.id);
+            const selected = Boolean(participant);
+            return `<div class="training-participant-option training-participant-rich" data-participant-row data-search-name="${esc(employee.name.toLowerCase())}">
+              <label class="training-participant-identity"><input type="checkbox" data-participant-id="${esc(employee.id)}" ${selected ? 'checked' : ''}><span><strong>${esc(employee.name)}</strong><small>${employee.nip ? `NIP ${esc(employee.nip)}` : 'NIP belum tersedia'}</small></span></label>
+              <div class="training-participant-fields ${selected ? '' : 'hidden'}" data-participant-fields="${esc(employee.id)}">
+                <div class="field"><label>Status</label><select data-participant-status-select="${esc(employee.id)}">${TRAINING_STATUSES.map((status) => `<option value="${esc(status)}" ${(participant?.status || 'Diusulkan') === status ? 'selected' : ''}>${esc(status)}</option>`).join('')}</select></div>
+                <div class="field"><label>Catatan</label><input type="text" data-participant-note="${esc(employee.id)}" value="${esc(participant?.note || '')}" placeholder="Opsional"></div>
+              </div>
+            </div>`;
+          }).join('') : '<div class="training-participant-empty">Master pegawai belum tersedia.</div>'}
         </div>
       </div>
       <div class="training-modal-actions"><button class="btn btn-secondary" type="button" data-action="close-modal">Batal</button><button class="btn btn-primary" type="button" data-action="save-training">Simpan</button></div>
     </div></div>`;
   }
 
+  function trainingDocumentModal() {
+    if (!state.documentModal) return '';
+    const data = state.documentModal.document || {};
+    return `<div class="training-modal-backdrop" data-action="close-document-modal"><div class="training-modal training-document-modal" role="dialog" aria-modal="true" data-document-modal-panel>
+      <div class="training-modal-head"><div><h3>${data.id ? 'Edit Metadata Dokumen' : 'Tambah Metadata Dokumen'}</h3><p>Metadata saja. Modul Pelatihan belum menyimpan file binary/attachment.</p></div><button class="icon-btn" type="button" data-action="close-document-modal">×</button></div>
+      <div class="training-modal-grid">
+        <div class="field"><label for="training-doc-type">Jenis Dokumen</label><select id="training-doc-type">${DOCUMENT_TYPES.map((type) => `<option value="${esc(type)}" ${(data.type || 'Sertifikat') === type ? 'selected' : ''}>${esc(type)}</option>`).join('')}</select></div>
+        <div class="field"><label for="training-doc-number">Nomor Dokumen</label><input id="training-doc-number" type="text" value="${esc(data.number || '')}" placeholder="Opsional"></div>
+        <div class="field span-2"><label for="training-doc-name">Nama Dokumen</label><input id="training-doc-name" type="text" value="${esc(data.name || '')}" placeholder="Contoh: Sertifikat Pelatihan Data"></div>
+        <div class="field span-2"><label for="training-doc-note">Keterangan</label><textarea id="training-doc-note" rows="3" placeholder="Opsional">${esc(data.note || '')}</textarea></div>
+      </div>
+      <div class="training-modal-actions"><button class="btn btn-secondary" type="button" data-action="close-document-modal">Batal</button><button class="btn btn-primary" type="button" data-action="save-training-document">Simpan</button></div>
+    </div></div>`;
+  }
+
   function overlayMarkup() {
-    const drawer = state.drawer?.type === 'training'
-      ? trainingDrawer(state.trainings.find((item) => item.id === state.drawer.id) || {})
-      : state.drawer?.type === 'employee' ? employeeDrawer(state.drawer.id) : '';
-    return `${drawer}${trainingModal()}${state.toast ? `<div class="training-toast">${esc(state.toast)}</div>` : ''}`;
+    let drawer = '';
+    if (state.drawer?.type === 'training') drawer = trainingDrawer(state.trainings.find((item) => item.id === state.drawer.id) || {});
+    else if (state.drawer?.type === 'employee') drawer = employeeDrawer(state.drawer.id);
+    else if (state.drawer?.type === 'participant') {
+      const training = state.trainings.find((item) => item.id === state.drawer.trainingId) || {};
+      drawer = participantTrainingDrawer(training, state.drawer.employeeId);
+    }
+    return `${drawer}${trainingModal()}${trainingDocumentModal()}${state.toast ? `<div class="training-toast">${esc(state.toast)}</div>` : ''}`;
   }
 
   function render() {
@@ -374,18 +521,7 @@
       ]);
       state.employees = masterSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       state.directory = new Map(directorySnap.docs.map((doc) => [doc.id, { id: doc.id, ...doc.data() }]));
-      state.trainings = trainingSnap.docs.map((doc) => {
-        const data = doc.data() || {};
-        return {
-          ...data,
-          id: doc.id,
-          name: String(data.name || ''),
-          organizer: String(data.organizer || ''),
-          startDate: String(data.startDate || ''),
-          endDate: String(data.endDate || ''),
-          participantIds: [...new Set((Array.isArray(data.participantIds) ? data.participantIds : []).map(String).filter(Boolean))]
-        };
-      });
+      state.trainings = trainingSnap.docs.map((doc) => normalizeTraining(doc.data(), doc.id));
     } catch (error) {
       state.error = error.message || String(error);
     } finally {
@@ -396,7 +532,7 @@
 
   function openAddModal() {
     state.drawer = null;
-    state.modal = { training: {}, selected: new Set() };
+    state.modal = { training: {}, participants: new Map() };
     render();
   }
 
@@ -404,7 +540,10 @@
     const training = state.trainings.find((item) => item.id === id);
     if (!training) return;
     state.drawer = null;
-    state.modal = { training: { ...training }, selected: new Set(training.participantIds || []) };
+    state.modal = {
+      training: { ...training },
+      participants: new Map((training.participants || []).map((item) => [item.employeeId, { ...item, documents: (item.documents || []).map((doc) => ({ ...doc })) }]))
+    };
     render();
   }
 
@@ -424,7 +563,13 @@
     const organizer = String(document.getElementById('training-organizer')?.value || '').trim();
     const startDate = String(document.getElementById('training-start-date')?.value || '').trim();
     const endDate = String(document.getElementById('training-end-date')?.value || '').trim();
-    const participantIds = [...(state.modal.selected || new Set())];
+    const participantIds = [...state.modal.participants.keys()];
+    const participants = participantIds.map((employeeId) => {
+      const existing = state.modal.participants.get(employeeId) || normalizeParticipant({}, employeeId);
+      const status = String(document.querySelector(`[data-participant-status-select="${CSS.escape(employeeId)}"]`)?.value || existing.status || 'Diusulkan');
+      const note = String(document.querySelector(`[data-participant-note="${CSS.escape(employeeId)}"]`)?.value || '').trim();
+      return normalizeParticipant({ ...existing, employeeId, status, note }, employeeId);
+    });
 
     if (!name || !organizer || !startDate) {
       alert('Nama pelatihan, penyelenggara, dan tanggal mulai wajib diisi.');
@@ -450,7 +595,8 @@
         startDate,
         endDate: endDate || '',
         participantIds,
-        schemaVersion: 1,
+        participants,
+        schemaVersion: 2,
         updatedAt: serverTimestamp(),
         updatedBy: user()?.email || ''
       };
@@ -473,7 +619,7 @@
   async function deleteTraining(id) {
     const training = state.trainings.find((item) => item.id === id);
     if (!training) return;
-    const ok = window.confirm(`Hapus arsip pelatihan "${training.name}"? Data peserta pada pelatihan ini juga akan terhapus dari riwayat.`);
+    const ok = window.confirm(`Hapus arsip pelatihan "${training.name}"? Data status, catatan, dan metadata dokumen peserta pada pelatihan ini juga akan terhapus.`);
     if (!ok) return;
     try {
       await db().collection('trainings').doc(id).delete();
@@ -484,6 +630,82 @@
       showToast('Data pelatihan berhasil dihapus.');
     } catch (error) {
       alert(`Data gagal dihapus: ${error.message || error}`);
+    }
+  }
+
+  function openDocumentModal(trainingId, employeeId, documentId) {
+    const training = state.trainings.find((item) => item.id === trainingId);
+    if (!training) return;
+    const participant = participantFor(training, employeeId);
+    const document = documentId ? (participant.documents || []).find((item) => item.id === documentId) : null;
+    state.documentModal = { trainingId, employeeId, document: document ? { ...document } : {} };
+    render();
+  }
+
+  async function saveTrainingDocument(button) {
+    const ctx = state.documentModal;
+    if (!ctx) return;
+    const training = state.trainings.find((item) => item.id === ctx.trainingId);
+    if (!training) return;
+    const type = String(document.getElementById('training-doc-type')?.value || 'Dokumen Lainnya');
+    const name = String(document.getElementById('training-doc-name')?.value || '').trim();
+    const number = String(document.getElementById('training-doc-number')?.value || '').trim();
+    const note = String(document.getElementById('training-doc-note')?.value || '').trim();
+    if (!name) {
+      alert('Nama dokumen wajib diisi.');
+      return;
+    }
+
+    const participants = (training.participants || []).map((item) => ({ ...item, documents: (item.documents || []).map((doc) => ({ ...doc })) }));
+    const index = participants.findIndex((item) => item.employeeId === ctx.employeeId);
+    if (index < 0) return;
+    const docs = participants[index].documents || [];
+    const existingId = String(ctx.document?.id || '');
+    const id = existingId || `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const payload = { id, type, name, number, note };
+    const docIndex = docs.findIndex((item) => item.id === id);
+    if (docIndex >= 0) docs[docIndex] = payload;
+    else docs.push(payload);
+    participants[index].documents = docs;
+
+    button.disabled = true;
+    try {
+      await db().collection('trainings').doc(training.id).set({
+        participants,
+        participantIds: training.participantIds || [],
+        schemaVersion: 2,
+        updatedAt: serverTimestamp(),
+        updatedBy: user()?.email || ''
+      }, { merge: true });
+      await audit(existingId ? 'UPDATE_TRAINING_DOCUMENT' : 'CREATE_TRAINING_DOCUMENT', `trainings/${training.id}`, `${employeeName(ctx.employeeId)} · ${name}`);
+      state.documentModal = null;
+      await loadData();
+      state.drawer = { type: 'participant', trainingId: training.id, employeeId: ctx.employeeId };
+      showToast(existingId ? 'Metadata dokumen diperbarui.' : 'Metadata dokumen ditambahkan.');
+    } catch (error) {
+      button.disabled = false;
+      alert(`Metadata dokumen gagal disimpan: ${error.message || error}`);
+    }
+  }
+
+  async function deleteTrainingDocument(trainingId, employeeId, documentId) {
+    const training = state.trainings.find((item) => item.id === trainingId);
+    if (!training) return;
+    const participant = participantFor(training, employeeId);
+    const target = (participant.documents || []).find((item) => item.id === documentId);
+    if (!target) return;
+    if (!window.confirm(`Hapus metadata dokumen "${target.name || target.type}"?`)) return;
+    try {
+      const participants = (training.participants || []).map((item) => item.employeeId === employeeId
+        ? { ...item, documents: (item.documents || []).filter((doc) => doc.id !== documentId) }
+        : { ...item, documents: (item.documents || []).map((doc) => ({ ...doc })) });
+      await db().collection('trainings').doc(trainingId).set({ participants, schemaVersion: 2, updatedAt: serverTimestamp(), updatedBy: user()?.email || '' }, { merge: true });
+      await audit('DELETE_TRAINING_DOCUMENT', `trainings/${trainingId}`, `${employeeName(employeeId)} · ${target.name || target.type}`);
+      await loadData();
+      state.drawer = { type: 'participant', trainingId, employeeId };
+      showToast('Metadata dokumen dihapus.');
+    } catch (error) {
+      alert(`Metadata dokumen gagal dihapus: ${error.message || error}`);
     }
   }
 
@@ -510,6 +732,13 @@
       app.querySelectorAll('[data-participant-row]').forEach((row) => {
         row.style.display = !q || String(row.dataset.searchName || '').includes(q) ? '' : 'none';
       });
+      return;
+    }
+    const noteEl = event.target?.closest?.('[data-participant-note]');
+    if (noteEl && state.modal) {
+      const id = String(noteEl.dataset.participantNote || '');
+      const participant = state.modal.participants.get(id);
+      if (participant) participant.note = String(noteEl.value || '');
     }
   });
 
@@ -520,15 +749,21 @@
     }
     if (event.target?.matches?.('[data-participant-id]') && state.modal) {
       const id = String(event.target.dataset.participantId || '');
-      if (event.target.checked) state.modal.selected.add(id);
-      else state.modal.selected.delete(id);
-      const count = app.querySelector('[data-selected-count]');
-      if (count) count.textContent = String(state.modal.selected.size);
-      const status = event.target.closest('[data-participant-row]')?.querySelector('[data-participant-status]');
-      if (status) {
-        status.textContent = event.target.checked ? 'Dipilih' : '';
-        status.classList.toggle('training-selected', event.target.checked);
+      if (event.target.checked) {
+        if (!state.modal.participants.has(id)) state.modal.participants.set(id, normalizeParticipant({}, id));
+      } else {
+        state.modal.participants.delete(id);
       }
+      const count = app.querySelector('[data-selected-count]');
+      if (count) count.textContent = String(state.modal.participants.size);
+      const fields = app.querySelector(`[data-participant-fields="${CSS.escape(id)}"]`);
+      fields?.classList.toggle('hidden', !event.target.checked);
+      return;
+    }
+    if (event.target?.matches?.('[data-participant-status-select]') && state.modal) {
+      const id = String(event.target.dataset.participantStatusSelect || '');
+      const participant = state.modal.participants.get(id);
+      if (participant) participant.status = String(event.target.value || 'Diusulkan');
     }
   });
 
@@ -536,12 +771,8 @@
     const actionEl = event.target.closest?.('[data-action]');
     const action = actionEl?.dataset.action;
 
-    // The modal backdrop wraps the modal panel. Without this guard, clicking
-    // any input inside the modal finds the backdrop via closest('[data-action]')
-    // and is incorrectly interpreted as a close-modal action.
-    if (action === 'close-modal' && actionEl?.classList.contains('training-modal-backdrop') && event.target !== actionEl) {
-      return;
-    }
+    if (action === 'close-modal' && actionEl?.classList.contains('training-modal-backdrop') && event.target !== actionEl) return;
+    if (action === 'close-document-modal' && actionEl?.classList.contains('training-modal-backdrop') && event.target !== actionEl) return;
     if (action === 'reset-filter') {
       state.filters = { search: '', startMonth: `${now.getFullYear()}-01`, endMonth: currentMonth };
       render();
@@ -549,8 +780,10 @@
     }
     if (action === 'add-training') { openAddModal(); return; }
     if (action === 'close-modal') { state.modal = null; render(); return; }
+    if (action === 'close-document-modal') { state.documentModal = null; render(); return; }
     if (action === 'close-drawer') { state.drawer = null; render(); return; }
     if (action === 'save-training') { saveTraining(event.target.closest('[data-action]')); return; }
+    if (action === 'save-training-document') { saveTrainingDocument(event.target.closest('[data-action]')); return; }
 
     const employeeDetail = event.target.closest?.('[data-employee-detail]')?.dataset.employeeDetail;
     if (employeeDetail) { state.drawer = { type: 'employee', id: employeeDetail }; render(); return; }
@@ -558,11 +791,27 @@
     const trainingDetail = event.target.closest?.('[data-training-detail]')?.dataset.trainingDetail;
     if (trainingDetail) { state.drawer = { type: 'training', id: trainingDetail }; render(); return; }
 
+    const participantDetailEl = event.target.closest?.('[data-participant-detail]');
+    if (participantDetailEl) {
+      state.drawer = { type: 'participant', trainingId: participantDetailEl.dataset.participantTraining, employeeId: participantDetailEl.dataset.participantDetail };
+      render();
+      return;
+    }
+
+    const addDoc = event.target.closest?.('[data-add-training-document]');
+    if (addDoc) { openDocumentModal(addDoc.dataset.addTrainingDocument, addDoc.dataset.employeeId, ''); return; }
+
+    const editDoc = event.target.closest?.('[data-edit-training-document]');
+    if (editDoc) { openDocumentModal(editDoc.dataset.trainingId, editDoc.dataset.employeeId, editDoc.dataset.editTrainingDocument); return; }
+
+    const deleteDoc = event.target.closest?.('[data-delete-training-document]');
+    if (deleteDoc) { deleteTrainingDocument(deleteDoc.dataset.trainingId, deleteDoc.dataset.employeeId, deleteDoc.dataset.deleteTrainingDocument); return; }
+
     const trainingEdit = event.target.closest?.('[data-training-edit]')?.dataset.trainingEdit;
     if (trainingEdit) { openEditModal(trainingEdit); return; }
 
     const trainingDelete = event.target.closest?.('[data-training-delete]')?.dataset.trainingDelete;
-    if (trainingDelete) { deleteTraining(trainingDelete); }
+    if (trainingDelete) deleteTraining(trainingDelete);
   });
 
   window.addEventListener('hashchange', () => {
@@ -570,6 +819,7 @@
     state.filters.search = '';
     state.drawer = null;
     state.modal = null;
+    state.documentModal = null;
     render();
   });
 

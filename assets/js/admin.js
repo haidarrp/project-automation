@@ -14,6 +14,8 @@
     settings: { lembur: {}, tukin: {} },
     audits: [],
     trainings: [],
+    leaveRecords: [],
+    leaveBalances: [],
     modal: null,
     importOpen: false,
     importFile: null
@@ -95,13 +97,15 @@
     state.error = '';
     render();
     try {
-      const [masterSnap, directorySnap, lemburSnap, tukinSnap, auditSnap, trainingSnap] = await Promise.all([
+      const [masterSnap, directorySnap, lemburSnap, tukinSnap, auditSnap, trainingSnap, leaveSnap, balanceSnap] = await Promise.all([
         db().collection('masterEmployees').get(),
         db().collection('masterDirectory').get(),
         db().collection('appSettings').doc('lembur').get(),
         db().collection('appSettings').doc('tukin').get(),
         db().collection('adminAudit').orderBy('createdAt', 'desc').limit(20).get(),
-        db().collection('trainings').get()
+        db().collection('trainings').get(),
+        db().collection('leaveRecords').get(),
+        db().collection('leaveBalances').get()
       ]);
       state.employees = masterSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       state.directory = new Map(directorySnap.docs.map((doc) => [doc.id, { id: doc.id, ...doc.data() }]));
@@ -111,6 +115,8 @@
       };
       state.audits = auditSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       state.trainings = trainingSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      state.leaveRecords = leaveSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      state.leaveBalances = balanceSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       state.employees.sort((a, b) => Number(a.order || 9999) - Number(b.order || 9999) || docLabel(a).title.localeCompare(docLabel(b).title, 'id'));
     } catch (error) {
       state.error = error.message || String(error);
@@ -216,12 +222,13 @@
     const title = existing ? 'Edit Master Pegawai' : 'Tambah Master Pegawai';
     const help = existing && !state.directory.has(existing.id)
       ? 'Lengkapi Nama dan NIP agar identitas pegawai dapat ditampilkan dengan benar pada seluruh menu aplikasi.'
-      : 'Nama dan NIP pada bagian ini digunakan sebagai identitas tampilan pada seluruh menu aplikasi.';
+      : 'Nama, NIP, dan Unit/Bidang/Bagian pada bagian ini digunakan sebagai identitas tampilan pada seluruh menu aplikasi.';
     return `<div class="admin-modal-backdrop" data-action="close-modal"><div class="admin-modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
       <div class="admin-modal-head"><div><h3>${title}</h3><p>${esc(help)}</p></div><button class="icon-btn" type="button" data-action="close-modal">×</button></div>
       <div class="admin-form">
         ${field('Nama Pegawai', 'm-name', privateData.name || '', { span2: true })}
         ${field('NIP', 'm-nip', privateData.nip || '', { span2: true, maxlength: 30 })}
+        ${field('Unit/Bidang/Bagian', 'm-unit', privateData.unit || '', { span2: true })}
         ${field('Kode Satker Lembur', 'm-lembur-code', existing?.lemburSatkerCode ?? '', { type: 'number', min: 0 })}
         ${field('Kode Satker Tukin', 'm-satker', existing?.satker || window.TUKIN_CONFIG.SATKER || '')}
         ${field('Anak Satker', 'm-anak', existing?.anakSatker || '', { maxlength: 2 })}
@@ -282,6 +289,7 @@
       const existing = state.modal?.id ? state.employees.find((x) => x.id === state.modal.id) : null;
       const name = String(document.getElementById('m-name')?.value || '').trim();
       const nip = String(document.getElementById('m-nip')?.value || '').replace(/\D/g, '');
+      const unit = String(document.getElementById('m-unit')?.value || '').trim();
       const hashes = await window.MasterDataService.hashIdentity({ name, nip });
       let id = existing?.id || hashes.nipHash || hashes.nameHash;
       if (!id) throw new Error('Isi minimal Nama Pegawai atau NIP.');
@@ -316,6 +324,7 @@
         batch.set(db().collection('masterDirectory').doc(id), {
           name,
           nip,
+          unit,
           updatedAt: serverTimestamp(),
           updatedBy: user()?.email || ''
         }, { merge: true });
@@ -422,6 +431,8 @@
         Object.entries(payload.masterDirectory).forEach(([id, item]) => writes.push({ type: 'directory', id, item }));
       }
       if (Array.isArray(payload.trainings)) payload.trainings.forEach((item) => writes.push({ type: 'training', item }));
+      if (Array.isArray(payload.leaveRecords)) payload.leaveRecords.forEach((item) => writes.push({ type: 'leave', item }));
+      if (Array.isArray(payload.leaveBalances)) payload.leaveBalances.forEach((item) => writes.push({ type: 'leaveBalance', item }));
       if (payload.appSettings?.lembur) writes.push({ type: 'setting', id: 'lembur', item: payload.appSettings.lembur });
       if (payload.appSettings?.tukin) writes.push({ type: 'setting', id: 'tukin', item: payload.appSettings.tukin });
 
@@ -445,22 +456,45 @@
             batch.set(db().collection('masterDirectory').doc(String(entry.id)), {
               name: String(entry.item?.name || ''),
               nip: String(entry.item?.nip || '').replace(/\D/g, ''),
+              unit: String(entry.item?.unit || ''),
               updatedAt: serverTimestamp(), updatedBy: user()?.email || ''
             }, { merge: true });
           } else if (entry.type === 'training') {
             const item = entry.item || {};
             const id = String(item.id || '').trim();
             if (!id) return;
+            const participants = Array.isArray(item.participants) ? item.participants.map((row) => ({
+              employeeId: String(row?.employeeId || ''),
+              status: String(row?.status || 'Diusulkan'),
+              note: String(row?.note || ''),
+              documents: Array.isArray(row?.documents) ? row.documents : []
+            })).filter((row) => row.employeeId) : [];
+            const participantIds = [...new Set([...(Array.isArray(item.participantIds) ? item.participantIds : []), ...participants.map((row) => row.employeeId)].map(String).filter(Boolean))];
             batch.set(db().collection('trainings').doc(id), {
               name: String(item.name || ''),
               organizer: String(item.organizer || ''),
               startDate: String(item.startDate || ''),
               endDate: String(item.endDate || ''),
-              participantIds: [...new Set((Array.isArray(item.participantIds) ? item.participantIds : []).map(String).filter(Boolean))],
-              schemaVersion: 1,
+              participantIds,
+              participants,
+              schemaVersion: participants.length ? 2 : 1,
               updatedAt: serverTimestamp(),
               updatedBy: user()?.email || ''
             }, { merge: true });
+          } else if (entry.type === 'leave') {
+            const item = entry.item || {};
+            const id = String(item.id || '').trim();
+            if (!id) return;
+            const clean = { ...item };
+            delete clean.id;
+            batch.set(db().collection('leaveRecords').doc(id), { ...clean, schemaVersion: 1, updatedAt: serverTimestamp(), updatedBy: user()?.email || '' }, { merge: true });
+          } else if (entry.type === 'leaveBalance') {
+            const item = entry.item || {};
+            const id = String(item.id || '').trim();
+            if (!id) return;
+            const clean = { ...item };
+            delete clean.id;
+            batch.set(db().collection('leaveBalances').doc(id), { ...clean, schemaVersion: 1, updatedAt: serverTimestamp(), updatedBy: user()?.email || '' }, { merge: true });
           } else {
             batch.set(db().collection('appSettings').doc(entry.id), { ...entry.item, schemaVersion: 3, updatedAt: serverTimestamp(), updatedBy: user()?.email || '' }, { merge: true });
           }
@@ -483,10 +517,12 @@
     try {
       const payload = {
         exportedAt: new Date().toISOString(),
-        schemaVersion: 3,
+        schemaVersion: 4,
         masterEmployees: state.employees.map((item) => ({ ...item, updatedAt: undefined })),
-        masterDirectory: Object.fromEntries([...state.directory.entries()].map(([id, value]) => [id, { name: value.name || '', nip: value.nip || '' }])),
-        trainings: state.trainings.map((item) => ({ id: item.id, name: item.name || '', organizer: item.organizer || '', startDate: item.startDate || '', endDate: item.endDate || '', participantIds: Array.isArray(item.participantIds) ? item.participantIds : [] })),
+        masterDirectory: Object.fromEntries([...state.directory.entries()].map(([id, value]) => [id, { name: value.name || '', nip: value.nip || '', unit: value.unit || '' }])),
+        trainings: state.trainings.map((item) => ({ id: item.id, name: item.name || '', organizer: item.organizer || '', startDate: item.startDate || '', endDate: item.endDate || '', participantIds: Array.isArray(item.participantIds) ? item.participantIds : [], participants: Array.isArray(item.participants) ? item.participants : [] })),
+        leaveRecords: state.leaveRecords.map((item) => ({ ...item, updatedAt: undefined, createdAt: undefined })),
+        leaveBalances: state.leaveBalances.map((item) => ({ ...item, updatedAt: undefined, createdAt: undefined })),
         appSettings: { lembur: state.settings.lembur || {}, tukin: state.settings.tukin || {} }
       };
       const replacer = (key, value) => {

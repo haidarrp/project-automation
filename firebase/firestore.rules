@@ -134,7 +134,7 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
-    // Direktori plaintext (Nama/NIP) hanya untuk tampilan dan pengelolaan oleh admin.
+    // Direktori plaintext (Nama/NIP/Unit) hanya untuk tampilan dan pengelolaan oleh admin.
     match /masterDirectory/{masterId} {
       allow read, create, update, delete: if isAdmin();
     }
@@ -147,6 +147,16 @@ service cloud.firestore {
 
     // Arsip pelatihan bersifat internal Pusdatin dan dikelola oleh administrator aplikasi.
     match /trainings/{trainingId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    // Pencatatan cuti internal TU. Modul ini bukan workflow persetujuan.
+    match /leaveRecords/{leaveId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    // Saldo Cuti Tahunan disimpan terpisah per pegawai per tahun.
+    match /leaveBalances/{balanceId} {
       allow read, create, update, delete: if isAdmin();
     }
 

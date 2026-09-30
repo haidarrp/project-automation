@@ -6,6 +6,7 @@
     tukin: '<path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
     overtime: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
     training: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 5.5v16M8 7h8M8 11h6"/>',
+    leave: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/><path d="m9 15 2 2 4-4"/>',
     users: '<circle cx="9" cy="8" r="3"/><path d="M3.8 19c.7-3 2.4-4.5 5.2-4.5S13.5 16 14.2 19"/><circle cx="17" cy="9" r="2.2"/><path d="M15.7 14.8c2.6-.1 4.1 1.3 4.5 4.2"/>',
     history: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>',
     process: '<path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M5 18v3h14v-3"/>',
@@ -37,8 +38,21 @@
       icon: 'training',
       file: 'pelatihan.html',
       items: [
-        { view: 'pegawai', label: 'Data Pegawai', icon: 'users' },
-        { view: 'pelatihan', label: 'Data Pelatihan', icon: 'training' }
+        { view: 'pegawai', label: 'Data Pegawai' },
+        { view: 'pelatihan', label: 'Data Pelatihan' }
+      ]
+    },
+    leave: {
+      label: 'Cuti',
+      icon: 'leave',
+      file: 'cuti.html',
+      items: [
+        { view: 'dashboard', label: 'Dashboard' },
+        { view: 'data', label: 'Data Cuti' },
+        { view: 'kalender', label: 'Kalender' },
+        { view: 'pegawai', label: 'Data Pegawai' },
+        { view: 'saldo', label: 'Saldo Cuti' },
+        { view: 'laporan', label: 'Laporan' }
       ]
     }
   });
@@ -88,12 +102,14 @@
       ? `<a class="nav-button nav-admin ${activeModule === 'admin' ? 'active' : ''}" href="admin.html"><span class="nav-icon">${icon('admin')}</span><span class="nav-label">Administrasi</span></a>`
       : '';
     const trainingGroup = isAdmin ? moduleGroup('training', activeModule, activeView) : '';
+    const leaveGroup = isAdmin ? moduleGroup('leave', activeModule, activeView) : '';
     return `<nav class="nav nav-modules" aria-label="Navigasi utama">
       <a class="nav-button nav-home ${activeModule === 'dashboard' ? 'active' : ''}" href="index.html"><span class="nav-icon">${icon('home')}</span><span class="nav-label">Dashboard</span></a>
       <div class="nav-groups" role="group" aria-label="Modul">
         ${moduleGroup('tukin', activeModule, activeView)}
         ${moduleGroup('lembur', activeModule, activeView)}
         ${trainingGroup}
+        ${leaveGroup}
       </div>
       ${adminLink}
     </nav>`;
@@ -103,6 +119,7 @@
     if (module === 'dashboard') return '<strong>Generator Dokumen</strong><span>/ Dashboard</span>';
     if (module === 'admin') return '<strong>Generator Dokumen</strong><span>/ Administrasi / Master Data</span>';
     if (module === 'training') return `<strong>Pusdatin PKP</strong><span>/ Pelatihan Pegawai / ${viewLabel || ''}</span>`;
+    if (module === 'leave') return `<strong>Pusdatin PKP</strong><span>/ Cuti / ${viewLabel || ''}</span>`;
     const moduleLabel = module === 'tukin' ? 'Tunjangan Kinerja' : 'Lembur';
     return `<strong>Generator Dokumen</strong><span>/ ${moduleLabel} / ${viewLabel || ''}</span>`;
   }
