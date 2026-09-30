@@ -10,24 +10,13 @@
     return !value || /^REPLACE_WITH_/i.test(String(value));
   }
 
-  function getDiagnostics() {
-    return {
-      configLoaded: Boolean(window.MICROSOFT_CONFIG),
-      tenantIdPresent: !placeholder(cfg.tenantId),
-      clientIdPresent: !placeholder(cfg.clientId),
-      shareUrlPresent: Boolean(String(cfg.shareUrl || '').trim()),
-      msalLoaded: Boolean(window.msal?.PublicClientApplication)
-    };
-  }
-
-  function hasConfig() {
-    const d = getDiagnostics();
-    return Boolean(d.configLoaded && d.tenantIdPresent && d.clientIdPresent && d.shareUrlPresent);
-  }
-
   function isConfigured() {
-    const d = getDiagnostics();
-    return Boolean(hasConfig() && d.msalLoaded);
+    return Boolean(
+      !placeholder(cfg.tenantId) &&
+      !placeholder(cfg.clientId) &&
+      cfg.shareUrl &&
+      window.msal?.PublicClientApplication
+    );
   }
 
   function redirectUri() {
@@ -63,11 +52,7 @@
   async function initialize() {
     if (initialized) return true;
     if (initializationPromise) return initializationPromise;
-    const d = getDiagnostics();
-    if (!hasConfig()) return false;
-    if (!d.msalLoaded) {
-      throw new Error('Library Microsoft Authentication (MSAL) tidak termuat. Pastikan assets/vendor/msal-browser.bundle.js tersedia. Jalankan npm install lalu npm run build, atau gunakan deployment GitHub Actions yang menjalankan proses build.');
-    }
+    if (!isConfigured()) return false;
 
     initializationPromise = (async () => {
       instance = new window.msal.PublicClientApplication({
@@ -168,12 +153,8 @@
 
   function getStatus() {
     const account = instance?.getActiveAccount?.() || null;
-    const diagnostics = getDiagnostics();
     return {
-      configured: hasConfig(),
-      ready: isConfigured(),
-      libraryLoaded: diagnostics.msalLoaded,
-      diagnostics,
+      configured: isConfigured(),
       initialized,
       connected: Boolean(account),
       email: accountEmail(account),
@@ -193,7 +174,6 @@
     getStatus,
     getAccount,
     isConfigured,
-    getDiagnostics,
     redirectUri
   });
 })();

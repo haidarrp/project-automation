@@ -218,15 +218,20 @@
 
   async function resolveAttachmentBinary(item) {
     if (!item) return null;
-    // Bila sudah tersinkron, SharePoint diperlakukan sebagai source of truth.
-    // Ini memastikan perubahan yang dilakukan melalui Excel Online/SharePoint
-    // ikut masuk saat ZIP digenerate ulang, termasuk pada perangkat asal.
-    if (item.driveId && item.itemId && sharePoint?.downloadAttachment) {
-      return sharePoint.downloadAttachment(item, true);
-    }
+
+    // Untuk proses generate pada perangkat yang sama, gunakan byte lokal terlebih
+    // dahulu. File lokal inilah yang baru saja divalidasi/di-upload ke SharePoint,
+    // sehingga tidak perlu mengunduh ulang file yang sama hanya untuk menyusun ZIP.
+    //
+    // Pada perangkat lain (atau setelah riwayat dimuat tanpa cache file), properti
+    // `file` tidak tersedia dan fungsi otomatis mengambil file dari SharePoint.
     if (typeof File !== 'undefined' && item instanceof File) return item;
     if (typeof Blob !== 'undefined' && item instanceof Blob) return item;
     if (item.file) return item.file;
+
+    if (item.driveId && item.itemId && sharePoint?.downloadAttachment) {
+      return sharePoint.downloadAttachment(item, true);
+    }
     return null;
   }
 

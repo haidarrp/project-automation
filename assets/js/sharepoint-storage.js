@@ -387,20 +387,79 @@
     return run.sharePoint.recap;
   }
 
+  async function getRemoteDownloadInfo(attachment, interactive) {
+    const basePath = `/drives/${encodeURIComponent(attachment.driveId)}/items/${encodeURIComponent(attachment.itemId)}`;
+
+    // Microsoft mendokumentasikan instance annotation download URL dengan query
+    // `?select=id,@microsoft.graph.downloadUrl` (tanpa awalan `$`). Gunakan bentuk
+    // persis tersebut terlebih dahulu karena beberapa respons SharePoint/OneDrive
+    // tidak mengembalikan annotation ketika dicampur dengan $select properti lain.
+    let remote = await graphJson(
+      `${basePath}?select=id,@microsoft.graph.downloadUrl`,
+      { interactive, headers: { 'Cache-Control': 'no-cache' } }
+    );
+
+    if (!remote?.['@microsoft.graph.downloadUrl']) {
+      // Fallback kedua: GET DriveItem tanpa select. Pada banyak tenant, Graph
+      // menyertakan instance annotation downloadUrl pada respons penuh.
+      remote = await graphJson(basePath, {
+        interactive,
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+    }
+
+    return remote || {};
+  }
+
   async function downloadAttachment(item, interactive) {
     const attachment = normalizeAttachment(item, 'file');
+
+    // Jika pemanggil memberikan byte lokal, tidak perlu round-trip ke Graph.
+    // Pemanggil yang memang ingin versi terbaru SharePoint (misalnya tombol
+    // "Muat Ulang Absensi dari SharePoint") sudah mengirim `file: null`.
+    if (attachment.file) return attachment.file;
+
     // Di browser, endpoint /content tidak dipakai langsung karena respons 302
     // dengan Authorization header dapat gagal pada CORS preflight. Ambil URL
     // download pre-authenticated dari metadata DriveItem, lalu fetch tanpa token.
     if (attachment.driveId && attachment.itemId) {
-      const remote = await graphJson(
-        `/drives/${encodeURIComponent(attachment.driveId)}/items/${encodeURIComponent(attachment.itemId)}?$select=id,name,size,webUrl,eTag,cTag,lastModifiedDateTime,file,@microsoft.graph.downloadUrl`,
-        { interactive }
-      );
-      const downloadUrl = remote?.['@microsoft.graph.downloadUrl'];
-      if (!downloadUrl) throw new Error(`URL download SharePoint tidak tersedia untuk ${attachment.name || attachment.itemId}.`);
-      const response = await fetch(downloadUrl, { method: 'GET', credentials: 'omit' });
-      if (!response.ok) throw new Error(`Download SharePoint gagal (${response.status}) untuk ${attachment.name || remote?.name || 'file'}.`);
+      let remote = await getRemoteDownloadInfo(attachment, interactive);
+      let downloadUrl = remote?.['@microsoft.graph.downloadUrl'];
+
+      if (!downloadUrl) {
+        if (!remote?.file) {
+          throw new Error(`Item SharePoint bukan file atau tidak dapat diunduh: ${attachment.name || attachment.itemId}.`);
+        }
+        throw new Error(
+          `Microsoft Graph tidak memberikan URL download untuk ${attachment.name || remote?.name || attachment.itemId}. ` +
+          'Pastikan akun yang digunakan memiliki akses Edit/Read ke file, lalu hubungkan ulang SharePoint.'
+        );
+      }
+
+      // URL ini bersifat sementara. Jika sudah kedaluwarsa di antara metadata dan
+      // fetch, ambil URL baru satu kali lalu ulangi download.
+      let response = await fetch(downloadUrl, {
+        method: 'GET',
+        credentials: 'omit',
+        cache: 'no-store'
+      });
+
+      if (!response.ok && (response.status === 401 || response.status === 403 || response.status === 404)) {
+        remote = await getRemoteDownloadInfo(attachment, interactive);
+        downloadUrl = remote?.['@microsoft.graph.downloadUrl'];
+        if (downloadUrl) {
+          response = await fetch(downloadUrl, {
+            method: 'GET',
+            credentials: 'omit',
+            cache: 'no-store'
+          });
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(`Download SharePoint gagal (${response.status}) untuk ${attachment.name || remote?.name || 'file'}.`);
+      }
+
       const blob = await response.blob();
       if (typeof File !== 'undefined') {
         return new File([blob], attachment.name || remote?.name || attachment.remoteName || 'file', {
@@ -410,7 +469,7 @@
       }
       return blob;
     }
-    return attachment.file || null;
+    return null;
   }
 
   async function refreshAttachmentMetadata(item, interactive) {

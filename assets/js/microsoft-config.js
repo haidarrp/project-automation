@@ -5,8 +5,8 @@
   // Jangan pernah menaruh client secret, certificate, atau password di file ini.
   window.MICROSOFT_CONFIG = Object.freeze({
     // Isi dari Microsoft Entra ID -> App registrations -> Overview.
-    tenantId: 'dd63b8a1-f2db-4fa0-8561-98b30d51f583',
-    clientId: '3eaa9458-9800-42cf-878a-f7c3e69a11ea',
+    tenantId: 'REPLACE_WITH_TENANT_ID',
+    clientId: 'REPLACE_WITH_CLIENT_ID',
 
     // Folder SharePoint/OneDrive for Business yang diberikan sebagai root penyimpanan.
     shareUrl: 'https://kemenpkp-my.sharepoint.com/:f:/g/personal/haidar_rasyid_pkp_go_id/IgBUU-kkbmhFQZoyFaBIzSPNAeWMrJrwlTFe7Kb29SrVtpo?e=cPWVIx',

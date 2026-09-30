@@ -130,18 +130,9 @@
   }
 
   function sharePointPanel() {
-    const status = microsoftAuth?.getStatus?.() || { configured: false, ready: false, libraryLoaded: false, connected: false };
-    const d = status.diagnostics || {};
+    const status = microsoftAuth?.getStatus?.() || { configured: false, connected: false };
     if (!status.configured) {
-      const missing = [];
-      if (!d.configLoaded) missing.push('microsoft-config.js tidak termuat');
-      if (!d.tenantIdPresent) missing.push('tenantId');
-      if (!d.clientIdPresent) missing.push('clientId');
-      if (!d.shareUrlPresent) missing.push('shareUrl');
-      return `<div class="alert alert-warning"><div class="alert-title">SharePoint belum dikonfigurasi</div>Periksa <code>assets/js/microsoft-config.js</code>. Komponen yang belum tersedia: <strong>${esc(missing.join(', ') || 'konfigurasi Microsoft')}</strong>.</div>`;
-    }
-    if (!status.libraryLoaded) {
-      return `<div class="alert alert-warning"><div class="alert-title">MSAL belum termuat</div><code>tenantId</code> dan <code>clientId</code> sudah terbaca, tetapi <code>assets/vendor/msal-browser.bundle.js</code> belum tersedia/termuat. Jalankan <code>npm install</code> lalu <code>npm run build</code>, kemudian deploy ulang.</div>`;
+      return `<div class="alert alert-warning"><div class="alert-title">SharePoint belum dikonfigurasi</div>Isi tenantId dan clientId pada <code>assets/js/microsoft-config.js</code>. File belum dapat disinkronkan ke SharePoint.</div>`;
     }
     if (status.connected) {
       return `<div class="alert alert-success"><div class="alert-title">SharePoint terhubung</div>${esc(status.name || status.email || 'Akun Microsoft 365')} ${status.email ? `· ${esc(status.email)}` : ''}${state.sharePointRun?.runFolderWebUrl ? ` · <a href="${esc(state.sharePointRun.runFolderWebUrl)}" target="_blank" rel="noopener noreferrer">Buka folder run ↗</a>` : ''}</div>`;
