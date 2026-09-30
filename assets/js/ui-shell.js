@@ -20,6 +20,7 @@
       icon: 'tukin',
       file: 'tukin.html',
       items: [
+        { view: 'dashboard', label: 'Dashboard' },
         { view: 'process', label: 'Proses Tukin' },
         { view: 'history', label: 'Riwayat' }
       ]
@@ -29,6 +30,7 @@
       icon: 'overtime',
       file: 'lembur.html',
       items: [
+        { view: 'dashboard', label: 'Dashboard' },
         { view: 'process', label: 'Proses Lembur' },
         { view: 'history', label: 'Riwayat' }
       ]
@@ -38,6 +40,7 @@
       icon: 'training',
       file: 'pelatihan.html',
       items: [
+        { view: 'dashboard', label: 'Dashboard' },
         { view: 'pegawai', label: 'Data Pegawai' },
         { view: 'pelatihan', label: 'Data Pelatihan' }
       ]
@@ -104,7 +107,6 @@
     const trainingGroup = isAdmin ? moduleGroup('training', activeModule, activeView) : '';
     const leaveGroup = isAdmin ? moduleGroup('leave', activeModule, activeView) : '';
     return `<nav class="nav nav-modules" aria-label="Navigasi utama">
-      <a class="nav-button nav-home ${activeModule === 'dashboard' ? 'active' : ''}" href="index.html"><span class="nav-icon">${icon('home')}</span><span class="nav-label">Dashboard</span></a>
       <div class="nav-groups" role="group" aria-label="Modul">
         ${moduleGroup('tukin', activeModule, activeView)}
         ${moduleGroup('lembur', activeModule, activeView)}
@@ -137,7 +139,7 @@
     const account = user ? `<div class="topbar-account"><div class="topbar-account-copy"><strong>${displayName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</strong><span>${email.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span></div><button class="btn btn-secondary btn-sm" type="button" onclick="window.FirebaseClient.signOut()">Keluar</button></div>` : '';
     return `<div class="app-shell">
       <aside class="sidebar">
-        <div class="sidebar-brand"><a href="index.html" aria-label="Buka Dashboard"><img src="assets/img/logo-pkp.png" alt="Kementerian PKP"></a></div>
+        <div class="sidebar-brand"><a href="tukin.html#dashboard" aria-label="Buka Dashboard Tukin"><img src="assets/img/logo-pkp.png" alt="Kementerian PKP"></a></div>
         ${navigation(module, view)}
         <div class="sidebar-footer"><div class="sidebar-avatar">${initials}</div><div class="sidebar-footer-copy"><strong>${displayName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</strong>${email ? email.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : 'Kementerian PKP'}</div></div>
       </aside>

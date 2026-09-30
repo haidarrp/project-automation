@@ -150,8 +150,8 @@
   }
 
   function shell(content) {
-    const view = state.view === 'history' ? 'history' : 'process';
-    const viewLabel = view === 'history' ? 'Riwayat' : 'Proses Lembur';
+    const view = ['dashboard', 'history', 'process'].includes(state.view) ? state.view : 'dashboard';
+    const viewLabel = view === 'dashboard' ? 'Dashboard' : view === 'history' ? 'Riwayat' : 'Proses Lembur';
     return window.AppShell.render({
       module: 'lembur',
       view,
@@ -612,7 +612,7 @@
     document.querySelector('[data-action="generate"]')?.addEventListener('click',generateDocs);
     document.querySelector('[data-action="save-history-edit"]')?.addEventListener('click',generateDocs);
     document.querySelector('[data-action="cancel-history-edit"]')?.addEventListener('click',cancelHistoryEdit);
-    document.querySelector('[data-action="go-dashboard"]')?.addEventListener('click',()=>{resetProcess(); history.replaceState(null,'','lembur.html#process'); render();});
+    document.querySelector('[data-action="go-dashboard"]')?.addEventListener('click',()=>{ state.started=true; state.view='dashboard'; state.editingHistoryId=null; history.replaceState(null,'','lembur.html#dashboard'); render(); });
     document.querySelector('[data-action="new-period"]')?.addEventListener('click',()=>{resetProcess(); history.replaceState(null,'','lembur.html#process'); render();});
     document.querySelector('[data-action="edit-current-run"]')?.addEventListener('click',()=>{ if(state.currentRun?.id) editHistory(state.currentRun.id); });
     document.querySelectorAll('[data-history-id]').forEach(btn=>btn.addEventListener('click',()=>openHistory(btn.dataset.historyId)));
@@ -627,14 +627,18 @@
 
   function applyHashRoute() {
     const route = String(location.hash || '').replace(/^#/, '').toLowerCase();
-    if (route === 'history') { state.started = true; state.view = 'history'; state.editingHistoryId = null; }
-    else if (route === 'process') { state.started = true; resetProcess(); }
+    state.started = true;
+    if (route === 'history') { state.view = 'history'; state.editingHistoryId = null; }
+    else if (route === 'process') { resetProcess(); }
+    else { state.view = 'dashboard'; state.editingHistoryId = null; if (route !== 'dashboard') history.replaceState(null, '', 'lembur.html#dashboard'); }
   }
 
   window.addEventListener('hashchange', () => {
     const route = String(location.hash || '').replace(/^#/, '').toLowerCase();
-    if (route === 'history') { state.started = true; state.view = 'history'; state.editingHistoryId = null; render(); }
-    else if (route === 'process') { state.started = true; resetProcess(); render(); }
+    state.started = true;
+    if (route === 'history') { state.view = 'history'; state.editingHistoryId = null; render(); }
+    else if (route === 'process') { resetProcess(); render(); }
+    else { state.view = 'dashboard'; state.editingHistoryId = null; render(); }
   });
 
   async function init() {

@@ -25,7 +25,7 @@
     loading: true,
     error: '',
     toast: '',
-    view: 'pegawai',
+    view: 'dashboard',
     employees: [],
     directory: new Map(),
     trainings: [],
@@ -56,7 +56,14 @@
   }
 
   function normalizeView(value) {
-    return value === 'pelatihan' ? 'pelatihan' : 'pegawai';
+    if (value === 'pelatihan' || value === 'pegawai' || value === 'dashboard') return value;
+    return 'dashboard';
+  }
+
+  function viewLabel(value = state.view) {
+    if (value === 'pelatihan') return 'Data Pelatihan';
+    if (value === 'pegawai') return 'Data Pegawai';
+    return 'Dashboard';
   }
 
   function viewFromHash() {
@@ -337,6 +344,30 @@
     </section>`;
   }
 
+  function dashboardStatusSummary(rows) {
+    const counts = new Map(TRAINING_STATUSES.map((status) => [status, 0]));
+    rows.forEach((training) => (training.participants || []).forEach((participant) => {
+      const status = TRAINING_STATUSES.includes(participant.status) ? participant.status : 'Diusulkan';
+      counts.set(status, (counts.get(status) || 0) + 1);
+    }));
+    const total = [...counts.values()].reduce((sum, value) => sum + value, 0);
+    return `<section class="card training-card training-dashboard-status"><div class="training-card-head"><div><h2>Komposisi Status Peserta</h2><p>Status peserta pada periode yang dipilih.</p></div><span class="card-subtitle">${total} keikutsertaan</span></div><div class="training-status-summary">${TRAINING_STATUSES.map((status) => `<div class="training-status-summary-row"><span>${statusBadge(status)}</span><strong>${counts.get(status) || 0}</strong></div>`).join('')}</div></section>`;
+  }
+
+  function dashboardRecentTraining(rows) {
+    const recent = rows.slice().sort((a, b) => String(b.startDate || '').localeCompare(String(a.startDate || ''))).slice(0, 5);
+    return `<section class="card training-card"><div class="training-card-head"><div><h2>Pelatihan Terbaru</h2><p>Data pelatihan terbaru pada periode aktif.</p></div><a class="btn btn-secondary btn-sm" href="pelatihan.html#pelatihan">Lihat Semua</a></div><div class="training-table-wrap"><table class="data-table training-table"><thead><tr><th>Pelatihan</th><th>Tanggal</th><th>Penyelenggara</th><th>Peserta</th><th>Aksi</th></tr></thead><tbody>${recent.length ? recent.map((training) => `<tr><td><button class="training-name-button" type="button" data-training-detail="${esc(training.id)}">${esc(training.name || 'Tanpa nama')}</button></td><td class="nowrap">${esc(formatDateRange(training))}</td><td>${esc(training.organizer || '—')}</td><td><span class="training-count">${(training.participantIds || []).length}</span></td><td><button class="btn btn-secondary btn-sm" type="button" data-training-detail="${esc(training.id)}">Detail</button></td></tr>`).join('') : '<tr><td colspan="5"><div class="empty-state"><strong>Belum ada data pelatihan</strong>Tambahkan pelatihan untuk menampilkan ringkasan dashboard.</div></td></tr>'}</tbody></table></div></section>`;
+  }
+
+  function dashboardView() {
+    const rows = trainingsInPeriod();
+    const employees = activeEmployees();
+    const participantIds = new Set(rows.flatMap((item) => item.participantIds || []));
+    const participation = rows.reduce((sum, item) => sum + (item.participantIds || []).length, 0);
+    const completed = rows.reduce((sum, item) => sum + (item.participants || []).filter((participant) => participant.status === 'Lulus').length, 0);
+    return `<div class="training-page"><div class="training-head"><div><h1>Dashboard Pelatihan</h1><p>Ringkasan pencatatan pelatihan pegawai Pusat Data dan Informasi.</p></div><div class="training-head-actions"><a class="btn btn-secondary" href="pelatihan.html#pegawai">Data Pegawai</a><button class="btn btn-primary" type="button" data-action="add-training">+ Tambah Pelatihan</button></div></div>${filterCard()}${identityNotice()}<div class="training-metrics">${metric('Total Pegawai', employees.length, 'Pegawai aktif pada master')}${metric('Pelatihan Tercatat', rows.length, periodLabel())}${metric('Pegawai Terlibat', participantIds.size, 'Peserta unik pada periode')}${metric('Status Lulus', completed, `${participation} total keikutsertaan`)}</div><div class="training-dashboard-grid">${dashboardStatusSummary(rows)}${dashboardRecentTraining(rows)}</div></div>`;
+  }
+
   function employeeView() {
     return `<div class="training-page">
       <div class="training-head"><div><h1>Data Pegawai</h1><p>Arsip ringkas pelatihan pegawai Pusat Data dan Informasi berdasarkan periode.</p></div><div class="training-head-actions"><a class="btn btn-secondary" href="pelatihan.html#pelatihan">Data Pelatihan</a></div></div>
@@ -478,17 +509,18 @@
   function render() {
     if (state.loading) {
       app.innerHTML = window.AppShell.render({
-        module: 'training', view: state.view, viewLabel: state.view === 'pegawai' ? 'Data Pegawai' : 'Data Pelatihan',
+        module: 'training', view: state.view, viewLabel: viewLabel(),
         content: '<div class="card training-loading"><strong>Memuat data pelatihan</strong>Membaca master pegawai dan arsip pelatihan dari Cloud Firestore...</div>'
       });
       return;
     }
 
-    const content = `${state.error ? `<div class="alert alert-warning"><div class="alert-title">Data belum dapat dimuat sempurna</div>${esc(state.error)}</div>` : ''}${state.view === 'pegawai' ? employeeView() : trainingView()}`;
+    const mainView = state.view === 'dashboard' ? dashboardView() : state.view === 'pegawai' ? employeeView() : trainingView();
+    const content = `${state.error ? `<div class="alert alert-warning"><div class="alert-title">Data belum dapat dimuat sempurna</div>${esc(state.error)}</div>` : ''}${mainView}`;
     app.innerHTML = window.AppShell.render({
       module: 'training',
       view: state.view,
-      viewLabel: state.view === 'pegawai' ? 'Data Pegawai' : 'Data Pelatihan',
+      viewLabel: viewLabel(),
       content,
       overlays: overlayMarkup()
     });
@@ -826,7 +858,7 @@
   async function init() {
     await window.FirebaseClient.requireAdmin();
     state.view = viewFromHash();
-    if (!location.hash) history.replaceState(null, '', '#pegawai');
+    if (!location.hash) history.replaceState(null, '', '#dashboard');
     await loadData();
   }
 

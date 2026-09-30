@@ -12,7 +12,7 @@
   let historyUnsubscribe = null;
 
   const state = {
-    view: 'process',
+    view: 'dashboard',
     step: 'period',
     period: { month: now.getMonth() + 1, year: now.getFullYear() },
     settings: { holidays: [], ramadanEnabled: false, ramadanStart: '', ramadanEnd: '' },
@@ -118,8 +118,8 @@
   }
 
   function shell(content) {
-    const view = state.view === 'history' ? 'history' : 'process';
-    const leaf = view === 'history' ? 'Riwayat' : 'Proses Tukin';
+    const view = ['dashboard', 'history', 'process'].includes(state.view) ? state.view : 'dashboard';
+    const leaf = view === 'dashboard' ? 'Dashboard' : view === 'history' ? 'Riwayat' : 'Proses Tukin';
     return window.AppShell.render({
       module: 'tukin',
       view,
@@ -137,7 +137,9 @@
 
   function render() {
     let body = '';
-    if (state.view === 'history') {
+    if (state.view === 'dashboard') {
+      body = renderDashboard();
+    } else if (state.view === 'history') {
       body = renderHistory();
     } else {
       if (state.step === 'period') body = renderPeriod();
@@ -148,6 +150,38 @@
     }
     app.innerHTML = shell(body);
     bind();
+  }
+
+  function dashboardMetric(value, label, suffix = '') {
+    return `<div class="card metric"><div class="metric-top"><div class="metric-label">${esc(label)}</div><div class="metric-icon">${icon('tukin')}</div></div><div class="metric-value">${value}${suffix ? `<span class="metric-suffix">${esc(suffix)}</span>` : ''}</div></div>`;
+  }
+
+  function renderDashboard() {
+    const history = state.history || [];
+    const latest = history[0] || null;
+    const summary = latest?.summary || {};
+    const recent = history.slice(0, 5);
+    const recentRows = recent.length ? recent.map((item) => {
+      const itemSummary = item.summary || {};
+      return `<div class="dashboard-history-row">
+        <div><div class="history-period-name">${esc(periodLabel(item.period))}</div><div class="history-period-sub">Tunjangan Kinerja</div></div>
+        <div>${Number(itemSummary.employees || 0)}</div>
+        <div class="tukin-money">${money(itemSummary.totalCutAmount || 0)}</div>
+        <div>${esc(formatDateTime(item.updatedAt || item.processedAt))}</div>
+        <div><span class="status-pill">Selesai</span></div>
+        <button class="chev-btn" type="button" data-view-tukin-history="${esc(item.id)}" aria-label="Lihat ${esc(periodLabel(item.period))}">${icon('chevron')}</button>
+      </div>`;
+    }).join('') : '<div class="empty-state"><strong>Belum ada riwayat Tukin</strong>Proses Tunjangan Kinerja pertama akan tampil di sini.</div>';
+
+    return `<div class="page-head"><div><h1>Dashboard Tunjangan Kinerja</h1><div class="small">Ringkasan proses dan hasil Tunjangan Kinerja.</div></div><a class="btn btn-primary" href="tukin.html#process">+ Proses Tukin</a></div>
+      <div class="dashboard-metrics">
+        ${dashboardMetric(Number(summary.employees || 0), 'Pegawai Periode Terakhir')}
+        ${dashboardMetric(money(summary.totalCutAmount || 0), 'Total Potongan')}
+        ${dashboardMetric(Number(summary.adjustedRecords || 0), 'Koreksi')}
+        ${dashboardMetric(Number(summary.flaggedRecords || 0), 'Perlu Verifikasi')}
+      </div>
+      <div class="dashboard-grid"><div class="card period-card"><div class="dashboard-card-head"><div class="card-title">Periode Terakhir</div><div class="dashboard-card-note">${latest ? 'Selesai' : '—'}</div></div><div class="period-box"><div class="period-label">Periode Tukin</div><div class="period-main">${latest ? esc(periodLabel(latest.period)) : 'Belum ada'}</div><div class="period-meta"><div><div class="period-meta-value">${Number(summary.employees || 0)}</div><div class="period-meta-label">Pegawai</div></div><div><div class="period-meta-value">${Number(summary.adjustedRecords || 0)}</div><div class="period-meta-label">Koreksi</div></div></div></div><div class="period-actions">${latest ? `<button class="text-link-btn" data-view-tukin-history="${esc(latest.id)}" type="button">Lihat hasil →</button>` : ''}</div></div></div>
+      <div class="card dashboard-history"><div class="dashboard-history-head"><div class="card-title">Riwayat Tukin Terbaru</div>${history.length ? '<a class="text-link-btn" href="tukin.html#history">Lihat semua</a>' : ''}</div>${history.length ? '<div class="dashboard-history-cols"><div>Periode</div><div>Pegawai</div><div>Total Potongan</div><div>Diproses</div><div>Status</div><div></div></div>' : ''}${recentRows}</div>`;
   }
 
   function renderPeriod() {
@@ -615,7 +649,8 @@
   function setViewFromHash() {
     const route = String(location.hash || '').replace(/^#/, '').toLowerCase();
     if (route === 'history') state.view = 'history';
-    else state.view = 'process';
+    else if (route === 'process') state.view = 'process';
+    else state.view = 'dashboard';
   }
 
   function goToHistory() {
@@ -627,6 +662,13 @@
   }
 
   function bind() {
+    document.querySelectorAll('a[href="tukin.html#dashboard"]').forEach((link) => link.addEventListener('click', (event) => {
+      event.preventDefault();
+      state.view = 'dashboard';
+      state.historyPreview = null;
+      history.replaceState(null, '', 'tukin.html#dashboard');
+      render();
+    }));
     document.querySelectorAll('a[href="tukin.html#process"]').forEach((link) => link.addEventListener('click', (event) => {
       event.preventDefault();
       state.view = 'process';
@@ -784,10 +826,13 @@
   window.addEventListener('hashchange', () => {
     const previous = state.view;
     setViewFromHash();
+    state.historyPreview = null;
     if (state.view === 'history') {
-      state.historyPreview = null;
       render();
       refreshHistory(true);
+    } else if (state.view === 'dashboard') {
+      render();
+      if (!state.historyLoaded) refreshHistory(true);
     } else if (previous !== 'process') {
       render();
     }
@@ -798,7 +843,8 @@
     await window.AppSettingsService?.loadAndApply?.();
     await window.MasterDataService?.getEmployees?.(false);
     setViewFromHash();
-    if (state.view === 'history') {
+    if (!location.hash) history.replaceState(null, '', 'tukin.html#dashboard');
+    if (state.view === 'history' || state.view === 'dashboard') {
       state.historyBusy = true;
       render();
       await refreshHistory(false);
@@ -809,7 +855,7 @@
     historyUnsubscribe = storage.subscribeRuns?.((history) => {
       state.history = history;
       state.historyLoaded = true;
-      if (state.view === 'history') render();
+      if (state.view === 'history' || state.view === 'dashboard') render();
     }, (error) => console.warn('Sinkronisasi realtime Tukin gagal:', error)) || null;
     render();
   }

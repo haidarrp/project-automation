@@ -100,7 +100,7 @@
       <div class="firebase-auth-kicker">Akses Administrasi</div>
       <h1>Akses admin diperlukan</h1>
       <p>Akun ini dapat menggunakan aplikasi, tetapi belum terdaftar sebagai administrator master data.</p>
-      <div class="firebase-login-form"><a class="btn btn-primary" href="index.html">Kembali ke Dashboard</a></div>
+      <div class="firebase-login-form"><a class="btn btn-primary" href="tukin.html#dashboard">Kembali ke Dashboard Tukin</a></div>
     </div></section>`;
   }
 

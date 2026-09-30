@@ -132,3 +132,12 @@
 .training-modal .field textarea{width:100%;min-height:92px;resize:vertical;border:1px solid var(--line);border-radius:11px;padding:10px 11px;background:#fff;color:var(--ink);font:inherit;font-size:11px;line-height:1.5}
 .training-modal .field textarea:focus{outline:none;border-color:#b4a471;box-shadow:0 0 0 3px rgba(205,187,125,.14)}
 @media(max-width:700px){.training-participant-fields{grid-template-columns:1fr;margin-left:0}.training-document-head,.training-document-row{align-items:stretch;flex-direction:column}.training-document-row .training-row-actions{width:100%}.training-document-row .training-row-actions .btn{flex:1}}
+
+/* Dashboard Pelatihan */
+.training-dashboard-grid{display:grid;grid-template-columns:minmax(280px,.72fr) minmax(0,1.6fr);gap:14px;align-items:start}
+.training-dashboard-status{min-width:0}
+.training-status-summary{padding:8px 18px 16px}
+.training-status-summary-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #eff0ed}
+.training-status-summary-row:last-child{border-bottom:0}
+.training-status-summary-row strong{font-size:13px;color:var(--ink)}
+@media(max-width:1050px){.training-dashboard-grid{grid-template-columns:1fr}}
