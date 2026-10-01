@@ -29,3 +29,15 @@
 .tukin-history-actions{flex-wrap:wrap;min-width:330px}
 .tukin-history-actions .btn{white-space:nowrap}
 @media(max-width:780px){.tukin-history-actions{min-width:0}.history-table{min-width:980px}}
+
+/* Referensi penyesuaian otomatis Tukin dari modul Cuti */
+.tukin-cuti-ref {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #5b6b7c;
+}

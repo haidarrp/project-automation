@@ -9,6 +9,7 @@
   const resources = window.ResourceLoader;
   const sharePoint = window.SharePointStorage;
   const microsoftAuth = window.MicrosoftAuth;
+  const cutiIntegration = window.TukinCutiIntegration;
   const app = document.getElementById('app');
   const now = new Date();
 
@@ -40,7 +41,8 @@
     currentRunId: null,
     sharePointRun: null,
     pendingSharePointDeletes: [],
-    sharePointBusy: false
+    sharePointBusy: false,
+    cutiIntegration: { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: '' }
   };
 
   function esc(value) {
@@ -247,6 +249,45 @@
       <div class="actions"><button class="btn btn-secondary" data-action="back-period" type="button">← Kembali</button><div class="actions-right">${state.files.length ? '<button class="btn btn-secondary" data-action="choose-files" type="button">+ Tambah File</button><button class="btn btn-primary" data-action="calculate" type="button">Hitung & Validasi →</button>' : ''}</div></div></div>`;
   }
 
+  function cutiIntegrationAlert() {
+    const info = state.cutiIntegration || {};
+    if (info.status === 'loading') {
+      return `<div class="alert alert-info"><div class="alert-title">Mencocokkan data Cuti</div>Data cuti pegawai sedang dicocokkan dengan tanggal yang memerlukan verifikasi.</div>`;
+    }
+    if (info.status === 'error') {
+      return `<div class="alert alert-warning"><div class="alert-title">Integrasi data Cuti belum diterapkan</div>${esc(info.message || 'Data Cuti tidak dapat dibaca oleh akun ini.')} Koreksi manual tetap dapat dilakukan.</div>`;
+    }
+    if (info.status !== 'applied') return '';
+    if (Number(info.adjustedRecords || 0) > 0) {
+      const manual = Number(info.preservedManualRecords || 0);
+      return `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Data Cuti</div>${Number(info.adjustedRecords || 0)} tanggal yang memerlukan verifikasi otomatis disesuaikan menjadi <strong>0%</strong>. Nilai potongan hasil perhitungan presensi tetap ditampilkan pada kolom <strong>Otomatis</strong>.${manual ? ` ${manual} koreksi manual yang sudah ada dipertahankan.` : ''}</div>`;
+    }
+    return '';
+  }
+
+  async function syncCutiAdjustments(options) {
+    if (!cutiIntegration?.apply || !state.employees.length) return null;
+    const opts = options || {};
+    state.cutiIntegration = { ...state.cutiIntegration, status: 'loading', message: '' };
+    if (opts.render !== false) render();
+    try {
+      const result = await cutiIntegration.apply(state.employees, state.period);
+      state.cutiIntegration = { ...result, message: '' };
+      state.generated = null;
+      return result;
+    } catch (error) {
+      console.warn('Integrasi data Cuti ke Tukin tidak dapat diterapkan:', error);
+      const code = String(error?.code || '');
+      const permissionMessage = code.includes('permission-denied')
+        ? 'Akun yang digunakan tidak memiliki hak baca terhadap data Cuti.'
+        : (error?.message || String(error));
+      state.cutiIntegration = { status: 'error', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: permissionMessage };
+      return null;
+    } finally {
+      if (opts.render !== false) render();
+    }
+  }
+
   function renderValidation() {
     const errors = state.validationResults.filter((item) => !item.ok);
     const summaries = state.employees.map((employee) => ({ employee, summary: rules.summarizeEmployee(employee) }));
@@ -258,6 +299,7 @@
 
     return `<div class="page-title"><div><h2>Validasi & Verifikasi Perhitungan</h2><p>Periksa hasil perhitungan otomatis. Buka Detail untuk menelusuri tanggal, alasan potongan, koreksi dan bukti dukung.</p></div></div>
       ${state.editingHistoryId ? `<div class="alert alert-warning"><div class="alert-title">Mengedit riwayat ${esc(periodLabel())}</div>Setelah koreksi selesai, Generate ZIP Final untuk memperbarui riwayat.</div>` : ''}
+      ${cutiIntegrationAlert()}
       ${errors.length ? `<div class="alert alert-danger"><div class="alert-title">${errors.length} file bermasalah</div>File bermasalah harus diperbaiki/dihapus sebelum generate final.</div>` : ''}
       <div class="tukin-kpi section-gap"><div class="card"><span>Pegawai</span><strong>${state.employees.length}</strong></div><div class="card"><span>Perlu Diverifikasi</span><strong>${totalNeed}</strong></div><div class="card"><span>Sudah Dikoreksi</span><strong>${adjusted}</strong></div><div class="card"><span>Total Potongan Rp</span><strong>${money(totalCut)}</strong></div></div>
       <div class="toolbar"><div class="search"><input id="tukin-search" placeholder="Cari nama atau NIP" value="${esc(state.search)}"></div><div class="card-subtitle">% SKP sementara 0% untuk seluruh pegawai</div></div>
@@ -267,7 +309,7 @@
         return `<tr class="${employee.masterMatched ? '' : 'tukin-master-miss'}"><td>${i + 1}</td><td><strong>${esc(employee.name)}</strong><div class="card-subtitle">${esc(employee.nip || '-')}</div></td><td>${esc(employee.anakSatker || '-')}</td><td>${summary.workDays}</td><td class="tukin-pct ${summary.attendancePercent ? 'tukin-danger' : ''}">${pct(summary.attendancePercent)}</td><td>${pct(summary.skpPercent)}</td><td class="tukin-pct">${pct(summary.finalPercent)}</td><td class="tukin-money">${money(summary.tukin)}</td><td class="tukin-money">${money(summary.cutAmount)}</td><td>${summary.flaggedRecords ? `<span class="tukin-badge warn">${summary.flaggedRecords} perlu cek</span>` : '<span class="tukin-badge">Tidak ada isu</span>'}${summary.adjustedRecords ? ` <span class="tukin-badge edit">${summary.adjustedRecords} koreksi</span>` : ''}${employee.masterMatched ? '' : ' <span class="tukin-badge warn">Master belum cocok</span>'}</td><td><button class="btn btn-secondary btn-sm" data-detail-employee="${esc(rules.employeeKey(employee))}" type="button">Detail</button></td></tr>`;
       }).join('') || '<tr><td colspan="11" class="text-center">Tidak ada data.</td></tr>'}</tbody></table></div>
       ${state.validationResults.length ? `<div class="section-gap card"><div class="table-wrap" style="border:0"><table class="file-table"><thead><tr><th>File</th><th>Status</th><th>Keterangan</th></tr></thead><tbody>${state.validationResults.map((result) => `<tr><td>${esc(result.fileName)}</td><td><span class="status ${result.ok ? 'ok' : 'error'}">${result.ok ? '● Berhasil' : '● Gagal'}</span></td><td>${esc(result.ok ? (result.warnings?.join(' · ') || `Pegawai: ${result.employee}`) : result.error)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
-      <div class="actions"><button class="btn btn-secondary" data-action="back-upload" type="button">← Kembali ke Upload</button><div class="actions-right">${state.employees.some((employee) => (employee.sourceFiles || []).some((item) => item?.driveId && item?.itemId)) ? `<button class="btn btn-secondary" data-action="reload-sharepoint-attendance" type="button" ${state.busy ? 'disabled' : ''}>Muat Ulang Absensi dari SharePoint</button>` : ''}<button class="btn btn-secondary" data-action="settings" type="button">Atur Periode/Tanggal Merah</button><button class="btn btn-primary" data-action="generate" type="button" ${errors.length || !state.employees.length || state.busy ? 'disabled' : ''}>${state.busy ? 'Memproses...' : state.editingHistoryId ? 'Simpan & Generate Ulang' : 'Generate ZIP Final'}</button></div></div>`;
+      <div class="actions"><button class="btn btn-secondary" data-action="back-upload" type="button">← Kembali ke Upload</button><div class="actions-right"><button class="btn btn-secondary" data-action="sync-cuti" type="button" ${state.busy || state.cutiIntegration?.status === 'loading' ? 'disabled' : ''}>Sinkronkan Data Cuti</button>${state.employees.some((employee) => (employee.sourceFiles || []).some((item) => item?.driveId && item?.itemId)) ? `<button class="btn btn-secondary" data-action="reload-sharepoint-attendance" type="button" ${state.busy ? 'disabled' : ''}>Muat Ulang Absensi dari SharePoint</button>` : ''}<button class="btn btn-secondary" data-action="settings" type="button">Atur Periode/Tanggal Merah</button><button class="btn btn-primary" data-action="generate" type="button" ${errors.length || !state.employees.length || state.busy || state.cutiIntegration?.status === 'loading' ? 'disabled' : ''}>${state.busy ? 'Memproses...' : state.editingHistoryId ? 'Simpan & Generate Ulang' : 'Generate ZIP Final'}</button></div></div>`;
   }
 
   function renderResult() {
@@ -311,7 +353,7 @@
     return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer tukin-drawer"><div class="tukin-drawer-header"><div class="drawer-header"><div><h3>Detail Potongan Pegawai</h3><div class="card-subtitle">Log tanggal yang menyebabkan potongan atau memerlukan verifikasi.</div></div><button class="icon-btn" data-action="close-drawer" type="button">×</button></div><div class="profile"><div class="profile-avatar">${esc(employee.name.charAt(0).toUpperCase())}</div><div><div class="profile-name">${esc(employee.name)}</div><div class="profile-meta">NIP ${esc(employee.nip || '-')} · Anak Satker ${esc(employee.anakSatker || '-')}</div></div><button class="btn btn-secondary btn-sm" style="margin-left:auto" data-edit-employee="${esc(rules.employeeKey(employee))}" type="button">Data Pegawai</button></div></div>
       <div class="tukin-detail-summary"><div><span>Pot. Absensi</span><strong>${pct(summary.attendancePercent)}</strong></div><div><span>Pot. SKP</span><strong>${pct(summary.skpPercent)}</strong></div><div><span>Pot. Final</span><strong>${pct(summary.finalPercent)}</strong></div><div><span>Potongan Rupiah</span><strong>${money(summary.cutAmount)}</strong></div></div>
       ${(employee.sourceFiles || []).length ? `<div class="card card-pad" style="margin-bottom:14px"><div class="card-title">File Absensi Asli</div><div class="tukin-files">${employee.sourceFiles.map((file) => `<div>${esc(file.name || file.file?.name || 'File Absensi')} ${attachmentOpenLink(file, 'Buka')}</div>`).join('')}</div></div>` : ''}
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>Tanggal</th><th>Masuk</th><th>Pulang</th><th>Status</th><th>TL</th><th>PSW</th><th>Otomatis</th><th>Final</th><th>Alasan / Bukti</th><th>Aksi</th></tr></thead><tbody>${records.map((record) => `<tr><td class="nowrap">${esc(rules.formatDate(record.date, true))}</td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${esc(record.status || '-')}${record.flags?.length ? `<div class="card-subtitle">${esc(record.flags.join(', '))}</div>` : ''}</td><td>${esc(record.tlCategory)}<div class="card-subtitle">${pct(record.tlPercent)}</div></td><td>${esc(record.pswCategory)}<div class="card-subtitle">${pct(record.pswPercent)}</div></td><td class="tukin-pct">${pct(record.autoTotalPercent)}</td><td class="tukin-pct ${record.adjustedPercent !== null ? 'tukin-ok' : ''}">${pct(rules.recordFinalPercent(record))}${record.adjustedPercent !== null ? '<div class="card-subtitle">disesuaikan</div>' : ''}</td><td><div class="tukin-reason">${esc(record.adjustmentNote || record.reason || '-')}</div>${(record.evidence || []).length ? `<div class="tukin-files">${record.evidence.map((evidence) => `${esc(evidence.name)} ${attachmentOpenLink(evidence, 'Buka')}`).join('<br>')}</div>` : ''}</td><td><button class="btn btn-secondary btn-sm" data-edit-record="${esc(record.key)}" data-employee="${esc(rules.employeeKey(employee))}" type="button">Edit</button></td></tr>`).join('') || '<tr><td colspan="10" class="text-center">Tidak ada tanggal yang menghasilkan potongan atau memerlukan verifikasi.</td></tr>'}</tbody></table></div></aside>`;
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Tanggal</th><th>Masuk</th><th>Pulang</th><th>Status</th><th>TL</th><th>PSW</th><th>Otomatis</th><th>Final</th><th>Alasan / Bukti</th><th>Aksi</th></tr></thead><tbody>${records.map((record) => `<tr><td class="nowrap">${esc(rules.formatDate(record.date, true))}</td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${esc(record.status || '-')}${record.flags?.length ? `<div class="card-subtitle">${esc(record.flags.join(', '))}</div>` : ''}</td><td>${esc(record.tlCategory)}<div class="card-subtitle">${pct(record.tlPercent)}</div></td><td>${esc(record.pswCategory)}<div class="card-subtitle">${pct(record.pswPercent)}</div></td><td class="tukin-pct">${pct(record.autoTotalPercent)}</td><td class="tukin-pct ${record.adjustedPercent !== null ? 'tukin-ok' : ''}">${pct(rules.recordFinalPercent(record))}${record.adjustedPercent !== null ? `<div class="card-subtitle">${record.adjustmentSource === 'cuti' ? 'disesuaikan otomatis · cuti' : 'disesuaikan'}</div>` : ''}</td><td><div class="tukin-reason">${esc(record.adjustmentNote || record.reason || '-')}</div>${record.cutiAdjustment?.automatic ? `<div class="tukin-cuti-ref"><span class="tukin-badge edit">Data Cuti</span><span>${esc(record.cutiAdjustment.leaveType || 'Cuti')} · ${esc(record.cutiAdjustment.startDate || '')}${record.cutiAdjustment.endDate && record.cutiAdjustment.endDate !== record.cutiAdjustment.startDate ? ` s.d. ${esc(record.cutiAdjustment.endDate)}` : ''}</span></div>` : ''}${(record.evidence || []).length ? `<div class="tukin-files">${record.evidence.map((evidence) => `${esc(evidence.name)} ${attachmentOpenLink(evidence, 'Buka')}`).join('<br>')}</div>` : ''}</td><td><button class="btn btn-secondary btn-sm" data-edit-record="${esc(record.key)}" data-employee="${esc(rules.employeeKey(employee))}" type="button">Edit</button></td></tr>`).join('') || '<tr><td colspan="10" class="text-center">Tidak ada tanggal yang menghasilkan potongan atau memerlukan verifikasi.</td></tr>'}</tbody></table></div></aside>`;
   }
 
   function renderEditModal() {
@@ -319,7 +361,7 @@
     const employee = employeeByKey(state.editDraft.employeeKey);
     const record = recordByKey(employee, state.editRecordKey);
     if (!employee || !record) return '';
-    return `<div class="tukin-modal-backdrop"><div class="tukin-modal"><div class="tukin-modal-head"><div><h3>Koreksi Perhitungan</h3><p>${esc(employee.name)} · ${esc(rules.formatDate(record.date, true))}</p></div><button class="icon-btn" data-action="close-edit" type="button">×</button></div><div class="alert alert-warning"><div class="alert-title">Hasil otomatis ${pct(record.autoTotalPercent)}</div>${esc(record.reason || '')}</div>
+    return `<div class="tukin-modal-backdrop"><div class="tukin-modal"><div class="tukin-modal-head"><div><h3>Koreksi Perhitungan</h3><p>${esc(employee.name)} · ${esc(rules.formatDate(record.date, true))}</p></div><button class="icon-btn" data-action="close-edit" type="button">×</button></div><div class="alert alert-warning"><div class="alert-title">Hasil otomatis ${pct(record.autoTotalPercent)}</div>${esc(record.reason || '')}</div>${record.cutiAdjustment?.automatic ? `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Data Cuti</div>${esc(record.adjustmentNote || '')}</div>` : ''}
       <div class="tukin-form-grid section-gap"><div class="field"><label>% Potongan Hasil Penyesuaian</label><input id="edit-percent" type="number" min="0" max="2.5" step="0.01" value="${esc(state.editDraft.percent)}"></div><div class="field"><label>Bukti Dukung</label><input id="edit-evidence" type="file" multiple accept="application/pdf,image/png,image/jpeg,image/webp"></div><div class="full field"><label>Keterangan</label><textarea id="edit-note" placeholder="Contoh: Dinas berdasarkan Surat Tugas ...">${esc(state.editDraft.note)}</textarea></div></div>
       <div class="tukin-evidence-list">${state.editDraft.evidence.length ? state.editDraft.evidence.map((evidence, i) => `<div class="tukin-evidence"><span>${esc(evidence.name)} · ${bytes(evidence.size || 0)} ${attachmentOpenLink(evidence, 'Buka')}</span><button data-remove-evidence="${i}" type="button">Hapus</button></div>`).join('') : '<div class="card-subtitle">Belum ada bukti dukung.</div>'}</div>
       <div class="actions"><button class="btn btn-secondary" data-action="reset-auto" type="button">Gunakan Hasil Otomatis</button><div class="actions-right"><button class="btn btn-secondary" data-action="close-edit" type="button">Batal</button><button class="btn btn-primary" data-action="save-edit" type="button">Simpan Koreksi</button></div></div></div></div>`;
@@ -374,6 +416,7 @@
     state.currentRunId = null;
     state.sharePointRun = null;
     state.pendingSharePointDeletes = [];
+    state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: '' };
   }
 
   function resetProcess() {
@@ -397,6 +440,7 @@
     state.currentRunId = null;
     state.sharePointRun = null;
     state.pendingSharePointDeletes = [];
+    state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: '' };
   }
 
   function addFiles(fileList) {
@@ -409,6 +453,7 @@
     state.validationResults = [];
     state.employees = [];
     state.generated = null;
+    state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: '' };
     if (state.files.length) {
       resources?.warm?.('xlsx');
       window.MasterDataService?.getEmployees?.(false).catch(() => {});
@@ -427,6 +472,7 @@
       state.validationResults = result.results;
       state.employees = result.employees;
       state.employees.forEach((employee) => sharePoint?.normalizeEmployeeAttachments?.(employee));
+      await syncCutiAdjustments({ render: false });
       if (!state.currentRunId) state.currentRunId = newRunId();
       state.step = 'validation';
       resources?.warm?.(['exceljs', 'jszip', 'filesaver']);
@@ -606,6 +652,8 @@
             if (!oldRecord) return;
             record.adjustedPercent = oldRecord.adjustedPercent ?? null;
             record.adjustmentNote = oldRecord.adjustmentNote || '';
+            record.adjustmentSource = oldRecord.adjustmentSource || '';
+            record.cutiAdjustment = oldRecord.cutiAdjustment ? { ...oldRecord.cutiAdjustment } : null;
             record.evidence = [...(oldRecord.evidence || [])];
           });
         }
@@ -616,7 +664,8 @@
       state.validationResults = parsed.results;
       state.files = downloadedFiles;
       state.generated = null;
-      alert('File absensi terbaru dari SharePoint telah dimuat ulang dan perhitungan otomatis diperbarui. Koreksi/bukti dukung yang sudah ada dipertahankan berdasarkan tanggal.');
+      await syncCutiAdjustments({ render: false });
+      alert('File absensi terbaru dari SharePoint telah dimuat ulang. Perhitungan otomatis dan integrasi Data Cuti diperbarui; koreksi manual/bukti dukung yang sudah ada dipertahankan berdasarkan tanggal.');
     } catch (error) {
       console.error(error);
       alert(`Gagal memuat ulang absensi dari SharePoint: ${error.message || error}`);
@@ -826,6 +875,8 @@
     }
     record.adjustedPercent = Number(value.toFixed(2));
     record.adjustmentNote = String(document.getElementById('edit-note')?.value || '').trim();
+    record.adjustmentSource = 'manual';
+    record.cutiAdjustment = null;
     record.evidence = [...state.editDraft.evidence];
     state.generated = null;
     state.editRecordKey = null;
@@ -839,6 +890,8 @@
     if (!record) return;
     record.adjustedPercent = null;
     record.adjustmentNote = '';
+    record.adjustmentSource = '';
+    record.cutiAdjustment = null;
     for (const item of record.evidence || []) {
       if (item?.driveId && item?.itemId) state.pendingSharePointDeletes.push({ ...item, file: null });
     }
@@ -967,6 +1020,7 @@
       state.files.splice(Number(button.dataset.removeFile), 1);
       state.validationResults = [];
       state.employees = [];
+      state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: '' };
       render();
     }));
     document.querySelector('[data-action="calculate"]')?.addEventListener('click', calculate);
@@ -1018,6 +1072,13 @@
       state.editEmployeeKey = null;
       state.generated = null;
       render();
+    });
+    document.querySelector('[data-action="sync-cuti"]')?.addEventListener('click', async () => {
+      const result = await syncCutiAdjustments();
+      if (result) {
+        const count = Number(result.adjustedRecords || 0);
+        alert(count ? `${count} tanggal berhasil disesuaikan otomatis berdasarkan Data Cuti.` : 'Sinkronisasi Data Cuti selesai. Tidak ada tanggal tambahan yang perlu disesuaikan.');
+      }
     });
     document.querySelector('[data-action="reload-sharepoint-attendance"]')?.addEventListener('click', reloadAttendanceFromSharePoint);
     document.querySelector('[data-action="generate"]')?.addEventListener('click', generate);

@@ -150,6 +150,7 @@
       satker:master?.satker || cfg.SATKER,
       anakSatker:master?.anakSatker || '',
       tukin:Number(master?.tukin || cfg.DEFAULT_TUKIN),
+      masterEmployeeId:String(master?.id || ''),
       masterOrder:Number(master?.order || 9999),masterMatched:Boolean(master),
       skpDeductionPercent:0,
       records,sourceFiles:[file],warnings
