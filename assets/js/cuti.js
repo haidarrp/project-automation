@@ -56,6 +56,7 @@
     balanceModal: null,
     documentModal: null,
     previewModal: null,
+    inlinePreviews: {},
     drawer: null
   };
 
@@ -534,22 +535,51 @@
     </div>`;
   }
 
+  function inlinePreviewKey(leaveId, documentId) {
+    return `${String(leaveId || '')}::${String(documentId || '')}`;
+  }
+
+  function inlinePreviewMarkup(item, doc) {
+    const file = doc.file || null;
+    if (!file?.driveId || !file?.itemId) return '';
+
+    const key = inlinePreviewKey(item.id, doc.id);
+    const ctx = state.inlinePreviews[key] || { loading: true, error: '', getUrl: '', postUrl: '', postParameters: '' };
+    const fileName = file.name || file.remoteName || doc.name || 'Dokumen Cuti';
+    let body = '';
+
+    if (ctx.loading) {
+      body = '<div class="leave-inline-preview-status"><strong>Menyiapkan preview dokumen</strong><span>Mengambil tampilan sementara dari Microsoft 365...</span></div>';
+    } else if (ctx.error) {
+      body = `<div class="leave-inline-preview-status leave-inline-preview-error"><strong>Preview tidak tersedia</strong><span>${esc(ctx.error)}</span><small>Gunakan tombol Unduh atau SharePoint di atas untuk membuka dokumen.</small></div>`;
+    } else if (ctx.getUrl) {
+      body = `<iframe class="leave-inline-preview-frame" src="${esc(ctx.getUrl)}" title="Preview ${esc(fileName)}" allow="fullscreen" referrerpolicy="no-referrer"></iframe>`;
+    } else if (ctx.postUrl) {
+      const targetName = `leave-inline-preview-${String(item.id || 'leave').replace(/[^A-Za-z0-9_-]/g, '')}-${String(doc.id || 'doc').replace(/[^A-Za-z0-9_-]/g, '')}`;
+      body = `<iframe class="leave-inline-preview-frame" name="${esc(targetName)}" title="Preview ${esc(fileName)}" allow="fullscreen" referrerpolicy="no-referrer"></iframe><form class="leave-preview-post-form" data-leave-inline-preview-post method="post" action="${esc(ctx.postUrl)}" target="${esc(targetName)}">${previewPostFields(ctx.postParameters)}</form>`;
+    } else {
+      body = '<div class="leave-inline-preview-status leave-inline-preview-error"><strong>Preview tidak tersedia</strong><span>Microsoft 365 tidak memberikan URL preview untuk dokumen ini.</span></div>';
+    }
+
+    return `<div class="leave-inline-preview"><div class="leave-inline-preview-label"><span>Preview Dokumen</span><small>Dokumen SharePoint dimuat otomatis</small></div><div class="leave-inline-preview-body">${body}</div></div>`;
+  }
+
   function leaveDrawer(item) {
     const identity = employeeIdentity(item.employeeId);
     const docs = item.documents || [];
-    return `<div class="leave-drawer-backdrop" data-action="close-drawer"></div><aside class="leave-drawer" role="dialog" aria-modal="true" aria-label="Detail cuti">
-      <div class="leave-drawer-head"><div><h3>${esc(identity.name || 'Pegawai')}</h3><p>Detail pencatatan cuti internal Pusdatin.</p></div><button class="icon-btn" type="button" data-action="close-drawer">×</button></div>
-      <div class="leave-detail-section"><div class="leave-section-title">Informasi Pegawai</div><div class="leave-detail-grid"><div><span>Nama</span><strong>${esc(identity.name || '—')}</strong></div><div><span>NIP</span><strong>${esc(identity.nip || '—')}</strong></div><div class="span-2"><span>Unit/Bidang</span><strong>${esc(identity.unit || 'Belum diisi')}</strong></div></div></div>
-      <div class="leave-detail-section"><div class="leave-section-title">Informasi Cuti</div><div class="leave-detail-grid"><div><span>Jenis Cuti</span><strong>${esc(item.leaveType)}</strong></div><div><span>Tahun</span><strong>${esc(item.leaveYear)}</strong></div><div><span>Tanggal Mulai</span><strong>${esc(formatDate(item.startDate))}</strong></div><div><span>Tanggal Selesai</span><strong>${esc(formatDate(item.endDate))}</strong></div><div><span>Jumlah Hari</span><strong>${esc(item.days)}${item.manualOverride ? ' (koreksi manual)' : ''}</strong></div><div><span>Hasil Kalkulasi</span><strong>${esc(item.calculatedDays)} hari kerja</strong></div><div><span>Nomor Surat/Dokumen</span><strong>${esc(item.documentNumber || '—')}</strong></div><div><span>Tanggal Surat</span><strong>${esc(formatDate(item.documentDate))}</strong></div><div class="span-2"><span>Catatan</span><strong>${item.note ? esc(item.note) : '—'}</strong></div></div></div>
-      <div class="leave-document-head"><div><div class="leave-section-title">Bukti Dukung Cuti</div><p>File disimpan pada SharePoint menggunakan lokasi yang sama dengan TUKIN, di dalam folder khusus CUTI.</p></div><button class="btn btn-secondary btn-sm" type="button" data-add-leave-document="${esc(item.id)}">+ Tambah Dokumen</button></div>
-      <div class="leave-document-list">${docs.length ? docs.map((doc) => {
+    return `<div class="leave-detail-backdrop" data-action="close-drawer"></div><section class="leave-detail-modal" role="dialog" aria-modal="true" aria-label="Detail cuti">
+      <div class="leave-drawer-head leave-detail-modal-head"><div><h3>${esc(identity.name || 'Pegawai')}</h3><p>Detail pencatatan cuti internal Pusdatin.</p></div><button class="icon-btn" type="button" data-action="close-drawer">×</button></div>
+      <div class="leave-detail-section"><div class="leave-section-title">Informasi Pegawai</div><div class="leave-detail-grid leave-detail-grid-employee"><div><span>Nama</span><strong>${esc(identity.name || '—')}</strong></div><div><span>NIP</span><strong>${esc(identity.nip || '—')}</strong></div><div><span>Unit/Bidang</span><strong>${esc(identity.unit || 'Belum diisi')}</strong></div></div></div>
+      <div class="leave-detail-section"><div class="leave-section-title">Informasi Cuti</div><div class="leave-detail-grid leave-detail-grid-leave"><div><span>Jenis Cuti</span><strong>${esc(item.leaveType)}</strong></div><div><span>Tahun</span><strong>${esc(item.leaveYear)}</strong></div><div><span>Tanggal Mulai</span><strong>${esc(formatDate(item.startDate))}</strong></div><div><span>Tanggal Selesai</span><strong>${esc(formatDate(item.endDate))}</strong></div><div><span>Jumlah Hari</span><strong>${esc(item.days)}${item.manualOverride ? ' (koreksi manual)' : ''}</strong></div><div><span>Hasil Kalkulasi</span><strong>${esc(item.calculatedDays)} hari kerja</strong></div><div><span>Nomor Surat/Dokumen</span><strong>${esc(item.documentNumber || '—')}</strong></div><div><span>Tanggal Surat</span><strong>${esc(formatDate(item.documentDate))}</strong></div><div class="span-all"><span>Catatan</span><strong>${item.note ? esc(item.note) : '—'}</strong></div></div></div>
+      <div class="leave-document-head"><div><div class="leave-section-title">Bukti Dukung Cuti</div><p>File disimpan pada SharePoint menggunakan lokasi yang sama dengan TUKIN, di dalam folder khusus CUTI. Preview dimuat otomatis.</p></div><button class="btn btn-secondary btn-sm" type="button" data-add-leave-document="${esc(item.id)}">+ Tambah Dokumen</button></div>
+      <div class="leave-document-list leave-document-list-preview">${docs.length ? docs.map((doc) => {
         const file = doc.file || null;
         const fileDetail = file?.itemId ? `<br><span class="leave-file-meta">SharePoint · ${esc(file.name || file.remoteName || 'File')}${file.size ? ` · ${esc(formatFileSize(file.size))}` : ''}</span>` : '<br><span class="leave-file-meta leave-file-missing">File belum tersimpan di SharePoint</span>';
-        const fileActions = file?.itemId ? `<button class="btn btn-primary btn-sm" type="button" data-preview-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Preview</button><button class="btn btn-secondary btn-sm" type="button" data-download-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Unduh</button>${file.webUrl ? `<a class="btn btn-secondary btn-sm" href="${esc(file.webUrl)}" target="_blank" rel="noopener noreferrer">SharePoint ↗</a>` : ''}` : '';
-        return `<div class="leave-document-row"><div><strong>${esc(doc.name || doc.type)}</strong><span>${esc(doc.type)}${doc.number ? ` · No. ${esc(doc.number)}` : ''}${doc.note ? `<br>${esc(doc.note)}` : ''}${fileDetail}</span></div><div class="leave-row-actions">${fileActions}<button class="btn btn-secondary btn-sm" type="button" data-edit-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Edit</button><button class="btn btn-danger btn-sm" type="button" data-delete-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Hapus</button></div></div>`;
+        const fileActions = file?.itemId ? `<button class="btn btn-secondary btn-sm" type="button" data-download-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Unduh</button>${file.webUrl ? `<a class="btn btn-secondary btn-sm" href="${esc(file.webUrl)}" target="_blank" rel="noopener noreferrer">SharePoint ↗</a>` : ''}` : '';
+        return `<article class="leave-document-card"><div class="leave-document-row"><div><strong>${esc(doc.name || doc.type)}</strong><span>${esc(doc.type)}${doc.number ? ` · No. ${esc(doc.number)}` : ''}${doc.note ? `<br>${esc(doc.note)}` : ''}${fileDetail}</span></div><div class="leave-row-actions">${fileActions}<button class="btn btn-secondary btn-sm" type="button" data-edit-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Edit</button><button class="btn btn-danger btn-sm" type="button" data-delete-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Hapus</button></div></div>${inlinePreviewMarkup(item, doc)}</article>`;
       }).join('') : '<div class="leave-empty"><strong>Belum ada bukti dukung</strong>Tambahkan dokumen cuti untuk mengunggah file ke SharePoint.</div>'}</div>
-      <div class="leave-modal-actions"><button class="btn btn-secondary" type="button" data-leave-edit="${esc(item.id)}">Edit Data</button><button class="btn btn-danger" type="button" data-leave-delete="${esc(item.id)}">Hapus</button></div>
-    </aside>`;
+      <div class="leave-modal-actions leave-detail-actions"><button class="btn btn-secondary" type="button" data-leave-edit="${esc(item.id)}">Edit Data</button><button class="btn btn-danger" type="button" data-leave-delete="${esc(item.id)}">Hapus</button></div>
+    </section>`;
   }
 
   function employeeDrawer(employeeId) {
@@ -691,6 +721,7 @@
     const yearLoading = state.loadingYear ? `<div class="alert alert-info"><div class="alert-title">Memuat data tahun ${esc(state.loadingYear)}</div>Riwayat dan saldo cuti sedang diambil dari cache/Cloud Firestore.</div>` : '';
     const content = `${state.error ? `<div class="alert alert-warning"><div class="alert-title">Data belum dapat dimuat sempurna</div>${esc(state.error)}</div>` : ''}${yearLoading}${viewMarkup()}`;
     app.innerHTML = window.AppShell.render({ module: 'leave', view: state.view, viewLabel: VIEW_LABELS[state.view], content, overlays: overlays() });
+    if (state.drawer?.type === 'leave') window.requestAnimationFrame(submitInlinePreviewPostForms);
   }
 
   async function audit(action, target, detail) {
@@ -1038,8 +1069,7 @@
       await audit(existingId ? 'UPDATE_LEAVE_DOCUMENT' : 'CREATE_LEAVE_DOCUMENT', `leaveRecords/${item.id}`, `${employeeIdentity(item.employeeId).name || item.employeeId} · ${name}`);
       state.documentModal = null;
       await ensureYearData(item.leaveYear, { force: true });
-      state.drawer = { type: 'leave', id: item.id };
-      render();
+      openLeaveDetail(item.id);
       showToast(existingId ? 'Dokumen cuti berhasil diperbarui.' : 'Bukti dukung cuti berhasil diunggah ke SharePoint.');
     } catch (error) {
       if (uploadedFile?.driveId && uploadedFile?.itemId && !firestoreSaved) {
@@ -1049,6 +1079,67 @@
       button.textContent = 'Simpan Dokumen';
       alert(`Dokumen cuti gagal disimpan: ${error.message || error}`);
     }
+  }
+
+  function submitInlinePreviewPostForms() {
+    document.querySelectorAll('[data-leave-inline-preview-post]').forEach((form) => {
+      try { form.submit(); } catch (error) { console.warn('Preview POST Microsoft 365 gagal dikirim:', error); }
+    });
+  }
+
+  async function loadLeaveDocumentPreviews(leaveId) {
+    const item = state.leaves.find((row) => row.id === leaveId);
+    if (!item) {
+      render();
+      return;
+    }
+
+    const docs = (item.documents || []).filter((doc) => doc.file?.driveId && doc.file?.itemId);
+    docs.forEach((doc) => {
+      state.inlinePreviews[inlinePreviewKey(leaveId, doc.id)] = {
+        loading: true,
+        error: '',
+        getUrl: '',
+        postUrl: '',
+        postParameters: ''
+      };
+    });
+    render();
+
+    for (const doc of docs) {
+      if (state.drawer?.type !== 'leave' || state.drawer.id !== leaveId) return;
+      const key = inlinePreviewKey(leaveId, doc.id);
+      try {
+        const preview = await sharePoint.getPreviewInfo({ ...doc.file, file: null }, true);
+        state.inlinePreviews[key] = {
+          loading: false,
+          error: '',
+          getUrl: preview.getUrl || '',
+          postUrl: preview.postUrl || '',
+          postParameters: preview.postParameters || ''
+        };
+      } catch (error) {
+        state.inlinePreviews[key] = {
+          loading: false,
+          error: error.message || String(error),
+          getUrl: '',
+          postUrl: '',
+          postParameters: ''
+        };
+      }
+    }
+
+    if (state.drawer?.type === 'leave' && state.drawer.id === leaveId) {
+      render();
+      window.requestAnimationFrame(submitInlinePreviewPostForms);
+    }
+  }
+
+  function openLeaveDetail(leaveId) {
+    state.previewModal = null;
+    state.inlinePreviews = {};
+    state.drawer = { type: 'leave', id: leaveId };
+    loadLeaveDocumentPreviews(leaveId);
   }
 
   async function previewLeaveDocument(leaveId, documentId) {
@@ -1145,8 +1236,7 @@
 
       await audit('DELETE_LEAVE_DOCUMENT', `leaveRecords/${item.id}`, `${employeeIdentity(item.employeeId).name || item.employeeId} · ${doc.name || doc.type}`);
       await ensureYearData(item.leaveYear, { force: true });
-      state.drawer = { type: 'leave', id: item.id };
-      render();
+      openLeaveDetail(item.id);
       showToast(cleanupFailed ? 'Metadata dokumen dihapus, tetapi file SharePoint belum berhasil dibersihkan.' : 'Dokumen dan file bukti dukung berhasil dihapus.');
     } catch (error) {
       alert(`Dokumen cuti gagal dihapus: ${error.message || error}`);
@@ -1238,7 +1328,7 @@
     if (action === 'close-balance-modal') { state.balanceModal = null; render(); return; }
     if (action === 'close-document-modal') { state.documentModal = null; render(); return; }
     if (action === 'close-preview-modal') { state.previewModal = null; render(); return; }
-    if (action === 'close-drawer') { state.drawer = null; render(); return; }
+    if (action === 'close-drawer') { state.drawer = null; state.inlinePreviews = {}; render(); return; }
     if (action === 'save-leave') { saveLeave(actionEl); return; }
     if (action === 'save-balance') { saveBalance(actionEl); return; }
     if (action === 'save-leave-document') { saveLeaveDocument(actionEl); return; }
@@ -1252,7 +1342,7 @@
     if (mode) { state.calendarMode = mode === 'list' ? 'list' : 'calendar'; render(); return; }
 
     const detailId = event.target.closest?.('[data-leave-detail]')?.dataset.leaveDetail;
-    if (detailId) { state.drawer = { type: 'leave', id: detailId }; render(); return; }
+    if (detailId) { openLeaveDetail(detailId); return; }
 
     const employeeDetail = event.target.closest?.('[data-employee-leave-detail]')?.dataset.employeeLeaveDetail;
     if (employeeDetail) { state.drawer = { type: 'employee', employeeId: employeeDetail }; render(); return; }
@@ -1272,9 +1362,6 @@
     const editDoc = event.target.closest?.('[data-edit-leave-document]');
     if (editDoc) { openDocumentModal(editDoc.dataset.leaveId, editDoc.dataset.editLeaveDocument); return; }
 
-    const previewDoc = event.target.closest?.('[data-preview-leave-document]');
-    if (previewDoc) { previewLeaveDocument(previewDoc.dataset.leaveId, previewDoc.dataset.previewLeaveDocument); return; }
-
     const downloadDoc = event.target.closest?.('[data-download-leave-document]');
     if (downloadDoc) { downloadLeaveDocument(downloadDoc.dataset.leaveId, downloadDoc.dataset.downloadLeaveDocument, downloadDoc); return; }
 
@@ -1288,6 +1375,7 @@
     state.balanceModal = null;
     state.documentModal = null;
     state.previewModal = null;
+    state.inlinePreviews = {};
     state.drawer = null;
     render();
   });
