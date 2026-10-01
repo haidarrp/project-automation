@@ -3,6 +3,7 @@
 
   const cfg = window.MICROSOFT_CONFIG || {};
   const auth = window.MicrosoftAuth;
+  const rootFolderName = String(window.SHAREPOINT_STORAGE_ROOT_FOLDER || cfg.rootFolderName || '').trim();
   const rootCache = { resolved: null, appRoot: null };
   const monthNames = window.TUKIN_CONFIG?.MONTHS || [
     'Januari','Februari','Maret','April','Mei','Juni',
@@ -156,8 +157,8 @@
   async function resolveAppRoot(interactive) {
     if (rootCache.appRoot) return rootCache.appRoot;
     const shared = await resolveSharedRoot(interactive);
-    const appRoot = cfg.rootFolderName
-      ? await ensureFolder(shared.driveId, shared.itemId, cfg.rootFolderName, interactive)
+    const appRoot = rootFolderName
+      ? await ensureFolder(shared.driveId, shared.itemId, rootFolderName, interactive)
       : { id: shared.itemId, name: shared.name, webUrl: shared.webUrl, parentReference: { driveId: shared.driveId } };
     rootCache.appRoot = {
       driveId: shared.driveId,
@@ -276,6 +277,32 @@
       (modified && modified !== Number(attachment.sourceLastModified || attachment.lastModified || 0));
   }
 
+  async function ensurePath(pathSegments, interactive) {
+    await ensureReady(interactive);
+    const appRoot = await resolveAppRoot(interactive);
+    const segments = (Array.isArray(pathSegments) ? pathSegments : [])
+      .map((segment) => safeName(segment, 'Folder'))
+      .filter(Boolean);
+    let current = {
+      id: appRoot.itemId,
+      name: appRoot.name,
+      webUrl: appRoot.webUrl || ''
+    };
+    const names = [];
+    for (const segment of segments) {
+      current = await ensureFolder(appRoot.driveId, current.id, segment, interactive);
+      names.push(current.name || segment);
+    }
+    return {
+      driveId: appRoot.driveId,
+      itemId: current.id,
+      name: current.name || appRoot.name,
+      webUrl: current.webUrl || '',
+      path: names.join('/'),
+      rootFolderName
+    };
+  }
+
   async function uploadBlob(driveId, parentItemId, remoteName, blob, interactive) {
     if (!blob) throw new Error('Isi file tidak tersedia untuk upload.');
     const max = Number(cfg.maxSimpleUploadBytes || 250 * 1024 * 1024);
@@ -306,6 +333,16 @@
     attachment.uploadedAt = new Date().toISOString();
     attachment.uploadedBy = account?.username || account?.name || '';
     attachment.localOnly = false;
+    return attachment;
+  }
+
+  async function uploadAttachment(item, options, interactive) {
+    const attachment = normalizeAttachment(item, options?.kind || 'file');
+    if (!attachment.file) throw new Error('Pilih file yang akan diunggah ke SharePoint.');
+    const folder = await ensurePath(options?.path || [], interactive);
+    const remoteName = safeName(options?.remoteName || attachment.name || attachment.file.name || 'file', 'file');
+    const remote = await uploadBlob(folder.driveId, folder.itemId, remoteName, attachment.file, interactive);
+    applyRemoteMetadata(attachment, remote, remoteName, [folder.path, remoteName].filter(Boolean).join('/'));
     return attachment;
   }
 
@@ -357,7 +394,7 @@
       runFolderWebUrl: runFolder.webUrl || '',
       recapFolderItemId: recapFolder.id,
       rootShareUrl: cfg.shareUrl,
-      rootFolderName: cfg.rootFolderName || '',
+      rootFolderName,
       syncedAt: new Date().toISOString()
     };
     run.sharePoint = sharePoint;
@@ -522,6 +559,8 @@
     normalizeAttachment,
     normalizeEmployeeAttachments,
     serializableAttachment,
+    ensurePath,
+    uploadAttachment,
     syncRunFiles,
     uploadRecap,
     downloadAttachment,

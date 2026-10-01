@@ -3,6 +3,7 @@
 
   const app = document.getElementById('app');
   const rules = window.CutiRules;
+  const sharePoint = window.SharePointStorage;
   const now = new Date();
   const CURRENT_YEAR = now.getFullYear();
   const CURRENT_MONTH = now.getMonth() + 1;
@@ -159,13 +160,43 @@
 
   function normalizeDocument(raw, index) {
     const row = raw && typeof raw === 'object' ? raw : {};
+    const storedFile = row.file && typeof row.file === 'object' ? { ...row.file } : null;
+    if (storedFile) delete storedFile.file;
     return {
       id: String(row.id || `doc-${index + 1}`),
       type: String(row.type || 'Dokumen Cuti'),
       name: String(row.name || ''),
       number: String(row.number || ''),
-      note: String(row.note || '')
+      note: String(row.note || ''),
+      file: storedFile
     };
+  }
+
+  function formatFileSize(value) {
+    const bytes = Number(value || 0);
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  }
+
+  function cutiSharePointPath(item) {
+    const identity = employeeIdentity(item?.employeeId);
+    const nip = identity.nip || 'TANPA-NIP';
+    const employeeFolder = sharePoint?.safeName?.(`${nip}_${identity.name || 'Pegawai'}`, nip) || `${nip}_${identity.name || 'Pegawai'}`;
+    const recordFolder = sharePoint?.safeName?.(`${item?.startDate || 'tanggal'}_${item?.id || 'cuti'}`, item?.id || 'cuti') || String(item?.id || 'cuti');
+    return [String(item?.leaveYear || yearFromDate(item?.startDate)), employeeFolder, recordFolder];
+  }
+
+  function cutiRemoteFileName(documentId, file) {
+    const original = String(file?.name || 'Bukti_Cuti');
+    const dot = original.lastIndexOf('.');
+    const ext = dot > 0 && original.length - dot <= 10 ? original.slice(dot) : '';
+    const base = ext ? original.slice(0, dot) : original;
+    const prefix = String(documentId || 'dokumen').replace(/[^A-Za-z0-9_-]/g, '').slice(-28) || 'dokumen';
+    const safeBase = sharePoint?.safeName?.(base, 'Bukti_Cuti') || base;
+    const maxBase = Math.max(20, 116 - prefix.length - ext.length);
+    return `${prefix}_${safeBase.slice(0, maxBase)}${ext}`;
   }
 
   function normalizeLeave(data, id) {
@@ -509,8 +540,13 @@
       <div class="leave-drawer-head"><div><h3>${esc(identity.name || 'Pegawai')}</h3><p>Detail pencatatan cuti internal Pusdatin.</p></div><button class="icon-btn" type="button" data-action="close-drawer">×</button></div>
       <div class="leave-detail-section"><div class="leave-section-title">Informasi Pegawai</div><div class="leave-detail-grid"><div><span>Nama</span><strong>${esc(identity.name || '—')}</strong></div><div><span>NIP</span><strong>${esc(identity.nip || '—')}</strong></div><div class="span-2"><span>Unit/Bidang</span><strong>${esc(identity.unit || 'Belum diisi')}</strong></div></div></div>
       <div class="leave-detail-section"><div class="leave-section-title">Informasi Cuti</div><div class="leave-detail-grid"><div><span>Jenis Cuti</span><strong>${esc(item.leaveType)}</strong></div><div><span>Tahun</span><strong>${esc(item.leaveYear)}</strong></div><div><span>Tanggal Mulai</span><strong>${esc(formatDate(item.startDate))}</strong></div><div><span>Tanggal Selesai</span><strong>${esc(formatDate(item.endDate))}</strong></div><div><span>Jumlah Hari</span><strong>${esc(item.days)}${item.manualOverride ? ' (koreksi manual)' : ''}</strong></div><div><span>Hasil Kalkulasi</span><strong>${esc(item.calculatedDays)} hari kerja</strong></div><div><span>Nomor Surat/Dokumen</span><strong>${esc(item.documentNumber || '—')}</strong></div><div><span>Tanggal Surat</span><strong>${esc(formatDate(item.documentDate))}</strong></div><div class="span-2"><span>Catatan</span><strong>${item.note ? esc(item.note) : '—'}</strong></div></div></div>
-      <div class="leave-document-head"><div><div class="leave-section-title">Dokumen Cuti</div><p>Metadata dummy untuk pengembangan selanjutnya; tidak ada upload atau penyimpanan file.</p></div><button class="btn btn-secondary btn-sm" type="button" data-add-leave-document="${esc(item.id)}">+ Tambah Dokumen</button></div>
-      <div class="leave-document-list">${docs.length ? docs.map((doc) => `<div class="leave-document-row"><div><strong>${esc(doc.name || doc.type)}</strong><span>${esc(doc.type)}${doc.number ? ` · No. ${esc(doc.number)}` : ''}${doc.note ? `<br>${esc(doc.note)}` : ''}</span></div><div class="leave-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-edit-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Edit</button><button class="btn btn-danger btn-sm" type="button" data-delete-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Hapus</button></div></div>`).join('') : '<div class="leave-empty"><strong>Belum ada metadata dokumen</strong>Tambahkan metadata apabila diperlukan.</div>'}</div>
+      <div class="leave-document-head"><div><div class="leave-section-title">Bukti Dukung Cuti</div><p>File disimpan pada SharePoint menggunakan lokasi yang sama dengan TUKIN, di dalam folder khusus CUTI.</p></div><button class="btn btn-secondary btn-sm" type="button" data-add-leave-document="${esc(item.id)}">+ Tambah Dokumen</button></div>
+      <div class="leave-document-list">${docs.length ? docs.map((doc) => {
+        const file = doc.file || null;
+        const fileDetail = file?.itemId ? `<br><span class="leave-file-meta">SharePoint · ${esc(file.name || file.remoteName || 'File')}${file.size ? ` · ${esc(formatFileSize(file.size))}` : ''}</span>` : '<br><span class="leave-file-meta leave-file-missing">File belum tersimpan di SharePoint</span>';
+        const fileActions = file?.itemId ? `<button class="btn btn-secondary btn-sm" type="button" data-download-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Unduh</button>${file.webUrl ? `<a class="btn btn-secondary btn-sm" href="${esc(file.webUrl)}" target="_blank" rel="noopener noreferrer">SharePoint ↗</a>` : ''}` : '';
+        return `<div class="leave-document-row"><div><strong>${esc(doc.name || doc.type)}</strong><span>${esc(doc.type)}${doc.number ? ` · No. ${esc(doc.number)}` : ''}${doc.note ? `<br>${esc(doc.note)}` : ''}${fileDetail}</span></div><div class="leave-row-actions">${fileActions}<button class="btn btn-secondary btn-sm" type="button" data-edit-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Edit</button><button class="btn btn-danger btn-sm" type="button" data-delete-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Hapus</button></div></div>`;
+      }).join('') : '<div class="leave-empty"><strong>Belum ada bukti dukung</strong>Tambahkan dokumen cuti untuk mengunggah file ke SharePoint.</div>'}</div>
       <div class="leave-modal-actions"><button class="btn btn-secondary" type="button" data-leave-edit="${esc(item.id)}">Edit Data</button><button class="btn btn-danger" type="button" data-leave-delete="${esc(item.id)}">Hapus</button></div>
     </aside>`;
   }
@@ -573,15 +609,20 @@
   function documentModal() {
     if (!state.documentModal) return '';
     const doc = state.documentModal.document || {};
+    const storedFile = doc.file || null;
+    const storedFileLabel = storedFile?.itemId
+      ? `<div class="leave-current-file"><span>File saat ini</span><strong>${esc(storedFile.name || storedFile.remoteName || 'File SharePoint')}</strong>${storedFile.size ? `<small>${esc(formatFileSize(storedFile.size))}</small>` : ''}</div>`
+      : '';
     return `<div class="leave-modal-backdrop" data-action="close-document-modal"><div class="leave-modal leave-document-modal" role="dialog" aria-modal="true" data-document-modal-panel>
-      <div class="leave-modal-head"><div><h3>${doc.id ? 'Edit Metadata Dokumen' : 'Tambah Metadata Dokumen'}</h3><p>Hanya metadata. Tidak ada file picker, upload server, base64, atau attachment database.</p></div><button class="icon-btn" type="button" data-action="close-document-modal">×</button></div>
+      <div class="leave-modal-head"><div><h3>${doc.id ? 'Edit Dokumen Cuti' : 'Tambah Dokumen Cuti'}</h3><p>File bukti dukung disimpan di SharePoint pada folder CUTI. Metadata dokumen tetap dicatat pada aplikasi.</p></div><button class="icon-btn" type="button" data-action="close-document-modal">×</button></div>
       <div class="leave-modal-grid">
         <div class="field"><label>Jenis Dokumen</label><select id="leave-doc-type">${DOCUMENT_TYPES.map((type) => `<option value="${esc(type)}" ${(doc.type || DOCUMENT_TYPES[0]) === type ? 'selected' : ''}>${esc(type)}</option>`).join('')}</select></div>
         <div class="field"><label>Nomor Dokumen</label><input id="leave-doc-number" type="text" value="${esc(doc.number || '')}" placeholder="Opsional"></div>
         <div class="field span-2"><label>Nama Dokumen</label><input id="leave-doc-name" type="text" value="${esc(doc.name || '')}" placeholder="Contoh: Surat Cuti Tahunan"></div>
+        <div class="field span-2"><label>File Bukti Dukung${storedFile?.itemId ? ' <span class="leave-optional">(pilih file baru untuk mengganti)</span>' : ''}</label><input id="leave-doc-file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">${storedFileLabel}<div class="leave-field-note">Saat upload pertama, aplikasi dapat meminta Anda menghubungkan akun Microsoft 365 Kementerian PKP.</div></div>
         <div class="field span-2"><label>Keterangan</label><textarea id="leave-doc-note" rows="3" placeholder="Opsional">${esc(doc.note || '')}</textarea></div>
       </div>
-      <div class="leave-modal-actions"><button class="btn btn-secondary" type="button" data-action="close-document-modal">Batal</button><button class="btn btn-primary" type="button" data-action="save-leave-document">Simpan</button></div>
+      <div class="leave-modal-actions"><button class="btn btn-secondary" type="button" data-action="close-document-modal">Batal</button><button class="btn btn-primary" type="button" data-action="save-leave-document">Simpan Dokumen</button></div>
     </div></div>`;
   }
 
@@ -837,11 +878,19 @@
         const nextLeaves = state.leaves.filter((row) => row.id !== id);
         await syncBalanceWithLeaves(item.employeeId, item.leaveYear, nextLeaves);
       }
+
+      const remoteFiles = (item.documents || []).map((doc) => doc.file).filter((file) => file?.driveId && file?.itemId);
+      let cleanupFailures = [];
+      if (remoteFiles.length) {
+        try { cleanupFailures = await sharePoint.deleteAttachments(remoteFiles, true); }
+        catch (sharePointError) { cleanupFailures = remoteFiles.map((file) => ({ item: file, error: sharePointError })); }
+      }
+
       await audit('DELETE_LEAVE', `leaveRecords/${id}`, `${employeeIdentity(item.employeeId).name || item.employeeId} · ${item.leaveType}`);
       state.drawer = null;
       await ensureYearData(item.leaveYear, { force: true });
       render();
-      showToast('Data cuti berhasil dihapus.');
+      showToast(cleanupFailures.length ? 'Data cuti dihapus, tetapi sebagian file SharePoint belum berhasil dibersihkan.' : 'Data cuti dan bukti dukung berhasil dihapus.');
     } catch (error) {
       alert(`Data cuti gagal dihapus: ${error.message || error}`);
     }
@@ -910,29 +959,90 @@
     const item = state.leaves.find((row) => row.id === ctx.leaveId);
     if (!item) return;
     const type = String(document.getElementById('leave-doc-type')?.value || 'Dokumen Lainnya');
-    const name = String(document.getElementById('leave-doc-name')?.value || '').trim();
+    const selectedFile = document.getElementById('leave-doc-file')?.files?.[0] || null;
+    const existingFile = ctx.document?.file || null;
+    const nameInput = String(document.getElementById('leave-doc-name')?.value || '').trim();
+    const name = nameInput || selectedFile?.name || ctx.document?.name || '';
     const number = String(document.getElementById('leave-doc-number')?.value || '').trim();
     const note = String(document.getElementById('leave-doc-note')?.value || '').trim();
     if (!name) { alert('Nama dokumen wajib diisi.'); return; }
-    const documents = (item.documents || []).map((doc) => ({ ...doc }));
+    if (!selectedFile && !existingFile?.itemId) { alert('Pilih file bukti dukung yang akan disimpan di SharePoint.'); return; }
+
+    const documents = (item.documents || []).map((doc) => ({ ...doc, file: doc.file ? { ...doc.file } : null }));
     const existingId = String(ctx.document?.id || '');
     const id = existingId || `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const payload = { id, type, name, number, note };
-    const index = documents.findIndex((doc) => doc.id === id);
-    if (index >= 0) documents[index] = payload;
-    else documents.push(payload);
+    let uploadedFile = null;
+    let storedFile = existingFile ? { ...existingFile } : null;
+    let firestoreSaved = false;
+
     button.disabled = true;
+    button.textContent = selectedFile ? 'Mengunggah...' : 'Menyimpan...';
     try {
+      if (selectedFile) {
+        const localAttachment = sharePoint.normalizeAttachment(selectedFile, 'cuti');
+        localAttachment.id = `cuti-${id}`;
+        uploadedFile = await sharePoint.uploadAttachment(localAttachment, {
+          kind: 'cuti',
+          path: cutiSharePointPath(item),
+          remoteName: cutiRemoteFileName(id, selectedFile)
+        }, true);
+        storedFile = sharePoint.serializableAttachment(uploadedFile);
+      }
+
+      const payload = { id, type, name, number, note, file: storedFile };
+      const index = documents.findIndex((doc) => doc.id === id);
+      if (index >= 0) documents[index] = payload;
+      else documents.push(payload);
+
+      button.textContent = 'Menyimpan...';
       await db().collection('leaveRecords').doc(item.id).set({ documents, updatedAt: serverTimestamp(), updatedBy: user()?.email || '' }, { merge: true });
+      firestoreSaved = true;
+
+      if (selectedFile && existingFile?.driveId && existingFile?.itemId && existingFile.itemId !== storedFile?.itemId) {
+        try { await sharePoint.deleteAttachment(existingFile, true); }
+        catch (cleanupError) { console.warn('File bukti dukung lama tidak berhasil dihapus dari SharePoint:', cleanupError); }
+      }
+
       await audit(existingId ? 'UPDATE_LEAVE_DOCUMENT' : 'CREATE_LEAVE_DOCUMENT', `leaveRecords/${item.id}`, `${employeeIdentity(item.employeeId).name || item.employeeId} · ${name}`);
       state.documentModal = null;
       await ensureYearData(item.leaveYear, { force: true });
       state.drawer = { type: 'leave', id: item.id };
       render();
-      showToast(existingId ? 'Metadata dokumen diperbarui.' : 'Metadata dokumen ditambahkan.');
+      showToast(existingId ? 'Dokumen cuti berhasil diperbarui.' : 'Bukti dukung cuti berhasil diunggah ke SharePoint.');
     } catch (error) {
+      if (uploadedFile?.driveId && uploadedFile?.itemId && !firestoreSaved) {
+        try { await sharePoint.deleteAttachment(uploadedFile, true); } catch (cleanupError) { console.warn(cleanupError); }
+      }
       button.disabled = false;
-      alert(`Metadata dokumen gagal disimpan: ${error.message || error}`);
+      button.textContent = 'Simpan Dokumen';
+      alert(`Dokumen cuti gagal disimpan: ${error.message || error}`);
+    }
+  }
+
+  async function downloadLeaveDocument(leaveId, documentId, button) {
+    const item = state.leaves.find((row) => row.id === leaveId);
+    const doc = (item?.documents || []).find((row) => row.id === documentId);
+    if (!doc?.file?.driveId || !doc?.file?.itemId) {
+      alert('File SharePoint untuk dokumen ini tidak tersedia.');
+      return;
+    }
+    const originalLabel = button?.textContent || 'Unduh';
+    if (button) { button.disabled = true; button.textContent = 'Mengunduh...'; }
+    try {
+      const file = await sharePoint.downloadAttachment({ ...doc.file, file: null }, true);
+      if (!file) throw new Error('File tidak berhasil diunduh dari SharePoint.');
+      const url = URL.createObjectURL(file);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = doc.file.name || doc.file.remoteName || doc.name || 'Dokumen_Cuti';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      alert(`File bukti dukung gagal diunduh: ${error.message || error}`);
+    } finally {
+      if (button) { button.disabled = false; button.textContent = originalLabel; }
     }
   }
 
@@ -941,17 +1051,24 @@
     if (!item) return;
     const doc = (item.documents || []).find((row) => row.id === documentId);
     if (!doc) return;
-    if (!window.confirm(`Hapus metadata dokumen "${doc.name || doc.type}"?`)) return;
+    if (!window.confirm(`Hapus dokumen "${doc.name || doc.type}" beserta file bukti dukungnya?`)) return;
     try {
       const documents = (item.documents || []).filter((row) => row.id !== documentId);
       await db().collection('leaveRecords').doc(item.id).set({ documents, updatedAt: serverTimestamp(), updatedBy: user()?.email || '' }, { merge: true });
+
+      let cleanupFailed = false;
+      if (doc.file?.driveId && doc.file?.itemId) {
+        try { await sharePoint.deleteAttachment(doc.file, true); }
+        catch (sharePointError) { cleanupFailed = true; console.warn('File SharePoint tidak berhasil dihapus:', sharePointError); }
+      }
+
       await audit('DELETE_LEAVE_DOCUMENT', `leaveRecords/${item.id}`, `${employeeIdentity(item.employeeId).name || item.employeeId} · ${doc.name || doc.type}`);
       await ensureYearData(item.leaveYear, { force: true });
       state.drawer = { type: 'leave', id: item.id };
       render();
-      showToast('Metadata dokumen dihapus.');
+      showToast(cleanupFailed ? 'Metadata dokumen dihapus, tetapi file SharePoint belum berhasil dibersihkan.' : 'Dokumen dan file bukti dukung berhasil dihapus.');
     } catch (error) {
-      alert(`Metadata dokumen gagal dihapus: ${error.message || error}`);
+      alert(`Dokumen cuti gagal dihapus: ${error.message || error}`);
     }
   }
 
@@ -1072,8 +1189,11 @@
     const editDoc = event.target.closest?.('[data-edit-leave-document]');
     if (editDoc) { openDocumentModal(editDoc.dataset.leaveId, editDoc.dataset.editLeaveDocument); return; }
 
+    const downloadDoc = event.target.closest?.('[data-download-leave-document]');
+    if (downloadDoc) { downloadLeaveDocument(downloadDoc.dataset.leaveId, downloadDoc.dataset.downloadLeaveDocument, downloadDoc); return; }
+
     const deleteDoc = event.target.closest?.('[data-delete-leave-document]');
-    if (deleteDoc) { deleteLeaveDocument(deleteDoc.dataset.leaveId, deleteDoc.dataset.deleteLeaveDocument); }
+    if (deleteDoc) { deleteLeaveDocument(deleteDoc.dataset.leaveId, deleteDoc.dataset.deleteLeaveDocument); return; }
   });
 
   window.addEventListener('hashchange', () => {
