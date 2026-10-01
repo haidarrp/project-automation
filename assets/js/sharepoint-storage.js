@@ -509,6 +509,28 @@
     return null;
   }
 
+  async function getPreviewInfo(item, interactive) {
+    const attachment = normalizeAttachment(item, 'file');
+    if (!attachment.driveId || !attachment.itemId) {
+      throw new Error('File SharePoint untuk preview tidak tersedia.');
+    }
+
+    const preview = await graphJson(`/drives/${encodeURIComponent(attachment.driveId)}/items/${encodeURIComponent(attachment.itemId)}/preview`, {
+      method: 'POST',
+      interactive,
+      json: {}
+    });
+
+    if (!preview?.getUrl && !preview?.postUrl) {
+      throw new Error(`Microsoft 365 tidak menyediakan preview untuk ${attachment.name || attachment.remoteName || 'file ini'}.`);
+    }
+    return {
+      getUrl: preview.getUrl || '',
+      postUrl: preview.postUrl || '',
+      postParameters: preview.postParameters || ''
+    };
+  }
+
   async function refreshAttachmentMetadata(item, interactive) {
     const attachment = normalizeAttachment(item, 'file');
     if (!attachment.driveId || !attachment.itemId) return attachment;
@@ -564,6 +586,7 @@
     syncRunFiles,
     uploadRecap,
     downloadAttachment,
+    getPreviewInfo,
     refreshAttachmentMetadata,
     deleteAttachment,
     deleteAttachments,

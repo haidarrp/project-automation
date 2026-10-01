@@ -55,6 +55,7 @@
     modal: null,
     balanceModal: null,
     documentModal: null,
+    previewModal: null,
     drawer: null
   };
 
@@ -544,7 +545,7 @@
       <div class="leave-document-list">${docs.length ? docs.map((doc) => {
         const file = doc.file || null;
         const fileDetail = file?.itemId ? `<br><span class="leave-file-meta">SharePoint · ${esc(file.name || file.remoteName || 'File')}${file.size ? ` · ${esc(formatFileSize(file.size))}` : ''}</span>` : '<br><span class="leave-file-meta leave-file-missing">File belum tersimpan di SharePoint</span>';
-        const fileActions = file?.itemId ? `<button class="btn btn-secondary btn-sm" type="button" data-download-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Unduh</button>${file.webUrl ? `<a class="btn btn-secondary btn-sm" href="${esc(file.webUrl)}" target="_blank" rel="noopener noreferrer">SharePoint ↗</a>` : ''}` : '';
+        const fileActions = file?.itemId ? `<button class="btn btn-primary btn-sm" type="button" data-preview-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Preview</button><button class="btn btn-secondary btn-sm" type="button" data-download-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Unduh</button>${file.webUrl ? `<a class="btn btn-secondary btn-sm" href="${esc(file.webUrl)}" target="_blank" rel="noopener noreferrer">SharePoint ↗</a>` : ''}` : '';
         return `<div class="leave-document-row"><div><strong>${esc(doc.name || doc.type)}</strong><span>${esc(doc.type)}${doc.number ? ` · No. ${esc(doc.number)}` : ''}${doc.note ? `<br>${esc(doc.note)}` : ''}${fileDetail}</span></div><div class="leave-row-actions">${fileActions}<button class="btn btn-secondary btn-sm" type="button" data-edit-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Edit</button><button class="btn btn-danger btn-sm" type="button" data-delete-leave-document="${esc(doc.id)}" data-leave-id="${esc(item.id)}">Hapus</button></div></div>`;
       }).join('') : '<div class="leave-empty"><strong>Belum ada bukti dukung</strong>Tambahkan dokumen cuti untuk mengunggah file ke SharePoint.</div>'}</div>
       <div class="leave-modal-actions"><button class="btn btn-secondary" type="button" data-leave-edit="${esc(item.id)}">Edit Data</button><button class="btn btn-danger" type="button" data-leave-delete="${esc(item.id)}">Hapus</button></div>
@@ -626,6 +627,37 @@
     </div></div>`;
   }
 
+  function previewPostFields(raw) {
+    const params = new URLSearchParams(String(raw || ''));
+    return [...params.entries()].map(([name, value]) => `<input type="hidden" name="${esc(name)}" value="${esc(value)}">`).join('');
+  }
+
+  function previewModal() {
+    if (!state.previewModal) return '';
+    const ctx = state.previewModal;
+    const fileName = ctx.fileName || 'Dokumen Cuti';
+    const sharePointAction = ctx.webUrl ? `<a class="btn btn-secondary btn-sm" href="${esc(ctx.webUrl)}" target="_blank" rel="noopener noreferrer">Buka SharePoint ↗</a>` : '';
+    let body = '';
+
+    if (ctx.loading) {
+      body = '<div class="leave-preview-status"><strong>Menyiapkan preview dokumen</strong><span>Mengambil tampilan sementara dari Microsoft 365...</span></div>';
+    } else if (ctx.error) {
+      body = `<div class="leave-preview-status leave-preview-error"><strong>Preview tidak tersedia</strong><span>${esc(ctx.error)}</span><div class="leave-preview-fallback">${sharePointAction}<button class="btn btn-secondary btn-sm" type="button" data-download-leave-document="${esc(ctx.documentId)}" data-leave-id="${esc(ctx.leaveId)}">Unduh Dokumen</button></div></div>`;
+    } else if (ctx.getUrl) {
+      body = `<iframe class="leave-preview-frame" src="${esc(ctx.getUrl)}" title="Preview ${esc(fileName)}" allow="fullscreen" referrerpolicy="no-referrer"></iframe>`;
+    } else if (ctx.postUrl) {
+      const targetName = `leave-preview-${String(ctx.documentId || 'doc').replace(/[^A-Za-z0-9_-]/g, '')}`;
+      body = `<iframe class="leave-preview-frame" name="${esc(targetName)}" title="Preview ${esc(fileName)}" allow="fullscreen" referrerpolicy="no-referrer"></iframe><form id="leave-preview-post-form" class="leave-preview-post-form" method="post" action="${esc(ctx.postUrl)}" target="${esc(targetName)}">${previewPostFields(ctx.postParameters)}</form>`;
+    } else {
+      body = '<div class="leave-preview-status leave-preview-error"><strong>Preview tidak tersedia</strong><span>Microsoft 365 tidak memberikan URL preview untuk dokumen ini.</span></div>';
+    }
+
+    return `<div class="leave-modal-backdrop leave-preview-backdrop" data-action="close-preview-modal"><div class="leave-modal leave-preview-modal" role="dialog" aria-modal="true" aria-label="Preview dokumen" data-preview-modal-panel>
+      <div class="leave-modal-head leave-preview-head"><div><h3>${esc(fileName)}</h3><p>Preview ditampilkan langsung dari file SharePoint. URL preview bersifat sementara.</p></div><div class="leave-preview-head-actions">${sharePointAction}<button class="icon-btn" type="button" data-action="close-preview-modal">×</button></div></div>
+      <div class="leave-preview-body">${body}</div>
+    </div></div>`;
+  }
+
   function overlays() {
     let drawer = '';
     if (state.drawer?.type === 'leave') {
@@ -634,7 +666,7 @@
     } else if (state.drawer?.type === 'employee') {
       drawer = employeeDrawer(state.drawer.employeeId);
     }
-    return `${drawer}${leaveModal()}${balanceModal()}${documentModal()}${state.toast ? `<div class="leave-toast">${esc(state.toast)}</div>` : ''}`;
+    return `${drawer}${leaveModal()}${balanceModal()}${documentModal()}${previewModal()}${state.toast ? `<div class="leave-toast">${esc(state.toast)}</div>` : ''}`;
   }
 
   function viewMarkup() {
@@ -1019,6 +1051,55 @@
     }
   }
 
+  async function previewLeaveDocument(leaveId, documentId) {
+    const item = state.leaves.find((row) => row.id === leaveId);
+    const doc = (item?.documents || []).find((row) => row.id === documentId);
+    if (!doc?.file?.driveId || !doc?.file?.itemId) {
+      alert('File SharePoint untuk dokumen ini tidak tersedia.');
+      return;
+    }
+
+    state.previewModal = {
+      leaveId,
+      documentId,
+      fileName: doc.file.name || doc.file.remoteName || doc.name || 'Dokumen Cuti',
+      webUrl: doc.file.webUrl || '',
+      loading: true,
+      error: '',
+      getUrl: '',
+      postUrl: '',
+      postParameters: ''
+    };
+    render();
+
+    try {
+      const preview = await sharePoint.getPreviewInfo({ ...doc.file, file: null }, true);
+      if (!state.previewModal || state.previewModal.leaveId !== leaveId || state.previewModal.documentId !== documentId) return;
+      state.previewModal = {
+        ...state.previewModal,
+        loading: false,
+        getUrl: preview.getUrl || '',
+        postUrl: preview.postUrl || '',
+        postParameters: preview.postParameters || ''
+      };
+      render();
+      if (!preview.getUrl && preview.postUrl) {
+        window.requestAnimationFrame(() => {
+          const form = document.getElementById('leave-preview-post-form');
+          if (form) form.submit();
+        });
+      }
+    } catch (error) {
+      if (!state.previewModal || state.previewModal.leaveId !== leaveId || state.previewModal.documentId !== documentId) return;
+      state.previewModal = {
+        ...state.previewModal,
+        loading: false,
+        error: error.message || String(error)
+      };
+      render();
+    }
+  }
+
   async function downloadLeaveDocument(leaveId, documentId, button) {
     const item = state.leaves.find((row) => row.id === leaveId);
     const doc = (item?.documents || []).find((row) => row.id === documentId);
@@ -1150,11 +1231,13 @@
     if (action === 'close-leave-modal' && actionEl.classList.contains('leave-modal-backdrop') && event.target !== actionEl) return;
     if (action === 'close-balance-modal' && actionEl.classList.contains('leave-modal-backdrop') && event.target !== actionEl) return;
     if (action === 'close-document-modal' && actionEl.classList.contains('leave-modal-backdrop') && event.target !== actionEl) return;
+    if (action === 'close-preview-modal' && actionEl.classList.contains('leave-modal-backdrop') && event.target !== actionEl) return;
 
     if (action === 'add-leave') { openLeaveModal(''); return; }
     if (action === 'close-leave-modal') { state.modal = null; render(); return; }
     if (action === 'close-balance-modal') { state.balanceModal = null; render(); return; }
     if (action === 'close-document-modal') { state.documentModal = null; render(); return; }
+    if (action === 'close-preview-modal') { state.previewModal = null; render(); return; }
     if (action === 'close-drawer') { state.drawer = null; render(); return; }
     if (action === 'save-leave') { saveLeave(actionEl); return; }
     if (action === 'save-balance') { saveBalance(actionEl); return; }
@@ -1189,6 +1272,9 @@
     const editDoc = event.target.closest?.('[data-edit-leave-document]');
     if (editDoc) { openDocumentModal(editDoc.dataset.leaveId, editDoc.dataset.editLeaveDocument); return; }
 
+    const previewDoc = event.target.closest?.('[data-preview-leave-document]');
+    if (previewDoc) { previewLeaveDocument(previewDoc.dataset.leaveId, previewDoc.dataset.previewLeaveDocument); return; }
+
     const downloadDoc = event.target.closest?.('[data-download-leave-document]');
     if (downloadDoc) { downloadLeaveDocument(downloadDoc.dataset.leaveId, downloadDoc.dataset.downloadLeaveDocument, downloadDoc); return; }
 
@@ -1201,6 +1287,7 @@
     state.modal = null;
     state.balanceModal = null;
     state.documentModal = null;
+    state.previewModal = null;
     state.drawer = null;
     render();
   });
