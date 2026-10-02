@@ -2,7 +2,7 @@
   "name": "pusdatin-pkp-automation",
   "private": true,
   "version": "1.0.0",
-  "description": "Aplikasi administrasi Pusdatin PKP dengan integrasi Microsoft SharePoint untuk arsip Tukin dan bukti dukung Cuti.",
+  "description": "Aplikasi administrasi Pusdatin PKP dengan integrasi Microsoft SharePoint untuk Tukin, Cuti, Surat Tugas, dan arsip bukti dukung.",
   "scripts": {
     "build:msal": "esbuild src/msal-global.js --bundle --minify --format=iife --platform=browser --outfile=assets/vendor/msal-browser.bundle.js && esbuild src/msal-redirect-entry.js --bundle --minify --format=iife --platform=browser --outfile=assets/vendor/msal-redirect-bridge.bundle.js",
     "build": "npm run build:msal"

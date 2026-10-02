@@ -160,6 +160,12 @@ service cloud.firestore {
       allow read, create, update, delete: if isAdmin();
     }
 
+    // Arsip Surat Tugas/penugasan dinas internal TU. Satu record dapat memuat
+    // beberapa pegawai dan menjadi sumber penyesuaian otomatis pada proses Tukin.
+    match /assignmentRecords/{assignmentId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
     // Audit log bersifat append-only dari halaman admin.
     match /adminAudit/{auditId} {
       allow read: if isAdmin();

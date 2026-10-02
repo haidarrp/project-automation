@@ -7,6 +7,7 @@
     overtime: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
     training: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 5.5v16M8 7h8M8 11h6"/>',
     leave: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/><path d="m9 15 2 2 4-4"/>',
+    assignment: '<path d="M7 4h10v4H7z"/><path d="M5 8h14v12H5z"/><path d="M9 12h6M9 16h4"/>',
     users: '<circle cx="9" cy="8" r="3"/><path d="M3.8 19c.7-3 2.4-4.5 5.2-4.5S13.5 16 14.2 19"/><circle cx="17" cy="9" r="2.2"/><path d="M15.7 14.8c2.6-.1 4.1 1.3 4.5 4.2"/>',
     history: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>',
     process: '<path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M5 18v3h14v-3"/>',
@@ -57,6 +58,16 @@
         { view: 'saldo', label: 'Saldo Cuti' },
         { view: 'laporan', label: 'Laporan' }
       ]
+    },
+    assignment: {
+      label: 'Surat Tugas',
+      icon: 'assignment',
+      file: 'surat-tugas.html',
+      items: [
+        { view: 'dashboard', label: 'Dashboard' },
+        { view: 'data', label: 'Data Surat Tugas' },
+        { view: 'kalender', label: 'Kalender' }
+      ]
     }
   });
 
@@ -106,12 +117,14 @@
       : '';
     const trainingGroup = isAdmin ? moduleGroup('training', activeModule, activeView) : '';
     const leaveGroup = isAdmin ? moduleGroup('leave', activeModule, activeView) : '';
+    const assignmentGroup = isAdmin ? moduleGroup('assignment', activeModule, activeView) : '';
     return `<nav class="nav nav-modules" aria-label="Navigasi utama">
       <div class="nav-groups" role="group" aria-label="Modul">
         ${moduleGroup('tukin', activeModule, activeView)}
         ${moduleGroup('lembur', activeModule, activeView)}
         ${trainingGroup}
         ${leaveGroup}
+        ${assignmentGroup}
       </div>
       ${adminLink}
     </nav>`;
@@ -122,6 +135,7 @@
     if (module === 'admin') return '<strong>Generator Dokumen</strong><span>/ Administrasi / Master Data</span>';
     if (module === 'training') return `<strong>Pusdatin PKP</strong><span>/ Pelatihan Pegawai / ${viewLabel || ''}</span>`;
     if (module === 'leave') return `<strong>Pusdatin PKP</strong><span>/ Cuti / ${viewLabel || ''}</span>`;
+    if (module === 'assignment') return `<strong>Pusdatin PKP</strong><span>/ Surat Tugas / ${viewLabel || ''}</span>`;
     const moduleLabel = module === 'tukin' ? 'Tunjangan Kinerja' : 'Lembur';
     return `<strong>Generator Dokumen</strong><span>/ ${moduleLabel} / ${viewLabel || ''}</span>`;
   }

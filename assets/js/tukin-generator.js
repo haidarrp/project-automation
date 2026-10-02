@@ -233,20 +233,21 @@
       return sharePoint.downloadAttachment(item, true);
     }
 
-    // Bukti Cuti yang belum disimpan ke folder Tukin tetap dapat diunduh langsung
-    // dari file sumber Cuti. Mekanisme Download tidak wajib melakukan Simpan dulu.
-    const cutiSource = item.cutiEvidence;
-    if (cutiSource?.automatic && cutiSource.sourceDriveId && cutiSource.sourceItemId && sharePoint?.downloadAttachment) {
+    // Bukti otomatis (Cuti/Surat Tugas) yang belum disimpan ke folder Tukin
+    // tetap dapat diunduh langsung dari sumbernya. Tombol Download tidak wajib
+    // melakukan Simpan terlebih dahulu.
+    const automaticSource = item.cutiEvidence?.automatic ? item.cutiEvidence : (item.assignmentEvidence?.automatic ? item.assignmentEvidence : null);
+    if (automaticSource?.sourceDriveId && automaticSource?.sourceItemId && sharePoint?.downloadAttachment) {
       return sharePoint.downloadAttachment({
-        id: `${item.id || 'cuti'}-download-source`,
-        name: cutiSource.sourceName || item.name || 'Bukti Cuti',
+        id: `${item.id || 'evidence'}-download-source`,
+        name: automaticSource.sourceName || item.name || 'Bukti Dukung',
         size: Number(item.size || 0),
         type: item.type || '',
-        driveId: cutiSource.sourceDriveId,
-        itemId: cutiSource.sourceItemId,
-        webUrl: cutiSource.sourceWebUrl || item.webUrl || '',
-        eTag: cutiSource.sourceETag || '',
-        cTag: cutiSource.sourceCTag || '',
+        driveId: automaticSource.sourceDriveId,
+        itemId: automaticSource.sourceItemId,
+        webUrl: automaticSource.sourceWebUrl || item.webUrl || '',
+        eTag: automaticSource.sourceETag || '',
+        cTag: automaticSource.sourceCTag || '',
         provider: 'sharepoint',
         localOnly: false,
         file: null
@@ -274,11 +275,12 @@
   }
 
 
-  function automaticCutiEvidenceKey(item) {
-    const meta = item?.cutiEvidence;
-    if (!meta?.automatic) return '';
+  function automaticEvidenceKey(item) {
+    const meta = item?.cutiEvidence?.automatic ? item.cutiEvidence : (item?.assignmentEvidence?.automatic ? item.assignmentEvidence : null);
+    if (!meta) return '';
     if (meta.sourceDriveId && meta.sourceItemId) return `source:${meta.sourceDriveId}:${meta.sourceItemId}`;
     if (meta.leaveId && meta.documentId) return `leave:${meta.leaveId}:${meta.documentId}`;
+    if (meta.assignmentId && meta.documentId) return `assignment:${meta.assignmentId}:${meta.documentId}`;
     return item?.id ? `id:${item.id}` : '';
   }
 
@@ -296,12 +298,12 @@
         const binary = await resolveAttachmentBinary(source);
         if (binary) folder.file(uniqueName(used, attachmentName(source, 'Absensi.xlsx')), binary);
       }
-      const seenAutomaticCutiEvidence = new Set();
+      const seenAutomaticEvidence = new Set();
       for (const record of Object.values(employee.records || {})) {
         for (const evidence of record.evidence || []) {
-          const cutiKey = automaticCutiEvidenceKey(evidence);
-          if (cutiKey && seenAutomaticCutiEvidence.has(cutiKey)) continue;
-          if (cutiKey) seenAutomaticCutiEvidence.add(cutiKey);
+          const evidenceKey = automaticEvidenceKey(evidence);
+          if (evidenceKey && seenAutomaticEvidence.has(evidenceKey)) continue;
+          if (evidenceKey) seenAutomaticEvidence.add(evidenceKey);
           const binary = await resolveAttachmentBinary(evidence);
           if (binary) folder.file(uniqueName(used, attachmentName(evidence, 'Bukti')), binary);
         }

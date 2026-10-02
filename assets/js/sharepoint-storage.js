@@ -265,7 +265,8 @@
       uploadedAt: attachment.uploadedAt || '',
       uploadedBy: attachment.uploadedBy || '',
       localOnly: !(attachment.itemId && attachment.driveId),
-      cutiEvidence: attachment.cutiEvidence ? { ...attachment.cutiEvidence } : null
+      cutiEvidence: attachment.cutiEvidence ? { ...attachment.cutiEvidence } : null,
+      assignmentEvidence: attachment.assignmentEvidence ? { ...attachment.assignmentEvidence } : null
     };
   }
 
@@ -347,14 +348,22 @@
     return attachment;
   }
 
-  async function materializeCutiEvidence(attachment, interactive) {
-    const meta = attachment?.cutiEvidence;
+  function automaticEvidenceInfo(attachment) {
+    if (attachment?.cutiEvidence?.automatic) return { type: 'cuti', meta: attachment.cutiEvidence };
+    if (attachment?.assignmentEvidence?.automatic) return { type: 'surat_tugas', meta: attachment.assignmentEvidence };
+    return null;
+  }
+
+  async function materializeAutomaticEvidence(attachment, interactive) {
+    const info = automaticEvidenceInfo(attachment);
+    const meta = info?.meta;
     if (!meta?.automatic || attachment?.file || (attachment?.driveId && attachment?.itemId)) return attachment;
     if (!meta.sourceDriveId || !meta.sourceItemId) return attachment;
 
+    const fallbackName = info.type === 'surat_tugas' ? 'Surat Tugas' : 'Bukti Cuti';
     const source = normalizeAttachment({
-      id: `${attachment.id || 'cuti'}-source`,
-      name: meta.sourceName || attachment.name || 'Bukti Cuti',
+      id: `${attachment.id || info.type || 'source'}-source`,
+      name: meta.sourceName || attachment.name || fallbackName,
       size: Number(attachment.size || 0),
       type: attachment.type || '',
       driveId: meta.sourceDriveId,
@@ -365,26 +374,38 @@
       provider: 'sharepoint',
       localOnly: false,
       file: null
-    }, 'cuti-source');
+    }, `${info.type || 'source'}-source`);
 
     const file = await downloadAttachment(source, interactive);
     attachment.file = file;
-    attachment.name = attachment.name || file?.name || meta.sourceName || 'Bukti Cuti';
+    attachment.name = attachment.name || file?.name || meta.sourceName || fallbackName;
     attachment.size = Number(file?.size || attachment.size || 0);
     attachment.type = file?.type || attachment.type || '';
     attachment.lastModified = Number(file?.lastModified || attachment.lastModified || 0);
-    attachment.provider = 'cuti';
+    attachment.provider = info.type === 'surat_tugas' ? 'assignment' : 'cuti';
     attachment.localOnly = true;
     return attachment;
   }
 
-
-  function automaticCutiEvidenceKey(attachment) {
-    const meta = attachment?.cutiEvidence;
+  function automaticEvidenceKey(attachment) {
+    const info = automaticEvidenceInfo(attachment);
+    const meta = info?.meta;
     if (!meta?.automatic) return '';
     if (meta.sourceDriveId && meta.sourceItemId) return `source:${meta.sourceDriveId}:${meta.sourceItemId}`;
-    if (meta.leaveId && meta.documentId) return `leave:${meta.leaveId}:${meta.documentId}`;
+    if (info.type === 'cuti' && meta.leaveId && meta.documentId) return `leave:${meta.leaveId}:${meta.documentId}`;
+    if (info.type === 'surat_tugas' && meta.assignmentId && meta.documentId) return `assignment:${meta.assignmentId}:${meta.documentId}`;
     return attachment?.id ? `id:${attachment.id}` : '';
+  }
+
+  function markEvidenceCopied(attachment, copiedAt) {
+    const timestamp = copiedAt || new Date().toISOString();
+    if (attachment?.cutiEvidence?.automatic) {
+      attachment.cutiEvidence = { ...attachment.cutiEvidence, copiedToTukin: true, copiedAt: timestamp };
+    }
+    if (attachment?.assignmentEvidence?.automatic) {
+      attachment.assignmentEvidence = { ...attachment.assignmentEvidence, copiedToTukin: true, copiedAt: timestamp };
+    }
+    return attachment;
   }
 
   function mirrorRemoteAttachment(target, source) {
@@ -404,13 +425,7 @@
     target.uploadedBy = source.uploadedBy || target.uploadedBy || '';
     target.localOnly = false;
     target.file = null;
-    if (target.cutiEvidence?.automatic) {
-      target.cutiEvidence = {
-        ...target.cutiEvidence,
-        copiedToTukin: true,
-        copiedAt: source.cutiEvidence?.copiedAt || target.cutiEvidence.copiedAt || new Date().toISOString()
-      };
-    }
+    markEvidenceCopied(target, automaticEvidenceInfo(source)?.meta?.copiedAt || new Date().toISOString());
     return target;
   }
 
@@ -441,21 +456,22 @@
         uploaded.push(attachment);
       }
 
-      const syncedAutomaticCuti = new Map();
+      const syncedAutomaticEvidence = new Map();
       for (const record of Object.values(employee.records || {})) {
         for (const attachment of record.evidence || []) {
-          const cutiKey = automaticCutiEvidenceKey(attachment);
-          const alreadySynced = cutiKey ? syncedAutomaticCuti.get(cutiKey) : null;
+          const evidenceKey = automaticEvidenceKey(attachment);
+          const alreadySynced = evidenceKey ? syncedAutomaticEvidence.get(evidenceKey) : null;
           if (alreadySynced) {
-            // Jangan mengunggah file sumber Cuti yang sama lebih dari sekali dalam
-            // satu pegawai/periode. Referensi duplikat diarahkan ke salinan pertama.
+            // Jangan mengunggah file sumber otomatis (Cuti/Surat Tugas) yang sama lebih
+            // dari sekali dalam satu pegawai/periode. Referensi duplikat diarahkan
+            // ke salinan pertama.
             if (alreadySynced.driveId && alreadySynced.itemId) mirrorRemoteAttachment(attachment, alreadySynced);
             continue;
           }
 
-          await materializeCutiEvidence(attachment, interactive);
+          await materializeAutomaticEvidence(attachment, interactive);
           if (!needsUpload(attachment)) {
-            if (cutiKey) syncedAutomaticCuti.set(cutiKey, attachment);
+            if (evidenceKey) syncedAutomaticEvidence.set(evidenceKey, attachment);
             continue;
           }
           const shortId = String(attachment.id || uid('bukti')).replace(/[^A-Za-z0-9]/g, '').slice(-8) || Date.now();
@@ -463,14 +479,8 @@
           const remoteName = safeName(`${date}_${shortId}_${attachment.name || attachment.file?.name || 'Bukti'}`, `Bukti_${shortId}`);
           const remote = await uploadBlob(driveId, evidenceFolder.id, remoteName, attachment.file, interactive);
           applyRemoteMetadata(attachment, remote, remoteName, `Pegawai/${employeeFolder.name}/Bukti_Dukung/${remoteName}`);
-          if (attachment.cutiEvidence?.automatic) {
-            attachment.cutiEvidence = {
-              ...attachment.cutiEvidence,
-              copiedToTukin: true,
-              copiedAt: new Date().toISOString()
-            };
-          }
-          if (cutiKey) syncedAutomaticCuti.set(cutiKey, attachment);
+          markEvidenceCopied(attachment);
+          if (evidenceKey) syncedAutomaticEvidence.set(evidenceKey, attachment);
           uploaded.push(attachment);
         }
       }
