@@ -263,18 +263,22 @@
     const adjusted = Number(info.adjustedRecords || 0);
     const cutiAdjusted = Number(info.cutiAdjustedRecords || 0);
     const assignmentAdjusted = Number(info.assignmentAdjustedRecords || 0);
+    const assignmentInformational = Number(info.assignmentInformationalRecords || 0);
     const conflicts = Number(info.conflictRecords || 0);
     const manual = Number(info.preservedManualRecords || 0);
     const evidence = Number(info.evidenceFiles || 0);
-    if (!adjusted && !conflicts && !manual) return '';
+    if (!adjusted && !assignmentInformational && !conflicts && !manual) return '';
 
     const success = adjusted
-      ? `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari data pendukung</div>${adjusted} tanggal otomatis disesuaikan menjadi <strong>0%</strong>${cutiAdjusted ? ` · ${cutiAdjusted} dari Cuti` : ''}${assignmentAdjusted ? ` · ${assignmentAdjusted} dari Surat Tugas` : ''}. Nilai hasil presensi tetap ditampilkan pada kolom <strong>Otomatis</strong>.${evidence ? ` ${evidence} file bukti dukung unik siap disalin satu kali saat Simpan.` : ''}${manual ? ` ${manual} koreksi manual dipertahankan.` : ''}</div>`
+      ? `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari data pendukung</div>${adjusted} tanggal otomatis disesuaikan menjadi <strong>0%</strong>${cutiAdjusted ? ` · ${cutiAdjusted} dari Cuti` : ''}${assignmentAdjusted ? ` · ${assignmentAdjusted} dari Surat Tugas Dinas Luar / Perjalanan Dinas` : ''}. Nilai hasil presensi tetap ditampilkan pada kolom <strong>Otomatis</strong>.${evidence ? ` ${evidence} file bukti dukung unik siap disalin satu kali saat Simpan.` : ''}${manual ? ` ${manual} koreksi manual dipertahankan.` : ''}</div>`
+      : '';
+    const information = assignmentInformational
+      ? `<div class="alert alert-info"><div class="alert-title">${assignmentInformational} tanggal memiliki Surat Tugas sebagai data pendukung</div>Jenis <strong>Pengaturan Kerja</strong> atau <strong>Lainnya</strong> tidak mengubah persentase secara otomatis. Jika diperlukan, penyesuaian dapat dilakukan melalui tombol <strong>Edit</strong> pada Proses Tukin.</div>`
       : '';
     const conflict = conflicts
       ? `<div class="alert alert-warning"><div class="alert-title">${conflicts} konflik Cuti dan Surat Tugas</div>Pada tanggal yang sama ditemukan Cuti dan Surat Tugas. Sistem tidak menerapkan 0% secara otomatis; tanggal tersebut tetap memerlukan verifikasi manual.</div>`
       : '';
-    return `${success}${conflict}`;
+    return `${success}${information}${conflict}`;
   }
 
   async function syncSupportingAdjustments(options) {
@@ -366,7 +370,7 @@
   function assignmentReferenceMarkup(record) {
     const items = record?.assignmentAdjustment?.assignments || [];
     if (!items.length) return '';
-    return items.map((item) => `<div class="tukin-cuti-ref"><span class="tukin-badge edit">Surat Tugas</span><span>${esc(item.letterNumber || 'Tanpa nomor')} · ${esc(item.startDate || '')}${item.endDate && item.endDate !== item.startDate ? ` s.d. ${esc(item.endDate)}` : ''}${item.activity ? ` · ${esc(item.activity)}` : ''}</span></div>`).join('');
+    return items.map((item) => `<div class="tukin-cuti-ref"><span class="tukin-badge edit">Surat Tugas</span><span>${esc(item.letterNumber || 'Tanpa nomor')} · ${esc(item.assignmentTypeLabel || 'Dinas Luar / Perjalanan Dinas')} · ${esc(item.startDate || '')}${item.endDate && item.endDate !== item.startDate ? ` s.d. ${esc(item.endDate)}` : ''}${item.activity ? ` · ${esc(item.activity)}` : ''}</span></div>`).join('');
   }
 
   function adjustmentLabel(record) {
@@ -400,9 +404,11 @@
       ? `<div class="alert alert-warning"><div class="alert-title">Konflik Cuti dan Surat Tugas</div>${esc(record.adjustmentNote || '')}</div>`
       : record.cutiAdjustment?.automatic
         ? `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Data Cuti</div>${esc(record.adjustmentNote || '')}</div>`
-        : record.assignmentAdjustment?.automatic
+        : record.assignmentAdjustment?.adjustmentApplied || record.assignmentAdjustment?.automatic
           ? `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Surat Tugas</div>${esc(record.adjustmentNote || '')}</div>`
-          : '';
+          : record.assignmentAdjustment?.informational
+            ? `<div class="alert alert-info"><div class="alert-title">Data pendukung Surat Tugas</div>${esc(record.adjustmentNote || '')}</div>`
+            : '';
     return `<div class="tukin-modal-backdrop"><div class="tukin-modal"><div class="tukin-modal-head"><div><h3>Koreksi Perhitungan</h3><p>${esc(employee.name)} · ${esc(rules.formatDate(record.date, true))}</p></div><button class="icon-btn" data-action="close-edit" type="button">×</button></div><div class="alert alert-warning"><div class="alert-title">Hasil otomatis ${pct(record.autoTotalPercent)}</div>${esc(record.reason || '')}</div>${automaticContext}
       <div class="tukin-form-grid section-gap"><div class="field"><label>% Potongan Hasil Penyesuaian</label><input id="edit-percent" type="number" min="0" max="2.5" step="0.01" value="${esc(state.editDraft.percent)}"></div><div class="field"><label>Bukti Dukung</label><input id="edit-evidence" type="file" multiple accept="application/pdf,image/png,image/jpeg,image/webp"></div><div class="full field"><label>Keterangan</label><textarea id="edit-note" placeholder="Contoh: Dinas berdasarkan Surat Tugas ...">${esc(state.editDraft.note)}</textarea></div></div>
       <div class="tukin-evidence-list">${state.editDraft.evidence.length ? state.editDraft.evidence.map((evidence, i) => `<div class="tukin-evidence"><span>${esc(evidence.name)} · ${bytes(evidence.size || 0)} ${attachmentOpenLink(evidence, 'Buka')}</span><button data-remove-evidence="${i}" type="button">Hapus</button></div>`).join('') : '<div class="card-subtitle">Belum ada bukti dukung.</div>'}</div>
@@ -965,11 +971,21 @@
         state.pendingSharePointDeletes.push({ ...item, file: null });
       }
     }
+    const assignmentContext = record.assignmentAdjustment?.linkedAutomatically || record.assignmentAdjustment?.assignments?.length
+      ? {
+          ...record.assignmentAdjustment,
+          automatic: false,
+          adjustmentApplied: false,
+          informational: true,
+          manualDecision: true,
+          assignments: (record.assignmentAdjustment.assignments || []).map((item) => ({ ...item }))
+        }
+      : null;
     record.adjustedPercent = Number(value.toFixed(2));
     record.adjustmentNote = String(document.getElementById('edit-note')?.value || '').trim();
     record.adjustmentSource = 'manual';
     record.cutiAdjustment = null;
-    record.assignmentAdjustment = null;
+    record.assignmentAdjustment = assignmentContext;
     record.adjustmentConflict = null;
     record.evidence = [...state.editDraft.evidence];
     state.generated = null;
@@ -1174,10 +1190,12 @@
       if (result) {
         const count = Number(result.adjustedRecords || 0);
         const evidenceCount = Number(result.evidenceFiles || 0);
+        const informationalCount = Number(result.assignmentInformationalRecords || 0);
         const conflictCount = Number(result.conflictRecords || 0);
         const evidenceText = evidenceCount ? ` ${evidenceCount} file bukti unik siap disalin satu kali saat Simpan.` : '';
+        const informationText = informationalCount ? ` ${informationalCount} tanggal Surat Tugas Pengaturan Kerja/Lainnya ditampilkan sebagai data pendukung tanpa mengubah persentase otomatis.` : '';
         const conflictText = conflictCount ? ` ${conflictCount} tanggal memiliki konflik Cuti dan Surat Tugas dan tetap memerlukan verifikasi.` : '';
-        alert(count ? `${count} tanggal berhasil disesuaikan otomatis berdasarkan Cuti/Surat Tugas.${evidenceText}${conflictText}` : `Sinkronisasi Cuti & Surat Tugas selesai.${evidenceText}${conflictText}`);
+        alert(count ? `${count} tanggal berhasil disesuaikan otomatis berdasarkan Cuti/Surat Tugas.${informationText}${evidenceText}${conflictText}` : `Sinkronisasi Cuti & Surat Tugas selesai.${informationText}${evidenceText}${conflictText}`);
       }
     });
     document.querySelector('[data-action="reload-sharepoint-attendance"]')?.addEventListener('click', reloadAttendanceFromSharePoint);

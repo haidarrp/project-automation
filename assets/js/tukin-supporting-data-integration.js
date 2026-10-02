@@ -3,6 +3,26 @@
 
   const rules = window.TukinRules;
   const master = window.MasterDataService;
+  const ASSIGNMENT_TYPES = Object.freeze({
+    official_travel: 'Dinas Luar / Perjalanan Dinas',
+    work_arrangement: 'Pengaturan Kerja',
+    other: 'Lainnya'
+  });
+
+  function normalizeAssignmentType(value, legacyAdjustmentType) {
+    const key = String(value || '').trim();
+    if (Object.prototype.hasOwnProperty.call(ASSIGNMENT_TYPES, key)) return key;
+    if (!key && String(legacyAdjustmentType || '') === 'official_duty') return 'official_travel';
+    return 'official_travel';
+  }
+
+  function assignmentTypeLabel(value) {
+    return ASSIGNMENT_TYPES[normalizeAssignmentType(value)] || ASSIGNMENT_TYPES.official_travel;
+  }
+
+  function assignmentUsesAutoZero(assignment) {
+    return normalizeAssignmentType(assignment?.assignmentType, assignment?.adjustmentType) === 'official_travel';
+  }
 
   function db() {
     const value = window.FirebaseClient?.getDb?.();
@@ -60,6 +80,8 @@
       assignmentYear: Number(row.assignmentYear || String(row.startDate || '').slice(0, 4) || 0),
       activity: String(row.activity || ''),
       location: String(row.location || ''),
+      assignmentType: normalizeAssignmentType(row.assignmentType, row.adjustmentType),
+      adjustmentType: String(row.adjustmentType || ''),
       employeeIds: (Array.isArray(row.employees) ? row.employees : [])
         .map((employee) => String(employee?.employeeId || employee?.id || ''))
         .filter(Boolean),
@@ -107,8 +129,19 @@
   function isAutomaticAdjustment(record) {
     return ['cuti', 'surat_tugas', 'conflict'].includes(String(record?.adjustmentSource || '')) ||
       record?.cutiAdjustment?.automatic === true ||
-      record?.assignmentAdjustment?.automatic === true ||
+      record?.assignmentAdjustment?.adjustmentApplied === true ||
+      (record?.assignmentAdjustment?.automatic === true && record?.adjustmentSource === 'surat_tugas') ||
       record?.adjustmentConflict?.automatic === true;
+  }
+
+  function hasAutomaticSupport(record) {
+    return Boolean(
+      record?.cutiAdjustment?.automatic === true ||
+      record?.assignmentAdjustment?.linkedAutomatically === true ||
+      record?.assignmentAdjustment?.automatic === true ||
+      record?.adjustmentConflict?.automatic === true ||
+      ['cuti', 'surat_tugas', 'conflict'].includes(String(record?.adjustmentSource || ''))
+    );
   }
 
   function hasProtectedManualAdjustment(record) {
@@ -195,6 +228,9 @@
         documentId: String(document.id || ''),
         letterNumber: String(assignment.letterNumber || ''),
         activity: String(assignment.activity || ''),
+        assignmentType: normalizeAssignmentType(assignment.assignmentType, assignment.adjustmentType),
+        assignmentTypeLabel: assignmentTypeLabel(assignment.assignmentType),
+        autoZero: assignmentUsesAutoZero(assignment),
         startDate: String(assignment.startDate || ''),
         endDate: String(assignment.endDate || ''),
         sourceDriveId: String(source.driveId || ''),
@@ -272,11 +308,16 @@
   }
 
   function clearAutomaticAdjustment(record) {
-    if (!isAutomaticAdjustment(record)) return { cleared: false, removed: [] };
+    if (!hasAutomaticSupport(record)) return { cleared: false, removed: [] };
     const removed = detachAutomaticEvidence(record);
-    record.adjustedPercent = null;
-    record.adjustmentNote = '';
-    record.adjustmentSource = '';
+    const protectedManual = hasProtectedManualAdjustment(record);
+    if (!protectedManual && isAutomaticAdjustment(record)) {
+      record.adjustedPercent = null;
+      record.adjustmentNote = '';
+      record.adjustmentSource = '';
+    } else if (!protectedManual && record?.assignmentAdjustment?.informational) {
+      record.adjustmentNote = '';
+    }
     record.cutiAdjustment = null;
     record.assignmentAdjustment = null;
     record.adjustmentConflict = null;
@@ -294,15 +335,22 @@
     };
   }
 
-  function assignmentMeta(assignments) {
+  function assignmentMeta(assignments, options) {
+    const opts = options || {};
     return {
-      automatic: true,
+      automatic: Boolean(opts.adjustmentApplied),
+      linkedAutomatically: true,
+      adjustmentApplied: Boolean(opts.adjustmentApplied),
+      informational: Boolean(opts.informational),
       assignments: (assignments || []).map((assignment) => ({
         assignmentId: assignment.id,
         letterNumber: assignment.letterNumber || '',
         letterDate: assignment.letterDate || '',
         activity: assignment.activity || '',
         location: assignment.location || '',
+        assignmentType: normalizeAssignmentType(assignment.assignmentType, assignment.adjustmentType),
+        assignmentTypeLabel: assignmentTypeLabel(assignment.assignmentType),
+        autoZero: assignmentUsesAutoZero(assignment),
         startDate: assignment.startDate,
         endDate: assignment.endDate
       }))
@@ -317,11 +365,21 @@
 
   function assignmentNote(assignments) {
     const items = assignments || [];
-    if (!items.length) return 'Penyesuaian otomatis menjadi 0% berdasarkan data Surat Tugas.';
+    if (!items.length) return 'Penyesuaian otomatis menjadi 0% berdasarkan Surat Tugas Dinas Luar / Perjalanan Dinas.';
     const numbers = items.map((item) => item.letterNumber || item.id).filter(Boolean).join(', ');
     const first = items[0];
     const period = first.startDate === first.endDate ? first.startDate : `${first.startDate} s.d. ${first.endDate}`;
-    return `Penyesuaian otomatis menjadi 0% berdasarkan Surat Tugas ${numbers} (${period}).`;
+    return `Penyesuaian otomatis menjadi 0% berdasarkan Surat Tugas ${numbers} (${period}) dengan jenis Dinas Luar / Perjalanan Dinas.`;
+  }
+
+  function assignmentInformationNote(assignments) {
+    const items = assignments || [];
+    if (!items.length) return 'Ditemukan data Surat Tugas. Jenis penugasan ini tidak mengubah persentase secara otomatis.';
+    const numbers = items.map((item) => item.letterNumber || item.id).filter(Boolean).join(', ');
+    const types = [...new Set(items.map((item) => assignmentTypeLabel(item.assignmentType)))].join(', ');
+    const first = items[0];
+    const period = first.startDate === first.endDate ? first.startDate : `${first.startDate} s.d. ${first.endDate}`;
+    return `Ditemukan Surat Tugas ${numbers} (${period}) dengan jenis ${types}. Tidak ada penyesuaian persentase otomatis; koreksi dapat dilakukan manual pada Proses Tukin bila diperlukan.`;
   }
 
   function conflictNote(leave, assignments) {
@@ -358,9 +416,19 @@
   function applyAssignments(record, assignments, evidenceAssignments) {
     record.adjustedPercent = 0;
     record.adjustmentSource = 'surat_tugas';
-    record.adjustmentNote = assignmentNote(assignments);
+    record.adjustmentNote = assignmentNote(assignments.filter(assignmentUsesAutoZero));
     record.cutiAdjustment = null;
-    record.assignmentAdjustment = assignmentMeta(assignments);
+    record.assignmentAdjustment = assignmentMeta(assignments, { adjustmentApplied: true, informational: false });
+    record.adjustmentConflict = null;
+    return mergeAutomaticEvidence(record, desiredAssignmentEvidence(evidenceAssignments));
+  }
+
+  function applyAssignmentInformation(record, assignments, evidenceAssignments) {
+    record.adjustedPercent = null;
+    record.adjustmentSource = '';
+    record.adjustmentNote = assignmentInformationNote(assignments);
+    record.cutiAdjustment = null;
+    record.assignmentAdjustment = assignmentMeta(assignments, { adjustmentApplied: false, informational: true });
     record.adjustmentConflict = null;
     return mergeAutomaticEvidence(record, desiredAssignmentEvidence(evidenceAssignments));
   }
@@ -371,7 +439,7 @@
     record.adjustmentSource = 'conflict';
     record.adjustmentNote = conflictNote(leave, assignments);
     record.cutiAdjustment = leaveMeta(leave);
-    record.assignmentAdjustment = assignmentMeta(assignments);
+    record.assignmentAdjustment = assignmentMeta(assignments, { adjustmentApplied: false, informational: false });
     record.adjustmentConflict = {
       automatic: true,
       type: 'cuti_vs_surat_tugas',
@@ -404,6 +472,7 @@
     let adjustedRecords = 0;
     let cutiAdjustedRecords = 0;
     let assignmentAdjustedRecords = 0;
+    let assignmentInformationalRecords = 0;
     let conflictRecords = 0;
     let clearedRecords = 0;
     let preservedManualRecords = 0;
@@ -456,6 +525,7 @@
           }
 
           let evidenceResult = { linked: 0, removed: [] };
+          const autoZeroAssignments = matchingAssignments.filter(assignmentUsesAutoZero);
           if (matchingLeave && matchingAssignments.length) {
             evidenceResult = applyConflict(record, matchingLeave, matchingAssignments);
             conflictRecords += 1;
@@ -465,9 +535,14 @@
             cutiAdjustedRecords += 1;
           } else {
             const evidenceAssignments = matchingAssignments.filter((assignment) => assignmentOwnerById.get(assignment.id) === record);
-            evidenceResult = applyAssignments(record, matchingAssignments, evidenceAssignments);
-            adjustedRecords += 1;
-            assignmentAdjustedRecords += 1;
+            if (autoZeroAssignments.length) {
+              evidenceResult = applyAssignments(record, matchingAssignments, evidenceAssignments);
+              adjustedRecords += 1;
+              assignmentAdjustedRecords += 1;
+            } else {
+              evidenceResult = applyAssignmentInformation(record, matchingAssignments, evidenceAssignments);
+              assignmentInformationalRecords += 1;
+            }
           }
           evidenceFiles += Number(evidenceResult.linked || 0);
           removedEvidence.push(...(evidenceResult.removed || []));
@@ -487,6 +562,7 @@
       adjustedRecords,
       cutiAdjustedRecords,
       assignmentAdjustedRecords,
+      assignmentInformationalRecords,
       conflictRecords,
       clearedRecords,
       matchedEmployees,

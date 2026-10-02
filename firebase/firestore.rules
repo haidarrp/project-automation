@@ -161,7 +161,7 @@ service cloud.firestore {
     }
 
     // Arsip Surat Tugas/penugasan dinas internal TU. Satu record dapat memuat
-    // beberapa pegawai dan menjadi sumber penyesuaian otomatis pada proses Tukin.
+    // beberapa pegawai dan menjadi data pendukung pada proses Tukin.
     match /assignmentRecords/{assignmentId} {
       allow read, create, update, delete: if isAdmin();
     }

@@ -12,6 +12,24 @@
     data: 'Data Surat Tugas',
     kalender: 'Kalender'
   });
+  const ASSIGNMENT_TYPES = Object.freeze({
+    official_travel: 'Dinas Luar / Perjalanan Dinas',
+    work_arrangement: 'Pengaturan Kerja',
+    other: 'Lainnya'
+  });
+
+  function normalizeAssignmentType(value, legacyAdjustmentType) {
+    const key = String(value || '').trim();
+    if (Object.prototype.hasOwnProperty.call(ASSIGNMENT_TYPES, key)) return key;
+    // Data Surat Tugas lama belum memiliki assignmentType dan seluruhnya dahulu
+    // diperlakukan sebagai dinas yang menghasilkan penyesuaian otomatis 0%.
+    if (!key && String(legacyAdjustmentType || '') === 'official_duty') return 'official_travel';
+    return 'official_travel';
+  }
+
+  function assignmentTypeLabel(value) {
+    return ASSIGNMENT_TYPES[normalizeAssignmentType(value)] || ASSIGNMENT_TYPES.official_travel;
+  }
 
   const state = {
     loading: true,
@@ -153,6 +171,7 @@
       activity: String(row.activity || ''),
       location: String(row.location || ''),
       note: String(row.note || ''),
+      assignmentType: normalizeAssignmentType(row.assignmentType, row.adjustmentType),
       adjustmentType: String(row.adjustmentType || 'official_duty'),
       adjustmentPercent: Number.isFinite(Number(row.adjustmentPercent)) ? Number(row.adjustmentPercent) : 0,
       documents: (Array.isArray(row.documents) ? row.documents : []).map(normalizeDocument)
@@ -222,7 +241,7 @@
         if (f.status && statusOf(item).key !== f.status) return false;
         if (!query) return true;
         const haystack = [
-          item.letterNumber, item.activity, item.location,
+          item.letterNumber, item.activity, item.location, assignmentTypeLabel(item.assignmentType),
           ...people.flatMap((person) => [person.name, person.nip, person.unit])
         ].join(' ').toLowerCase();
         return haystack.includes(query);
@@ -248,7 +267,7 @@
       .slice(0, 6);
 
     return `<div class="assignment-page">
-      <div class="assignment-head"><div><h1>Surat Tugas</h1><p>Arsip penugasan/dinas pegawai yang terhubung otomatis dengan proses Tunjangan Kinerja.</p></div><div class="assignment-head-actions"><button class="btn btn-primary" type="button" data-action="add-assignment">+ Tambah Surat Tugas</button></div></div>
+      <div class="assignment-head"><div><h1>Surat Tugas</h1><p>Arsip penugasan pegawai yang terhubung dengan proses Tunjangan Kinerja.</p></div><div class="assignment-head-actions"><button class="btn btn-primary" type="button" data-action="add-assignment">+ Tambah Surat Tugas</button></div></div>
       <div class="assignment-metrics">${metric('Surat Tugas', yearRows.length, `Tahun ${CURRENT_YEAR}`)}${metric('Sedang Berjalan', active, 'Berdasarkan tanggal hari ini')}${metric('Akan Datang', upcoming, 'Penugasan yang belum dimulai')}${metric('Pegawai Ditugaskan', uniqueEmployeeIds.size, 'Pegawai unik pada tahun berjalan')}</div>
       <section class="card assignment-card"><div class="assignment-card-head"><div><h2>Penugasan Terdekat</h2><p>Surat Tugas berjalan dan akan datang.</p></div><a class="btn btn-secondary btn-sm" href="surat-tugas.html#data">Lihat Semua</a></div>
         ${upcomingRows.length ? `<div class="assignment-upcoming-list">${upcomingRows.map((item) => `<article class="assignment-upcoming"><strong>${esc(item.activity || item.letterNumber || 'Surat Tugas')}</strong><span>${esc(formatDateRange(item))} · ${esc(item.location || 'Lokasi belum diisi')}</span><span>${esc(assignmentPeople(item).map((person) => person.name).filter(Boolean).slice(0, 3).join(', '))}${assignmentPeople(item).length > 3 ? ` +${assignmentPeople(item).length - 3}` : ''}</span><div style="margin-top:8px"><button class="btn btn-secondary btn-sm" type="button" data-assignment-detail="${esc(item.id)}">Detail</button></div></article>`).join('')}</div>` : '<div class="assignment-empty"><strong>Belum ada penugasan</strong>Tambahkan Surat Tugas untuk mulai membangun arsip penugasan.</div>'}
@@ -270,7 +289,7 @@
       <section class="card assignment-card"><div class="assignment-table-wrap"><table class="data-table assignment-table"><thead><tr><th>No</th><th>Pegawai</th><th>Nomor Surat</th><th>Tanggal Surat</th><th>Periode Tugas</th><th>Kegiatan</th><th>Lokasi</th><th>Status</th><th>Dokumen</th><th>Aksi</th></tr></thead><tbody>${rows.length ? rows.map((item, index) => {
         const status = statusOf(item);
         const doc = primaryDocument(item);
-        return `<tr><td>${index + 1}</td><td>${peopleCompact(item)}</td><td><strong>${esc(item.letterNumber || '—')}</strong></td><td class="nowrap">${esc(formatDate(item.letterDate))}</td><td class="nowrap">${esc(formatDateRange(item))}</td><td><strong>${esc(item.activity || '—')}</strong><div class="assignment-sub">${esc(item.note || '')}</div></td><td>${esc(item.location || '—')}</td><td><span class="assignment-pill ${status.key}">${esc(status.label)}</span></td><td>${doc?.file?.itemId ? `<span class="assignment-pill">Tersimpan</span><div class="assignment-sub">${esc(doc.file.name || doc.file.remoteName || 'Surat Tugas')}</div>` : '<span class="assignment-sub">Belum ada file</span>'}</td><td><div class="assignment-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-assignment-detail="${esc(item.id)}">Detail</button><button class="btn btn-secondary btn-sm" type="button" data-assignment-edit="${esc(item.id)}">Edit</button></div></td></tr>`;
+        return `<tr><td>${index + 1}</td><td>${peopleCompact(item)}</td><td><strong>${esc(item.letterNumber || '—')}</strong></td><td class="nowrap">${esc(formatDate(item.letterDate))}</td><td class="nowrap">${esc(formatDateRange(item))}</td><td><strong>${esc(item.activity || '—')}</strong><div class="assignment-sub">${esc(assignmentTypeLabel(item.assignmentType))}${item.note ? ` · ${esc(item.note)}` : ''}</div></td><td>${esc(item.location || '—')}</td><td><span class="assignment-pill ${status.key}">${esc(status.label)}</span></td><td>${doc?.file?.itemId ? `<span class="assignment-pill">Tersimpan</span><div class="assignment-sub">${esc(doc.file.name || doc.file.remoteName || 'Surat Tugas')}</div>` : '<span class="assignment-sub">Belum ada file</span>'}</td><td><div class="assignment-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-assignment-detail="${esc(item.id)}">Detail</button><button class="btn btn-secondary btn-sm" type="button" data-assignment-edit="${esc(item.id)}">Edit</button></div></td></tr>`;
       }).join('') : '<tr><td colspan="10"><div class="assignment-empty"><strong>Tidak ada data</strong>Tidak ada Surat Tugas yang sesuai filter.</div></td></tr>'}</tbody></table></div></section>
     </div>`;
   }
@@ -286,7 +305,7 @@
   function calendarView() {
     const rows = calendarRows();
     return `<div class="assignment-page">
-      <div class="assignment-head"><div><h1>Kalender Surat Tugas</h1><p>Daftar penugasan berdasarkan rentang tanggal dinas.</p></div><div class="assignment-head-actions"><button class="btn btn-primary" type="button" data-action="add-assignment">+ Tambah Surat Tugas</button></div></div>
+      <div class="assignment-head"><div><h1>Kalender Surat Tugas</h1><p>Daftar penugasan berdasarkan rentang tanggal pelaksanaan.</p></div><div class="assignment-head-actions"><button class="btn btn-primary" type="button" data-action="add-assignment">+ Tambah Surat Tugas</button></div></div>
       <section class="card assignment-card"><div class="assignment-card-head assignment-calendar-toolbar"><div><h2>${esc(monthName(state.calendar.month))} ${esc(state.calendar.year)}</h2><p>${rows.length} Surat Tugas beririsan dengan bulan ini.</p></div><div class="assignment-calendar-nav"><button class="btn btn-secondary btn-sm" type="button" data-action="calendar-prev">←</button><strong>${esc(monthName(state.calendar.month))}</strong><button class="btn btn-secondary btn-sm" type="button" data-action="calendar-next">→</button></div></div>
         <div class="assignment-calendar-list">${rows.length ? rows.map((item) => `<button class="assignment-calendar-row" type="button" data-assignment-detail="${esc(item.id)}" style="width:100%;border-left:0;border-right:0;border-top:0;background:#fff;text-align:left"><div class="date">${esc(formatDateRange(item))}</div><div class="activity"><strong>${esc(item.activity || item.letterNumber || 'Surat Tugas')}</strong><span>${esc(item.letterNumber || 'Tanpa nomor')}</span></div><div>${esc(assignmentPeople(item).map((person) => person.name).filter(Boolean).slice(0, 2).join(', '))}${assignmentPeople(item).length > 2 ? ` +${assignmentPeople(item).length - 2}` : ''}</div><div><span class="assignment-pill ${statusOf(item).key}">${esc(statusOf(item).label)}</span></div></button>`).join('') : '<div class="assignment-empty"><strong>Tidak ada penugasan</strong>Belum ada Surat Tugas pada bulan ini.</div>'}</div>
       </section>
@@ -305,7 +324,7 @@
     const currentFile = doc?.file || null;
     const currentFileMarkup = currentFile?.itemId ? `<div class="assignment-current-file"><span>File saat ini</span><strong>${esc(currentFile.name || currentFile.remoteName || doc.name || 'Surat Tugas')}</strong>${currentFile.size ? `<small>${esc(formatFileSize(currentFile.size))}</small>` : '<small>SharePoint</small>'}</div>` : '';
     return `<div class="assignment-modal-backdrop" data-action="close-assignment-modal"><div class="assignment-modal" role="dialog" aria-modal="true" data-assignment-modal-panel>
-      <div class="assignment-modal-head"><div><h3>${item.id ? 'Edit Surat Tugas' : 'Tambah Surat Tugas'}</h3><p>Upload surat, pilih satu atau lebih pegawai, kemudian isi rentang tanggal penugasan. Data ini akan menjadi sumber penyesuaian otomatis pada proses Tukin.</p></div><button class="icon-btn" type="button" data-action="close-assignment-modal">×</button></div>
+      <div class="assignment-modal-head"><div><h3>${item.id ? 'Edit Surat Tugas' : 'Tambah Surat Tugas'}</h3><p>Upload surat, pilih satu atau lebih pegawai, kemudian isi rentang tanggal penugasan. Data Surat Tugas akan menjadi data pendukung pada proses Tukin.</p></div><button class="icon-btn" type="button" data-action="close-assignment-modal">×</button></div>
       <div class="assignment-form-grid">
         <div class="field"><label for="assignment-letter-number">Nomor Surat Tugas</label><input id="assignment-letter-number" type="text" value="${esc(item.letterNumber || '')}" placeholder="Contoh: ST/123/Pusdatin/2026"></div>
         <div class="field"><label for="assignment-letter-date">Tanggal Surat</label><input id="assignment-letter-date" type="date" value="${esc(item.letterDate || '')}"></div>
@@ -314,7 +333,7 @@
         <div class="field span-2"><label>Pegawai yang Ditugaskan</label>${employeePickerMarkup()}<div class="assignment-field-note">Satu Surat Tugas cukup dicatat satu kali walaupun memuat banyak pegawai.</div></div>
         <div class="field span-2"><label for="assignment-activity">Kegiatan / Keperluan</label><input id="assignment-activity" type="text" value="${esc(item.activity || '')}" placeholder="Contoh: Rapat Koordinasi ..."></div>
         <div class="field"><label for="assignment-location">Lokasi / Tujuan</label><input id="assignment-location" type="text" value="${esc(item.location || '')}" placeholder="Opsional"></div>
-        <div class="field"><label>Perlakuan Tukin</label><input type="text" value="Dinas / Surat Tugas — penyesuaian 0%" readonly><div class="assignment-field-note">Hanya diterapkan pada tanggal yang berstatus perlu verifikasi. Nilai otomatis asal tetap ditampilkan.</div></div>
+        <div class="field"><label for="assignment-type">Jenis Penugasan</label><select id="assignment-type"><option value="official_travel" ${normalizeAssignmentType(item.assignmentType, item.adjustmentType) === 'official_travel' ? 'selected' : ''}>Dinas Luar / Perjalanan Dinas</option><option value="work_arrangement" ${normalizeAssignmentType(item.assignmentType, item.adjustmentType) === 'work_arrangement' ? 'selected' : ''}>Pengaturan Kerja</option><option value="other" ${normalizeAssignmentType(item.assignmentType, item.adjustmentType) === 'other' ? 'selected' : ''}>Lainnya</option></select><div class="assignment-field-note">Dinas Luar / Perjalanan Dinas dapat menyesuaikan potongan menjadi 0% secara otomatis. Pengaturan Kerja dan Lainnya hanya menjadi data pendukung dan tidak mengubah persentase otomatis.</div></div>
         <div class="field span-2"><label for="assignment-note">Keterangan</label><textarea id="assignment-note" rows="3" placeholder="Opsional">${esc(item.note || '')}</textarea></div>
         <div class="field span-2"><label for="assignment-file">Berkas Surat Tugas${currentFile?.itemId ? ' <span class="assignment-sub">(pilih file baru untuk mengganti)</span>' : ''}</label><input class="assignment-file-input" id="assignment-file" type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png">${currentFileMarkup}<div class="assignment-field-note">File disimpan pada folder SURAT_TUGAS di SharePoint. PDF dan gambar dapat dipreview langsung sebelum disimpan.</div><div id="assignment-local-preview"></div></div>
       </div>
@@ -363,7 +382,7 @@
     const status = statusOf(item);
     return `<div class="assignment-detail-backdrop" data-action="close-assignment-detail"></div><section class="assignment-detail-modal" role="dialog" aria-modal="true" aria-label="Detail Surat Tugas">
       <div class="assignment-modal-head assignment-detail-head"><div><h3>${esc(item.letterNumber || 'Surat Tugas')}</h3><p>${esc(item.activity || 'Detail penugasan/dinas pegawai.')}</p></div><button class="icon-btn" type="button" data-action="close-assignment-detail">×</button></div>
-      <div class="assignment-section"><div class="assignment-section-title">Informasi Surat Tugas</div><div class="assignment-detail-grid"><div><span>Nomor Surat</span><strong>${esc(item.letterNumber || '—')}</strong></div><div><span>Tanggal Surat</span><strong>${esc(formatDate(item.letterDate))}</strong></div><div><span>Status</span><strong>${esc(status.label)}</strong></div><div><span>Perlakuan Tukin</span><strong>Dinas · 0%</strong></div><div><span>Tanggal Mulai</span><strong>${esc(formatDate(item.startDate))}</strong></div><div><span>Tanggal Selesai</span><strong>${esc(formatDate(item.endDate))}</strong></div><div class="span-2"><span>Lokasi / Tujuan</span><strong>${esc(item.location || '—')}</strong></div><div class="span-all"><span>Kegiatan / Keperluan</span><strong>${esc(item.activity || '—')}</strong></div><div class="span-all"><span>Keterangan</span><strong>${esc(item.note || '—')}</strong></div></div></div>
+      <div class="assignment-section"><div class="assignment-section-title">Informasi Surat Tugas</div><div class="assignment-detail-grid"><div><span>Nomor Surat</span><strong>${esc(item.letterNumber || '—')}</strong></div><div><span>Tanggal Surat</span><strong>${esc(formatDate(item.letterDate))}</strong></div><div><span>Status</span><strong>${esc(status.label)}</strong></div><div><span>Jenis Penugasan</span><strong>${esc(assignmentTypeLabel(item.assignmentType))}</strong></div><div><span>Tanggal Mulai</span><strong>${esc(formatDate(item.startDate))}</strong></div><div><span>Tanggal Selesai</span><strong>${esc(formatDate(item.endDate))}</strong></div><div class="span-2"><span>Lokasi / Tujuan</span><strong>${esc(item.location || '—')}</strong></div><div class="span-all"><span>Kegiatan / Keperluan</span><strong>${esc(item.activity || '—')}</strong></div><div class="span-all"><span>Keterangan</span><strong>${esc(item.note || '—')}</strong></div></div></div>
       <div class="assignment-section"><div class="assignment-section-title">Pegawai yang Ditugaskan (${people.length})</div><div class="assignment-people-list">${people.length ? people.map((person) => `<div class="assignment-people-item"><strong>${esc(person.name || 'Pegawai')}</strong><span>${person.nip ? `NIP ${esc(person.nip)} · ` : ''}${esc(person.unit || 'Unit/Bidang belum diisi')}</span></div>`).join('') : '<div class="assignment-empty"><strong>Belum ada pegawai</strong>Record ini belum memiliki pegawai.</div>'}</div></div>
       <div class="assignment-section"><div class="assignment-section-title">Berkas Surat Tugas</div>${doc ? `<article class="assignment-document-card"><div class="assignment-document-row"><div><strong>${esc(file?.name || doc.name || 'Surat Tugas')}</strong><span>${esc(doc.type || 'Surat Tugas')}${file?.size ? ` · ${esc(formatFileSize(file.size))}` : ''}</span></div><div class="assignment-row-actions">${file?.itemId ? `<button class="btn btn-secondary btn-sm" type="button" data-download-assignment-document="${esc(doc.id)}" data-assignment-id="${esc(item.id)}">Unduh</button><button class="btn btn-secondary btn-sm" type="button" data-preview-assignment-document="${esc(doc.id)}" data-assignment-id="${esc(item.id)}">Preview Besar</button>${file.webUrl ? `<a class="btn btn-secondary btn-sm" href="${esc(file.webUrl)}" target="_blank" rel="noopener noreferrer">SharePoint ↗</a>` : ''}` : ''}</div></div>${inlinePreviewMarkup(item, doc)}</article>` : '<div class="assignment-empty"><strong>Berkas belum tersedia</strong>Edit Surat Tugas untuk mengunggah file.</div>'}</div>
       <div class="assignment-modal-actions" style="justify-content:space-between"><button class="btn btn-danger" type="button" data-assignment-delete="${esc(item.id)}">Hapus</button><div class="assignment-row-actions"><button class="btn btn-secondary" type="button" data-action="close-assignment-detail">Tutup</button><button class="btn btn-primary" type="button" data-assignment-edit="${esc(item.id)}">Edit Data</button></div></div>
@@ -449,7 +468,7 @@
     state.detailId = '';
     state.previewModal = null;
     state.modal = {
-      record: existing ? { ...existing, employees: (existing.employees || []).map((employee) => ({ ...employee })), documents: (existing.documents || []).map((doc) => ({ ...doc, file: doc.file ? { ...doc.file } : null })) } : { letterNumber: '', letterDate: TODAY, startDate: '', endDate: '', activity: '', location: '', note: '', documents: [] },
+      record: existing ? { ...existing, employees: (existing.employees || []).map((employee) => ({ ...employee })), documents: (existing.documents || []).map((doc) => ({ ...doc, file: doc.file ? { ...doc.file } : null })) } : { letterNumber: '', letterDate: TODAY, startDate: '', endDate: '', assignmentType: 'official_travel', activity: '', location: '', note: '', documents: [] },
       selectedEmployeeIds: selected
     };
     render();
@@ -503,6 +522,7 @@
     const startDate = String(document.getElementById('assignment-start')?.value || '');
     const endDate = String(document.getElementById('assignment-end')?.value || '');
     const activity = String(document.getElementById('assignment-activity')?.value || '').trim();
+    const assignmentType = normalizeAssignmentType(document.getElementById('assignment-type')?.value || 'official_travel');
     const locationText = String(document.getElementById('assignment-location')?.value || '').trim();
     const note = String(document.getElementById('assignment-note')?.value || '').trim();
     const selectedFile = document.getElementById('assignment-file')?.files?.[0] || null;
@@ -526,7 +546,7 @@
       const identity = employeeIdentity(employeeId);
       return { employeeId, name: identity.name, nip: identity.nip, unit: identity.unit };
     });
-    const draft = { id, letterNumber, letterDate, startDate, endDate, assignmentYear, employees, activity, location: locationText, note };
+    const draft = { id, letterNumber, letterDate, startDate, endDate, assignmentYear, employees, assignmentType, activity, location: locationText, note };
     let storedFile = existingFile ? { ...existingFile } : null;
     let uploadedFile = null;
     let firestoreSaved = false;
@@ -557,10 +577,13 @@
 
       const payload = {
         letterNumber, letterDate, startDate, endDate, assignmentYear,
-        employees, activity, location: locationText, note,
-        adjustmentType: 'official_duty', adjustmentPercent: 0,
+        employees, assignmentType, activity, location: locationText, note,
+        // Disimpan untuk kompatibilitas data lama. Mesin Tukin memakai assignmentType
+        // sebagai business rule utama mulai schemaVersion 2.
+        adjustmentType: assignmentType === 'official_travel' ? 'official_duty' : 'manual_review',
+        adjustmentPercent: assignmentType === 'official_travel' ? 0 : null,
         documents,
-        schemaVersion: 1,
+        schemaVersion: 2,
         updatedAt: serverTimestamp(), updatedBy: user()?.email || ''
       };
       if (!existing.id) {
