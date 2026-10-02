@@ -378,6 +378,42 @@
     return attachment;
   }
 
+
+  function automaticCutiEvidenceKey(attachment) {
+    const meta = attachment?.cutiEvidence;
+    if (!meta?.automatic) return '';
+    if (meta.sourceDriveId && meta.sourceItemId) return `source:${meta.sourceDriveId}:${meta.sourceItemId}`;
+    if (meta.leaveId && meta.documentId) return `leave:${meta.leaveId}:${meta.documentId}`;
+    return attachment?.id ? `id:${attachment.id}` : '';
+  }
+
+  function mirrorRemoteAttachment(target, source) {
+    if (!target || !source) return target;
+    target.provider = source.provider || 'sharepoint';
+    target.driveId = source.driveId || '';
+    target.itemId = source.itemId || '';
+    target.webUrl = source.webUrl || '';
+    target.eTag = source.eTag || '';
+    target.cTag = source.cTag || '';
+    target.remoteName = source.remoteName || '';
+    target.remotePath = source.remotePath || '';
+    target.size = Number(source.size || target.size || 0);
+    target.sourceSize = Number(source.sourceSize || target.sourceSize || target.size || 0);
+    target.sourceLastModified = Number(source.sourceLastModified || target.sourceLastModified || target.lastModified || 0);
+    target.uploadedAt = source.uploadedAt || target.uploadedAt || '';
+    target.uploadedBy = source.uploadedBy || target.uploadedBy || '';
+    target.localOnly = false;
+    target.file = null;
+    if (target.cutiEvidence?.automatic) {
+      target.cutiEvidence = {
+        ...target.cutiEvidence,
+        copiedToTukin: true,
+        copiedAt: source.cutiEvidence?.copiedAt || target.cutiEvidence.copiedAt || new Date().toISOString()
+      };
+    }
+    return target;
+  }
+
   async function syncRunFiles(run, interactive) {
     const structure = await ensureRunStructure(run, interactive);
     const driveId = structure.driveId;
@@ -405,10 +441,23 @@
         uploaded.push(attachment);
       }
 
+      const syncedAutomaticCuti = new Map();
       for (const record of Object.values(employee.records || {})) {
         for (const attachment of record.evidence || []) {
+          const cutiKey = automaticCutiEvidenceKey(attachment);
+          const alreadySynced = cutiKey ? syncedAutomaticCuti.get(cutiKey) : null;
+          if (alreadySynced) {
+            // Jangan mengunggah file sumber Cuti yang sama lebih dari sekali dalam
+            // satu pegawai/periode. Referensi duplikat diarahkan ke salinan pertama.
+            if (alreadySynced.driveId && alreadySynced.itemId) mirrorRemoteAttachment(attachment, alreadySynced);
+            continue;
+          }
+
           await materializeCutiEvidence(attachment, interactive);
-          if (!needsUpload(attachment)) continue;
+          if (!needsUpload(attachment)) {
+            if (cutiKey) syncedAutomaticCuti.set(cutiKey, attachment);
+            continue;
+          }
           const shortId = String(attachment.id || uid('bukti')).replace(/[^A-Za-z0-9]/g, '').slice(-8) || Date.now();
           const date = record.key || (record.date instanceof Date ? window.TukinRules?.dateKey?.(record.date) : '') || 'tanggal';
           const remoteName = safeName(`${date}_${shortId}_${attachment.name || attachment.file?.name || 'Bukti'}`, `Bukti_${shortId}`);
@@ -421,6 +470,7 @@
               copiedAt: new Date().toISOString()
             };
           }
+          if (cutiKey) syncedAutomaticCuti.set(cutiKey, attachment);
           uploaded.push(attachment);
         }
       }

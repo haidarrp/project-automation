@@ -232,6 +232,26 @@
     if (item.driveId && item.itemId && sharePoint?.downloadAttachment) {
       return sharePoint.downloadAttachment(item, true);
     }
+
+    // Bukti Cuti yang belum disimpan ke folder Tukin tetap dapat diunduh langsung
+    // dari file sumber Cuti. Mekanisme Download tidak wajib melakukan Simpan dulu.
+    const cutiSource = item.cutiEvidence;
+    if (cutiSource?.automatic && cutiSource.sourceDriveId && cutiSource.sourceItemId && sharePoint?.downloadAttachment) {
+      return sharePoint.downloadAttachment({
+        id: `${item.id || 'cuti'}-download-source`,
+        name: cutiSource.sourceName || item.name || 'Bukti Cuti',
+        size: Number(item.size || 0),
+        type: item.type || '',
+        driveId: cutiSource.sourceDriveId,
+        itemId: cutiSource.sourceItemId,
+        webUrl: cutiSource.sourceWebUrl || item.webUrl || '',
+        eTag: cutiSource.sourceETag || '',
+        cTag: cutiSource.sourceCTag || '',
+        provider: 'sharepoint',
+        localOnly: false,
+        file: null
+      }, true);
+    }
     return null;
   }
 
@@ -253,6 +273,15 @@
     return candidate;
   }
 
+
+  function automaticCutiEvidenceKey(item) {
+    const meta = item?.cutiEvidence;
+    if (!meta?.automatic) return '';
+    if (meta.sourceDriveId && meta.sourceItemId) return `source:${meta.sourceDriveId}:${meta.sourceItemId}`;
+    if (meta.leaveId && meta.documentId) return `leave:${meta.leaveId}:${meta.documentId}`;
+    return item?.id ? `id:${item.id}` : '';
+  }
+
   async function generateZip(employees, period) {
     if (!window.JSZip) throw new Error('Library JSZip belum termuat.');
     const recap = await generateRecap(employees, period);
@@ -267,8 +296,12 @@
         const binary = await resolveAttachmentBinary(source);
         if (binary) folder.file(uniqueName(used, attachmentName(source, 'Absensi.xlsx')), binary);
       }
+      const seenAutomaticCutiEvidence = new Set();
       for (const record of Object.values(employee.records || {})) {
         for (const evidence of record.evidence || []) {
+          const cutiKey = automaticCutiEvidenceKey(evidence);
+          if (cutiKey && seenAutomaticCutiEvidence.has(cutiKey)) continue;
+          if (cutiKey) seenAutomaticCutiEvidence.add(cutiKey);
           const binary = await resolveAttachmentBinary(evidence);
           if (binary) folder.file(uniqueName(used, attachmentName(evidence, 'Bukti')), binary);
         }

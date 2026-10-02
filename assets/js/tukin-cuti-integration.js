@@ -143,9 +143,18 @@
     const evidence = Array.isArray(record.evidence) ? record.evidence : [];
     const manualEvidence = evidence.filter((item) => !isAutoCutiEvidence(item));
     const existingAuto = evidence.filter(isAutoCutiEvidence);
-    const desired = (leave.documents || [])
+    const desiredBySource = new Map();
+    (leave.documents || [])
       .map((document, index) => cutiEvidenceFromDocument(leave, document, index))
-      .filter(Boolean);
+      .filter(Boolean)
+      .forEach((item) => {
+        const meta = item.cutiEvidence || {};
+        const sourceKey = meta.sourceDriveId && meta.sourceItemId
+          ? `${meta.sourceDriveId}:${meta.sourceItemId}`
+          : item.id;
+        if (!desiredBySource.has(sourceKey)) desiredBySource.set(sourceKey, item);
+      });
+    const desired = [...desiredBySource.values()];
     const removed = [];
     const nextAuto = [];
 
@@ -206,7 +215,7 @@
     return `Penyesuaian otomatis menjadi 0% berdasarkan data ${leave.leaveType} pada modul Cuti (${period}${number}).`;
   }
 
-  function applyLeaveToRecord(record, leave) {
+  function applyLeaveToRecord(record, leave, includeEvidence) {
     record.adjustedPercent = 0;
     record.adjustmentSource = 'cuti';
     record.adjustmentNote = leaveNote(leave);
@@ -218,7 +227,12 @@
       endDate: leave.endDate,
       documentNumber: leave.documentNumber || ''
     };
-    return mergeCutiEvidence(record, leave);
+
+    // Bukti dukung cuti hanya ditempelkan pada satu tanggal kanonis dalam satu
+    // rentang cuti. Seluruh tanggal tetap memperoleh penyesuaian 0%, tetapi file
+    // yang sama tidak lagi ikut tersalin berulang kali ke folder/ZIP Tukin.
+    if (includeEvidence) return mergeCutiEvidence(record, leave);
+    return { linked: 0, removed: detachCutiEvidence(record) };
   }
 
   async function apply(employees, period) {
@@ -247,7 +261,24 @@
       const employeeLeaves = byEmployee.get(masterEmployeeId) || [];
       if (employeeLeaves.length) matchedEmployees += 1;
 
-      for (const record of Object.values(employee.records || {})) {
+      const records = Object.values(employee.records || {}).sort((a, b) => {
+        return dateKey(a.key || a.date).localeCompare(dateKey(b.key || b.date));
+      });
+
+      // Tentukan satu record pemilik bukti untuk setiap leave record. Record paling
+      // awal dalam rentang yang memang perlu diverifikasi dipilih sebagai pemilik.
+      // Ini sekaligus memigrasikan data lama yang sebelumnya menempelkan bukti yang
+      // sama pada setiap tanggal cuti.
+      const evidenceOwnerByLeaveId = new Map();
+      for (const leave of employeeLeaves) {
+        const owner = records.find((record) => {
+          const key = dateKey(record.key || record.date);
+          return key >= leave.startDate && key <= leave.endDate && record.needsVerification && !hasProtectedManualAdjustment(record);
+        }) || null;
+        if (owner) evidenceOwnerByLeaveId.set(leave.id, owner);
+      }
+
+      for (const record of records) {
         const key = dateKey(record.key || record.date);
         const matchingLeave = employeeLeaves.find((leave) => leave.startDate <= key && leave.endDate >= key) || null;
 
@@ -256,7 +287,8 @@
             preservedManualRecords += 1;
             continue;
           }
-          const evidenceResult = applyLeaveToRecord(record, matchingLeave);
+          const includeEvidence = evidenceOwnerByLeaveId.get(matchingLeave.id) === record;
+          const evidenceResult = applyLeaveToRecord(record, matchingLeave, includeEvidence);
           evidenceFiles += Number(evidenceResult.linked || 0);
           removedEvidence.push(...(evidenceResult.removed || []));
           adjustedRecords += 1;

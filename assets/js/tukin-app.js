@@ -24,6 +24,7 @@
     validationResults: [],
     employees: [],
     busy: false,
+    busyAction: '',
     drawerEmployeeKey: null,
     editRecordKey: null,
     editDraft: null,
@@ -164,7 +165,7 @@
   }
 
   function stepper() {
-    const steps = [['period', 'Periode'], ['upload', 'Upload'], ['validation', 'Validasi'], ['result', 'Hasil']];
+    const steps = [['period', 'Periode'], ['upload', 'Upload'], ['validation', 'Validasi / Simpan']];
     const idx = steps.findIndex((item) => item[0] === state.step);
     return `<div class="card tukin-stepper">${steps.map((step, i) => `${i ? '<div class="tukin-step-line"></div>' : ''}<div class="tukin-step ${i < idx ? 'done' : i === idx ? 'active' : ''}"><span class="tukin-step-dot">${i < idx ? '✓' : i + 1}</span><span>${step[1]}</span></div>`).join('')}</div>`;
   }
@@ -229,7 +230,7 @@
       : '<span class="card-subtitle">Belum ada tanggal merah tambahan.</span>';
 
     return `<div class="page-title"><div><h2>Proses Tunjangan Kinerja</h2><p>Pilih periode pembayaran. Dasar absensi ditetapkan otomatis tanggal 11 dua bulan sebelumnya sampai tanggal 10 bulan sebelumnya.</p></div></div>
-      ${state.editingHistoryId ? '<div class="alert alert-warning"><div class="alert-title">Mode edit riwayat</div>Perubahan akan memperbarui riwayat yang sama setelah ZIP digenerate kembali.</div>' : ''}
+      ${state.editingHistoryId ? '<div class="alert alert-warning"><div class="alert-title">Mode edit riwayat</div>Perubahan akan memperbarui riwayat yang sama setelah tombol Simpan digunakan. Download hanya mengunduh paket ZIP ke perangkat.</div>' : ''}
       <div class="card card-pad">
         <div class="card-title">Periode Pembayaran</div>
         <div class="form-grid section-gap"><div class="field"><label>Bulan Tukin</label><select id="tukin-month">${months}</select></div><div class="field"><label>Tahun</label><select id="tukin-year">${years}</select></div></div>
@@ -261,7 +262,7 @@
     if (Number(info.adjustedRecords || 0) > 0) {
       const manual = Number(info.preservedManualRecords || 0);
       const evidence = Number(info.evidenceFiles || 0);
-      return `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Data Cuti</div>${Number(info.adjustedRecords || 0)} tanggal yang memerlukan verifikasi otomatis disesuaikan menjadi <strong>0%</strong>. Nilai potongan hasil perhitungan presensi tetap ditampilkan pada kolom <strong>Otomatis</strong>.${evidence ? ` ${evidence} bukti dukung Cuti siap disalin ke folder Tukin saat disimpan/generate.` : ''}${manual ? ` ${manual} koreksi manual yang sudah ada dipertahankan.` : ''}</div>`;
+      return `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Data Cuti</div>${Number(info.adjustedRecords || 0)} tanggal yang memerlukan verifikasi otomatis disesuaikan menjadi <strong>0%</strong>. Nilai potongan hasil perhitungan presensi tetap ditampilkan pada kolom <strong>Otomatis</strong>.${evidence ? ` ${evidence} bukti dukung Cuti siap disalin satu kali ke folder Tukin saat disimpan.` : ''}${manual ? ` ${manual} koreksi manual yang sudah ada dipertahankan.` : ''}</div>`;
     }
     return '';
   }
@@ -309,9 +310,9 @@
     const rows = summaries.filter((item) => !query || item.employee.name.toLowerCase().includes(query) || String(item.employee.nip).includes(query));
 
     return `<div class="page-title"><div><h2>Validasi & Verifikasi Perhitungan</h2><p>Periksa hasil perhitungan otomatis. Buka Detail untuk menelusuri tanggal, alasan potongan, koreksi dan bukti dukung.</p></div></div>
-      ${state.editingHistoryId ? `<div class="alert alert-warning"><div class="alert-title">Mengedit riwayat ${esc(periodLabel())}</div>Setelah koreksi selesai, Generate ZIP Final untuk memperbarui riwayat.</div>` : ''}
+      ${state.editingHistoryId ? `<div class="alert alert-warning"><div class="alert-title">Mengedit riwayat ${esc(periodLabel())}</div>Setelah koreksi selesai, klik Simpan untuk memperbarui riwayat. Gunakan Download bila ingin mengunduh paket ZIP ke perangkat.</div>` : ''}
       ${cutiIntegrationAlert()}
-      ${errors.length ? `<div class="alert alert-danger"><div class="alert-title">${errors.length} file bermasalah</div>File bermasalah harus diperbaiki/dihapus sebelum generate final.</div>` : ''}
+      ${errors.length ? `<div class="alert alert-danger"><div class="alert-title">${errors.length} file bermasalah</div>File bermasalah harus diperbaiki/dihapus sebelum data disimpan atau didownload.</div>` : ''}
       <div class="tukin-kpi section-gap"><div class="card"><span>Pegawai</span><strong>${state.employees.length}</strong></div><div class="card"><span>Perlu Diverifikasi</span><strong>${totalNeed}</strong></div><div class="card"><span>Sudah Dikoreksi</span><strong>${adjusted}</strong></div><div class="card"><span>Total Potongan Rp</span><strong>${money(totalCut)}</strong></div></div>
       <div class="toolbar"><div class="search"><input id="tukin-search" placeholder="Cari nama atau NIP" value="${esc(state.search)}"></div><div class="card-subtitle">% SKP sementara 0% untuk seluruh pegawai</div></div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>No</th><th>Nama / NIP</th><th>Anak Satker</th><th>Hari Kerja</th><th>% Pot. Absensi</th><th>% Pot. SKP</th><th>% Pot. Final</th><th>Besaran Tukin</th><th>Potongan Tukin</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${rows.map((item, i) => {
@@ -320,7 +321,7 @@
         return `<tr class="${employee.masterMatched ? '' : 'tukin-master-miss'}"><td>${i + 1}</td><td><strong>${esc(employee.name)}</strong><div class="card-subtitle">${esc(employee.nip || '-')}</div></td><td>${esc(employee.anakSatker || '-')}</td><td>${summary.workDays}</td><td class="tukin-pct ${summary.attendancePercent ? 'tukin-danger' : ''}">${pct(summary.attendancePercent)}</td><td>${pct(summary.skpPercent)}</td><td class="tukin-pct">${pct(summary.finalPercent)}</td><td class="tukin-money">${money(summary.tukin)}</td><td class="tukin-money">${money(summary.cutAmount)}</td><td>${summary.flaggedRecords ? `<span class="tukin-badge warn">${summary.flaggedRecords} perlu cek</span>` : '<span class="tukin-badge">Tidak ada isu</span>'}${summary.adjustedRecords ? ` <span class="tukin-badge edit">${summary.adjustedRecords} koreksi</span>` : ''}${employee.masterMatched ? '' : ' <span class="tukin-badge warn">Master belum cocok</span>'}</td><td><button class="btn btn-secondary btn-sm" data-detail-employee="${esc(rules.employeeKey(employee))}" type="button">Detail</button></td></tr>`;
       }).join('') || '<tr><td colspan="11" class="text-center">Tidak ada data.</td></tr>'}</tbody></table></div>
       ${state.validationResults.length ? `<div class="section-gap card"><div class="table-wrap" style="border:0"><table class="file-table"><thead><tr><th>File</th><th>Status</th><th>Keterangan</th></tr></thead><tbody>${state.validationResults.map((result) => `<tr><td>${esc(result.fileName)}</td><td><span class="status ${result.ok ? 'ok' : 'error'}">${result.ok ? '● Berhasil' : '● Gagal'}</span></td><td>${esc(result.ok ? (result.warnings?.join(' · ') || `Pegawai: ${result.employee}`) : result.error)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
-      <div class="actions"><button class="btn btn-secondary" data-action="back-upload" type="button">← Kembali ke Upload</button><div class="actions-right"><button class="btn btn-secondary" data-action="sync-cuti" type="button" ${state.busy || state.cutiIntegration?.status === 'loading' ? 'disabled' : ''}>Sinkronkan Data Cuti</button>${state.employees.some((employee) => (employee.sourceFiles || []).some((item) => item?.driveId && item?.itemId)) ? `<button class="btn btn-secondary" data-action="reload-sharepoint-attendance" type="button" ${state.busy ? 'disabled' : ''}>Muat Ulang Absensi dari SharePoint</button>` : ''}<button class="btn btn-secondary" data-action="settings" type="button">Atur Periode/Tanggal Merah</button><button class="btn btn-primary" data-action="generate" type="button" ${errors.length || !state.employees.length || state.busy || state.cutiIntegration?.status === 'loading' ? 'disabled' : ''}>${state.busy ? 'Memproses...' : state.editingHistoryId ? 'Simpan & Generate Ulang' : 'Generate ZIP Final'}</button></div></div>`;
+      <div class="actions"><button class="btn btn-secondary" data-action="back-upload" type="button">← Kembali ke Upload</button><div class="actions-right"><button class="btn btn-secondary" data-action="sync-cuti" type="button" ${state.busy || state.cutiIntegration?.status === 'loading' ? 'disabled' : ''}>Sinkronkan Data Cuti</button>${state.employees.some((employee) => (employee.sourceFiles || []).some((item) => item?.driveId && item?.itemId)) ? `<button class="btn btn-secondary" data-action="reload-sharepoint-attendance" type="button" ${state.busy ? 'disabled' : ''}>Muat Ulang Absensi dari SharePoint</button>` : ''}<button class="btn btn-secondary" data-action="settings" type="button">Atur Periode/Tanggal Merah</button><button class="btn btn-primary" data-action="save-run" type="button" ${errors.length || !state.employees.length || state.busy || state.cutiIntegration?.status === 'loading' ? 'disabled' : ''}>${state.busy && state.busyAction === 'save' ? 'Menyimpan...' : 'Simpan'}</button><button class="btn btn-secondary" data-action="download-run" type="button" ${errors.length || !state.employees.length || state.busy || state.cutiIntegration?.status === 'loading' ? 'disabled' : ''}>${state.busy && state.busyAction === 'download' ? 'Menyiapkan...' : 'Download'}</button></div></div>`;
   }
 
   function renderResult() {
@@ -344,7 +345,7 @@
       const manageActions = manageable
         ? `<button class="btn btn-secondary btn-sm" data-edit-tukin-history="${esc(item.id)}" type="button">Verifikasi/Edit</button><button class="btn btn-danger btn-sm" data-delete-tukin-history="${esc(item.id)}" type="button">Hapus</button>`
         : '';
-      return `<tr><td><strong>${esc(periodLabel(item.period))}</strong><div class="card-subtitle">${esc(rules.formatPeriodRange(rg))}</div></td><td>${Number(summary.employees || 0)}</td><td class="tukin-money">${money(summary.totalCutAmount || 0)}</td><td>${Number(summary.adjustedRecords || 0)}</td><td><strong>${esc(actorName)}</strong>${actorSub}</td><td><span class="history-time-label">${changedLabel}</span><br>${esc(formatDateTime(changedAt))}</td><td><span class="status-pill">Selesai</span></td><td><div class="history-actions tukin-history-actions"><button class="btn btn-secondary btn-sm" data-view-tukin-history="${esc(item.id)}" type="button">Lihat</button>${manageActions}${item.sharePoint?.runFolderWebUrl ? `<a class="btn btn-secondary btn-sm" href="${esc(item.sharePoint.runFolderWebUrl)}" target="_blank" rel="noopener noreferrer">SharePoint ↗</a>` : ''}<button class="btn btn-secondary btn-sm" data-regenerate-tukin-history="${esc(item.id)}" type="button">Generate Ulang</button></div></td></tr>`;
+      return `<tr><td><strong>${esc(periodLabel(item.period))}</strong><div class="card-subtitle">${esc(rules.formatPeriodRange(rg))}</div></td><td>${Number(summary.employees || 0)}</td><td class="tukin-money">${money(summary.totalCutAmount || 0)}</td><td>${Number(summary.adjustedRecords || 0)}</td><td><strong>${esc(actorName)}</strong>${actorSub}</td><td><span class="history-time-label">${changedLabel}</span><br>${esc(formatDateTime(changedAt))}</td><td><span class="status-pill">Selesai</span></td><td><div class="history-actions tukin-history-actions"><button class="btn btn-secondary btn-sm" data-view-tukin-history="${esc(item.id)}" type="button">Lihat</button>${manageActions}${item.sharePoint?.runFolderWebUrl ? `<a class="btn btn-secondary btn-sm" href="${esc(item.sharePoint.runFolderWebUrl)}" target="_blank" rel="noopener noreferrer">SharePoint ↗</a>` : ''}<button class="btn btn-secondary btn-sm" data-download-tukin-history="${esc(item.id)}" type="button">Download</button></div></td></tr>`;
     }).join('');
 
     return `<div class="page-title"><div><h2>Riwayat Tunjangan Kinerja</h2><p>Riwayat bersama seluruh akun aplikasi. Data perhitungan tersimpan di Firestore dan file biner tersimpan di SharePoint sehingga dapat diakses lintas akun/perangkat sesuai hak akses Microsoft 365.</p></div><button class="btn btn-primary" data-action="new-process-from-history" type="button">+ Proses Tukin Baru</button></div>
@@ -396,7 +397,7 @@
     return `<div class="drawer-backdrop" data-action="close-history-preview"></div><aside class="drawer tukin-drawer"><div class="tukin-drawer-header"><div class="drawer-header"><div><h3>Riwayat Tukin ${esc(periodLabel(run.period))}</h3><div class="card-subtitle">Dasar absensi ${esc(rules.formatPeriodRange(rg))}</div></div><button class="icon-btn" data-action="close-history-preview" type="button">×</button></div></div>
       <div class="tukin-detail-summary"><div><span>Pegawai</span><strong>${summaries.length}</strong></div><div><span>Total Potongan</span><strong>${money(totalCut)}</strong></div><div><span>Koreksi</span><strong>${adjusted}</strong></div><div><span>Terakhir Diubah</span><strong>${esc(formatDateTime(run.updatedAt || run.processedAt))}</strong></div></div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>No</th><th>Nama / NIP</th><th>Pot. Absensi</th><th>Pot. Final</th><th>Potongan Rp</th></tr></thead><tbody>${summaries.map((item, i) => `<tr><td>${i + 1}</td><td><strong>${esc(item.employee.name)}</strong><div class="card-subtitle">${esc(item.employee.nip || '-')}</div></td><td>${pct(item.summary.attendancePercent)}</td><td>${pct(item.summary.finalPercent)}</td><td>${money(item.summary.cutAmount)}</td></tr>`).join('')}</tbody></table></div>
-      <div class="actions">${manageable ? `<button class="btn btn-secondary" data-edit-tukin-history="${esc(run.id)}" type="button">Verifikasi / Edit</button>` : '<span class="card-subtitle">Hanya pembuat atau administrator yang dapat mengedit.</span>'}<div class="actions-right">${run.sharePoint?.runFolderWebUrl ? `<a class="btn btn-secondary" href="${esc(run.sharePoint.runFolderWebUrl)}" target="_blank" rel="noopener noreferrer">Buka SharePoint ↗</a>` : ''}<button class="btn btn-primary" data-regenerate-tukin-history="${esc(run.id)}" type="button">Generate Ulang</button></div></div></aside>`;
+      <div class="actions">${manageable ? `<button class="btn btn-secondary" data-edit-tukin-history="${esc(run.id)}" type="button">Verifikasi / Edit</button>` : '<span class="card-subtitle">Hanya pembuat atau administrator yang dapat mengedit.</span>'}<div class="actions-right">${run.sharePoint?.runFolderWebUrl ? `<a class="btn btn-secondary" href="${esc(run.sharePoint.runFolderWebUrl)}" target="_blank" rel="noopener noreferrer">Buka SharePoint ↗</a>` : ''}<button class="btn btn-primary" data-download-tukin-history="${esc(run.id)}" type="button">Download</button></div></div></aside>`;
   }
 
   function validateRamadan() {
@@ -541,15 +542,16 @@
     return savedRun;
   }
 
-  async function generate() {
+  async function saveRun() {
     if (state.busy || !state.employees.length) return;
     state.busy = true;
+    state.busyAction = 'save';
     render();
     try {
       if (!state.currentRunId) state.currentRunId = state.editingHistoryId || newRunId();
 
-      // Pastikan data Cuti dan bukti dukung terbaru selalu disinkronkan kembali
-      // tepat sebelum Simpan & Generate Ulang / Generate ZIP Final.
+      // Simpan = sinkronkan data Cuti terbaru, salin file ke SharePoint, buat rekap,
+      // lalu simpan state perhitungan ke Firestore. Tidak ada download ke perangkat.
       await syncCutiAdjustments({ render: false });
       await sharePoint?.ensureReady?.(true);
 
@@ -562,33 +564,76 @@
       const syncResult = await sharePoint.syncRunFiles(draftRun, true);
       state.sharePointRun = syncResult.sharePoint;
 
-      await resources?.ensure?.(['exceljs', 'jszip', 'filesaver']);
-      state.generated = await generator.generateZip(state.employees, state.period);
-
+      await resources?.ensure?.('exceljs');
+      const recap = await generator.generateRecap(state.employees, state.period);
       const recapRun = {
         id: state.currentRunId,
         period: { ...state.period },
         employees: state.employees,
         sharePoint: state.sharePointRun
       };
-      await sharePoint.uploadRecap(recapRun, state.generated.recap, true);
+      await sharePoint.uploadRecap(recapRun, recap, true);
       state.sharePointRun = recapRun.sharePoint;
 
-      await saveCurrentRun(state.generated.name);
+      await saveCurrentRun(generator.zipFileName(state.period));
 
       if (state.pendingSharePointDeletes.length) {
-        const failures = await sharePoint.deleteAttachments(state.pendingSharePointDeletes, true);
+        const activeRemoteKeys = new Set();
+        for (const employee of state.employees || []) {
+          for (const source of employee.sourceFiles || []) {
+            if (source?.driveId && source?.itemId) activeRemoteKeys.add(`${source.driveId}:${source.itemId}`);
+          }
+          for (const record of Object.values(employee.records || {})) {
+            for (const evidence of record.evidence || []) {
+              if (evidence?.driveId && evidence?.itemId) activeRemoteKeys.add(`${evidence.driveId}:${evidence.itemId}`);
+            }
+          }
+        }
+
+        const uniqueDeletes = [];
+        const seen = new Set();
+        for (const item of state.pendingSharePointDeletes) {
+          const key = `${item?.driveId || ''}:${item?.itemId || ''}`;
+          if (!item?.driveId || !item?.itemId || seen.has(key) || activeRemoteKeys.has(key)) continue;
+          seen.add(key);
+          uniqueDeletes.push(item);
+        }
+        const failures = uniqueDeletes.length ? await sharePoint.deleteAttachments(uniqueDeletes, true) : [];
         if (failures.length) console.warn('Sebagian file SharePoint lama tidak berhasil dibersihkan:', failures);
         state.pendingSharePointDeletes = [];
       }
 
-      generator.download(state.generated);
-      state.step = 'result';
+      state.generated = null;
+      alert(`Data Tunjangan Kinerja ${periodLabel()} berhasil disimpan. File absensi, rekap, dan bukti dukung tersimpan di SharePoint; tidak ada file yang diunduh ke perangkat.`);
     } catch (error) {
       console.error(error);
-      alert(`Gagal menyimpan/generate paket Tukin: ${error.message || error}`);
+      alert(`Gagal menyimpan data Tukin: ${error.message || error}`);
     } finally {
       state.busy = false;
+      state.busyAction = '';
+      render();
+    }
+  }
+
+  async function downloadRun() {
+    if (state.busy || !state.employees.length) return;
+    state.busy = true;
+    state.busyAction = 'download';
+    render();
+    try {
+      // Download = gunakan kondisi data yang sedang tampil dan ambil paket ZIP ke
+      // perangkat. Aksi ini tidak menyimpan ulang Firestore maupun menyalin file ke
+      // folder run SharePoint.
+      await syncCutiAdjustments({ render: false });
+      await resources?.ensure?.(['exceljs', 'jszip', 'filesaver']);
+      state.generated = await generator.generateZip(state.employees, state.period);
+      generator.download(state.generated);
+    } catch (error) {
+      console.error(error);
+      alert(`Gagal mendownload paket Tukin: ${error.message || error}`);
+    } finally {
+      state.busy = false;
+      state.busyAction = '';
       render();
     }
   }
@@ -731,7 +776,7 @@
     try {
       const run = await storage.getRun(id);
       if (!run) throw new Error('Riwayat tidak ditemukan.');
-      if (!storage.canManage?.(run)) throw new Error('Riwayat ini dibuat oleh akun lain. Anda dapat melihat atau generate ulang hasilnya, tetapi hanya pembuat atau administrator yang dapat mengedit.');
+      if (!storage.canManage?.(run)) throw new Error('Riwayat ini dibuat oleh akun lain. Anda dapat melihat atau mendownload hasilnya, tetapi hanya pembuat atau administrator yang dapat mengedit.');
       if (run.cloudOnly && !run.binaryFilesAvailable) {
         alert('Riwayat lama ini tidak memiliki pointer file SharePoint. Data perhitungan tersedia, tetapi file biner mungkin tidak tersedia pada perangkat ini.');
       }
@@ -781,7 +826,7 @@
     return false;
   }
 
-  async function regenerateHistory(id) {
+  async function downloadHistory(id) {
     if (state.historyBusy || state.busy) return;
     state.historyBusy = true;
     render();
@@ -789,7 +834,7 @@
       const run = await storage.getRun(id);
       if (!run) throw new Error('Riwayat tidak ditemukan.');
       if (run.cloudOnly && !run.binaryFilesAvailable) {
-        const approved = window.confirm('Riwayat lama ini tidak memiliki file SharePoint yang lengkap. Generate ulang dapat menghasilkan paket tanpa sebagian file biner. Lanjutkan?');
+        const approved = window.confirm('Riwayat lama ini tidak memiliki file SharePoint yang lengkap. Download dapat menghasilkan paket tanpa sebagian file biner. Lanjutkan?');
         if (!approved) return;
       }
       if (run.binaryFilesAvailable) {
@@ -797,8 +842,8 @@
         const attendanceChanged = await attendanceSourceChangedOnSharePoint(run);
         if (attendanceChanged) {
           const message = storage.canManage?.(run)
-            ? 'File absensi di SharePoint telah berubah sejak perhitungan terakhir. Buka Verifikasi/Edit, klik "Muat Ulang Absensi dari SharePoint", lalu Simpan & Generate Ulang agar rekap konsisten dengan file sumber terbaru.'
-            : 'File absensi di SharePoint telah berubah sejak perhitungan terakhir. Pemilik riwayat atau administrator perlu memuat ulang absensi dan menyimpan perhitungan sebelum ZIP dapat digenerate ulang.';
+            ? 'File absensi di SharePoint telah berubah sejak perhitungan terakhir. Buka Verifikasi/Edit, klik "Muat Ulang Absensi dari SharePoint", lalu klik Simpan agar rekap konsisten dengan file sumber terbaru.'
+            : 'File absensi di SharePoint telah berubah sejak perhitungan terakhir. Pemilik riwayat atau administrator perlu memuat ulang absensi dan menyimpan perhitungan sebelum paket ZIP dapat didownload.';
           alert(message);
           return;
         }
@@ -807,7 +852,7 @@
       const generated = await generator.generateZip(run.employees || [], run.period);
       generator.download(generated);
     } catch (error) {
-      alert(`Gagal generate ulang: ${error.message || error}`);
+      alert(`Gagal download: ${error.message || error}`);
     } finally {
       state.historyBusy = false;
       render();
@@ -1093,12 +1138,13 @@
       if (result) {
         const count = Number(result.adjustedRecords || 0);
         const evidenceCount = Number(result.evidenceFiles || 0);
-        const evidenceText = evidenceCount ? ` ${evidenceCount} bukti dukung Cuti siap disalin saat Simpan & Generate Ulang.` : '';
+        const evidenceText = evidenceCount ? ` ${evidenceCount} bukti dukung Cuti siap disalin satu kali saat Simpan.` : '';
         alert(count ? `${count} tanggal berhasil disesuaikan otomatis berdasarkan Data Cuti.${evidenceText}` : `Sinkronisasi Data Cuti selesai. Tidak ada tanggal tambahan yang perlu disesuaikan.${evidenceText}`);
       }
     });
     document.querySelector('[data-action="reload-sharepoint-attendance"]')?.addEventListener('click', reloadAttendanceFromSharePoint);
-    document.querySelector('[data-action="generate"]')?.addEventListener('click', generate);
+    document.querySelector('[data-action="save-run"]')?.addEventListener('click', saveRun);
+    document.querySelector('[data-action="download-run"]')?.addEventListener('click', downloadRun);
     document.querySelector('[data-action="download-again"]')?.addEventListener('click', () => state.generated && generator.download(state.generated));
     document.querySelector('[data-action="edit-again"]')?.addEventListener('click', () => { state.step = 'validation'; render(); });
     document.querySelector('[data-action="new-process"]')?.addEventListener('click', () => {
@@ -1115,7 +1161,7 @@
 
     document.querySelectorAll('[data-view-tukin-history]').forEach((button) => button.addEventListener('click', () => viewHistory(button.dataset.viewTukinHistory)));
     document.querySelectorAll('[data-edit-tukin-history]').forEach((button) => button.addEventListener('click', () => editHistory(button.dataset.editTukinHistory)));
-    document.querySelectorAll('[data-regenerate-tukin-history]').forEach((button) => button.addEventListener('click', () => regenerateHistory(button.dataset.regenerateTukinHistory)));
+    document.querySelectorAll('[data-download-tukin-history]').forEach((button) => button.addEventListener('click', () => downloadHistory(button.dataset.downloadTukinHistory)));
     document.querySelectorAll('[data-delete-tukin-history]').forEach((button) => button.addEventListener('click', () => deleteHistory(button.dataset.deleteTukinHistory)));
     document.querySelectorAll('[data-action="close-history-preview"]').forEach((button) => button.addEventListener('click', () => { state.historyPreview = null; render(); }));
   }
