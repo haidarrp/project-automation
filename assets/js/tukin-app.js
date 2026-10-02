@@ -42,7 +42,7 @@
     sharePointRun: null,
     pendingSharePointDeletes: [],
     sharePointBusy: false,
-    cutiIntegration: { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: '' }
+    cutiIntegration: { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: '' }
   };
 
   function esc(value) {
@@ -260,7 +260,8 @@
     if (info.status !== 'applied') return '';
     if (Number(info.adjustedRecords || 0) > 0) {
       const manual = Number(info.preservedManualRecords || 0);
-      return `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Data Cuti</div>${Number(info.adjustedRecords || 0)} tanggal yang memerlukan verifikasi otomatis disesuaikan menjadi <strong>0%</strong>. Nilai potongan hasil perhitungan presensi tetap ditampilkan pada kolom <strong>Otomatis</strong>.${manual ? ` ${manual} koreksi manual yang sudah ada dipertahankan.` : ''}</div>`;
+      const evidence = Number(info.evidenceFiles || 0);
+      return `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Data Cuti</div>${Number(info.adjustedRecords || 0)} tanggal yang memerlukan verifikasi otomatis disesuaikan menjadi <strong>0%</strong>. Nilai potongan hasil perhitungan presensi tetap ditampilkan pada kolom <strong>Otomatis</strong>.${evidence ? ` ${evidence} bukti dukung Cuti siap disalin ke folder Tukin saat disimpan/generate.` : ''}${manual ? ` ${manual} koreksi manual yang sudah ada dipertahankan.` : ''}</div>`;
     }
     return '';
   }
@@ -272,16 +273,26 @@
     if (opts.render !== false) render();
     try {
       const result = await cutiIntegration.apply(state.employees, state.period);
-      state.cutiIntegration = { ...result, message: '' };
+      const removedEvidence = Array.isArray(result?.removedEvidence) ? result.removedEvidence : [];
+      if (removedEvidence.length) {
+        const queuedIds = new Set(state.pendingSharePointDeletes.map((item) => item?.itemId).filter(Boolean));
+        for (const item of removedEvidence) {
+          if (!item?.driveId || !item?.itemId || queuedIds.has(item.itemId)) continue;
+          state.pendingSharePointDeletes.push({ ...item, file: null });
+          queuedIds.add(item.itemId);
+        }
+      }
+      const { removedEvidence: _removedEvidence, ...status } = result || {};
+      state.cutiIntegration = { ...status, message: '' };
       state.generated = null;
-      return result;
+      return status;
     } catch (error) {
       console.warn('Integrasi data Cuti ke Tukin tidak dapat diterapkan:', error);
       const code = String(error?.code || '');
       const permissionMessage = code.includes('permission-denied')
         ? 'Akun yang digunakan tidak memiliki hak baca terhadap data Cuti.'
         : (error?.message || String(error));
-      state.cutiIntegration = { status: 'error', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: permissionMessage };
+      state.cutiIntegration = { status: 'error', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: permissionMessage };
       return null;
     } finally {
       if (opts.render !== false) render();
@@ -416,7 +427,7 @@
     state.currentRunId = null;
     state.sharePointRun = null;
     state.pendingSharePointDeletes = [];
-    state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: '' };
+    state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: '' };
   }
 
   function resetProcess() {
@@ -440,7 +451,7 @@
     state.currentRunId = null;
     state.sharePointRun = null;
     state.pendingSharePointDeletes = [];
-    state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: '' };
+    state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: '' };
   }
 
   function addFiles(fileList) {
@@ -453,7 +464,7 @@
     state.validationResults = [];
     state.employees = [];
     state.generated = null;
-    state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: '' };
+    state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: '' };
     if (state.files.length) {
       resources?.warm?.('xlsx');
       window.MasterDataService?.getEmployees?.(false).catch(() => {});
@@ -536,6 +547,10 @@
     render();
     try {
       if (!state.currentRunId) state.currentRunId = state.editingHistoryId || newRunId();
+
+      // Pastikan data Cuti dan bukti dukung terbaru selalu disinkronkan kembali
+      // tepat sebelum Simpan & Generate Ulang / Generate ZIP Final.
+      await syncCutiAdjustments({ render: false });
       await sharePoint?.ensureReady?.(true);
 
       const draftRun = {
@@ -1020,7 +1035,7 @@
       state.files.splice(Number(button.dataset.removeFile), 1);
       state.validationResults = [];
       state.employees = [];
-      state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, message: '' };
+      state.cutiIntegration = { status: 'idle', leaveRecords: 0, adjustedRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: '' };
       render();
     }));
     document.querySelector('[data-action="calculate"]')?.addEventListener('click', calculate);
@@ -1077,7 +1092,9 @@
       const result = await syncCutiAdjustments();
       if (result) {
         const count = Number(result.adjustedRecords || 0);
-        alert(count ? `${count} tanggal berhasil disesuaikan otomatis berdasarkan Data Cuti.` : 'Sinkronisasi Data Cuti selesai. Tidak ada tanggal tambahan yang perlu disesuaikan.');
+        const evidenceCount = Number(result.evidenceFiles || 0);
+        const evidenceText = evidenceCount ? ` ${evidenceCount} bukti dukung Cuti siap disalin saat Simpan & Generate Ulang.` : '';
+        alert(count ? `${count} tanggal berhasil disesuaikan otomatis berdasarkan Data Cuti.${evidenceText}` : `Sinkronisasi Data Cuti selesai. Tidak ada tanggal tambahan yang perlu disesuaikan.${evidenceText}`);
       }
     });
     document.querySelector('[data-action="reload-sharepoint-attendance"]')?.addEventListener('click', reloadAttendanceFromSharePoint);

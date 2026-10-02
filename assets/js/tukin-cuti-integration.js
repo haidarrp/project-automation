@@ -21,6 +21,20 @@
     return [...new Set([range.start.getFullYear(), range.end.getFullYear()])];
   }
 
+  function normalizeLeaveDocument(raw, index) {
+    const row = raw && typeof raw === 'object' ? raw : {};
+    const file = row.file && typeof row.file === 'object' ? { ...row.file } : null;
+    if (file) delete file.file;
+    return {
+      id: String(row.id || `doc-${index + 1}`),
+      type: String(row.type || 'Dokumen Cuti'),
+      name: String(row.name || ''),
+      number: String(row.number || ''),
+      note: String(row.note || ''),
+      file
+    };
+  }
+
   function normalizeLeave(doc) {
     const row = doc.data() || {};
     return {
@@ -30,7 +44,8 @@
       startDate: String(row.startDate || ''),
       endDate: String(row.endDate || row.startDate || ''),
       leaveYear: Number(row.leaveYear || String(row.startDate || '').slice(0, 4) || 0),
-      documentNumber: String(row.documentNumber || '')
+      documentNumber: String(row.documentNumber || ''),
+      documents: (Array.isArray(row.documents) ? row.documents : []).map(normalizeLeaveDocument)
     };
   }
 
@@ -71,13 +86,116 @@
     return !autoCutiAdjustment(record);
   }
 
+  function isAutoCutiEvidence(item) {
+    return item?.cutiEvidence?.automatic === true || String(item?.id || '').startsWith('cuti-evidence-');
+  }
+
+  function cutiEvidenceId(leave, document, index) {
+    const leaveId = String(leave?.id || 'cuti').replace(/[^A-Za-z0-9_-]/g, '-');
+    const documentId = String(document?.id || `doc-${index + 1}`).replace(/[^A-Za-z0-9_-]/g, '-');
+    return `cuti-evidence-${leaveId}-${documentId}`;
+  }
+
+  function cutiEvidenceFromDocument(leave, document, index) {
+    const source = document?.file;
+    if (!source?.driveId || !source?.itemId) return null;
+    const name = String(source.name || source.remoteName || document.name || `Bukti Cuti ${index + 1}`);
+    return {
+      id: cutiEvidenceId(leave, document, index),
+      name,
+      size: Number(source.size || source.sourceSize || 0),
+      type: String(source.type || ''),
+      lastModified: Number(source.lastModified || source.sourceLastModified || 0),
+      file: null,
+      provider: 'cuti',
+      // Sebelum file disalin ke folder run Tukin, tautan ini tetap membuka sumber CUTI.
+      webUrl: String(source.webUrl || ''),
+      localOnly: true,
+      cutiEvidence: {
+        automatic: true,
+        copiedToTukin: false,
+        leaveId: String(leave.id || ''),
+        documentId: String(document.id || ''),
+        documentType: String(document.type || ''),
+        documentName: String(document.name || name),
+        documentNumber: String(document.number || ''),
+        sourceDriveId: String(source.driveId || ''),
+        sourceItemId: String(source.itemId || ''),
+        sourceWebUrl: String(source.webUrl || ''),
+        sourceName: name,
+        sourceETag: String(source.eTag || ''),
+        sourceCTag: String(source.cTag || '')
+      }
+    };
+  }
+
+  function sameCutiSource(existing, desired) {
+    const current = existing?.cutiEvidence || {};
+    const next = desired?.cutiEvidence || {};
+    if (!current.sourceDriveId || !current.sourceItemId) return false;
+    if (current.sourceDriveId !== next.sourceDriveId || current.sourceItemId !== next.sourceItemId) return false;
+    if (current.sourceETag && next.sourceETag && current.sourceETag !== next.sourceETag) return false;
+    if (current.sourceCTag && next.sourceCTag && current.sourceCTag !== next.sourceCTag) return false;
+    return true;
+  }
+
+  function mergeCutiEvidence(record, leave) {
+    const evidence = Array.isArray(record.evidence) ? record.evidence : [];
+    const manualEvidence = evidence.filter((item) => !isAutoCutiEvidence(item));
+    const existingAuto = evidence.filter(isAutoCutiEvidence);
+    const desired = (leave.documents || [])
+      .map((document, index) => cutiEvidenceFromDocument(leave, document, index))
+      .filter(Boolean);
+    const removed = [];
+    const nextAuto = [];
+
+    for (const target of desired) {
+      const existing = existingAuto.find((item) => item.id === target.id) || null;
+      if (existing && sameCutiSource(existing, target)) {
+        const copied = Boolean(existing?.driveId && existing?.itemId && existing?.cutiEvidence?.copiedToTukin);
+        nextAuto.push({
+          ...existing,
+          name: target.name || existing.name,
+          size: Number(target.size || existing.size || 0),
+          type: target.type || existing.type || '',
+          lastModified: Number(target.lastModified || existing.lastModified || 0),
+          cutiEvidence: {
+            ...existing.cutiEvidence,
+            ...target.cutiEvidence,
+            copiedToTukin: copied
+          }
+        });
+      } else {
+        if (existing?.driveId && existing?.itemId && existing?.cutiEvidence?.copiedToTukin) removed.push(existing);
+        nextAuto.push(target);
+      }
+    }
+
+    const desiredIds = new Set(desired.map((item) => item.id));
+    for (const existing of existingAuto) {
+      if (desiredIds.has(existing.id)) continue;
+      if (existing?.driveId && existing?.itemId && existing?.cutiEvidence?.copiedToTukin) removed.push(existing);
+    }
+
+    record.evidence = [...manualEvidence, ...nextAuto];
+    return { linked: nextAuto.length, removed };
+  }
+
+  function detachCutiEvidence(record) {
+    const evidence = Array.isArray(record.evidence) ? record.evidence : [];
+    const removed = evidence.filter((item) => isAutoCutiEvidence(item) && item?.driveId && item?.itemId && item?.cutiEvidence?.copiedToTukin);
+    record.evidence = evidence.filter((item) => !isAutoCutiEvidence(item));
+    return removed;
+  }
+
   function clearCutiAdjustment(record) {
-    if (!autoCutiAdjustment(record)) return false;
+    if (!autoCutiAdjustment(record)) return { cleared: false, removed: [] };
+    const removed = detachCutiEvidence(record);
     record.adjustedPercent = null;
     record.adjustmentNote = '';
     record.adjustmentSource = '';
     record.cutiAdjustment = null;
-    return true;
+    return { cleared: true, removed };
   }
 
   function leaveNote(leave) {
@@ -100,6 +218,7 @@
       endDate: leave.endDate,
       documentNumber: leave.documentNumber || ''
     };
+    return mergeCutiEvidence(record, leave);
   }
 
   async function apply(employees, period) {
@@ -116,6 +235,8 @@
     let preservedManualRecords = 0;
     let matchedEmployees = 0;
     let unresolvedEmployees = 0;
+    let evidenceFiles = 0;
+    const removedEvidence = [];
 
     for (const employee of list) {
       const masterEmployeeId = await resolveMasterEmployeeId(employee);
@@ -135,12 +256,16 @@
             preservedManualRecords += 1;
             continue;
           }
-          applyLeaveToRecord(record, matchingLeave);
+          const evidenceResult = applyLeaveToRecord(record, matchingLeave);
+          evidenceFiles += Number(evidenceResult.linked || 0);
+          removedEvidence.push(...(evidenceResult.removed || []));
           adjustedRecords += 1;
           continue;
         }
 
-        if (clearCutiAdjustment(record)) clearedRecords += 1;
+        const clearResult = clearCutiAdjustment(record);
+        if (clearResult.cleared) clearedRecords += 1;
+        removedEvidence.push(...(clearResult.removed || []));
       }
     }
 
@@ -151,7 +276,9 @@
       clearedRecords,
       matchedEmployees,
       unresolvedEmployees,
-      preservedManualRecords
+      preservedManualRecords,
+      evidenceFiles,
+      removedEvidence
     };
   }
 

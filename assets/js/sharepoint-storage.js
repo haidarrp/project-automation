@@ -264,7 +264,8 @@
       sourceLastModified: Number(attachment.sourceLastModified || attachment.file?.lastModified || attachment.lastModified || 0),
       uploadedAt: attachment.uploadedAt || '',
       uploadedBy: attachment.uploadedBy || '',
-      localOnly: !(attachment.itemId && attachment.driveId)
+      localOnly: !(attachment.itemId && attachment.driveId),
+      cutiEvidence: attachment.cutiEvidence ? { ...attachment.cutiEvidence } : null
     };
   }
 
@@ -346,6 +347,37 @@
     return attachment;
   }
 
+  async function materializeCutiEvidence(attachment, interactive) {
+    const meta = attachment?.cutiEvidence;
+    if (!meta?.automatic || attachment?.file || (attachment?.driveId && attachment?.itemId)) return attachment;
+    if (!meta.sourceDriveId || !meta.sourceItemId) return attachment;
+
+    const source = normalizeAttachment({
+      id: `${attachment.id || 'cuti'}-source`,
+      name: meta.sourceName || attachment.name || 'Bukti Cuti',
+      size: Number(attachment.size || 0),
+      type: attachment.type || '',
+      driveId: meta.sourceDriveId,
+      itemId: meta.sourceItemId,
+      webUrl: meta.sourceWebUrl || attachment.webUrl || '',
+      eTag: meta.sourceETag || '',
+      cTag: meta.sourceCTag || '',
+      provider: 'sharepoint',
+      localOnly: false,
+      file: null
+    }, 'cuti-source');
+
+    const file = await downloadAttachment(source, interactive);
+    attachment.file = file;
+    attachment.name = attachment.name || file?.name || meta.sourceName || 'Bukti Cuti';
+    attachment.size = Number(file?.size || attachment.size || 0);
+    attachment.type = file?.type || attachment.type || '';
+    attachment.lastModified = Number(file?.lastModified || attachment.lastModified || 0);
+    attachment.provider = 'cuti';
+    attachment.localOnly = true;
+    return attachment;
+  }
+
   async function syncRunFiles(run, interactive) {
     const structure = await ensureRunStructure(run, interactive);
     const driveId = structure.driveId;
@@ -375,12 +407,20 @@
 
       for (const record of Object.values(employee.records || {})) {
         for (const attachment of record.evidence || []) {
+          await materializeCutiEvidence(attachment, interactive);
           if (!needsUpload(attachment)) continue;
           const shortId = String(attachment.id || uid('bukti')).replace(/[^A-Za-z0-9]/g, '').slice(-8) || Date.now();
           const date = record.key || (record.date instanceof Date ? window.TukinRules?.dateKey?.(record.date) : '') || 'tanggal';
           const remoteName = safeName(`${date}_${shortId}_${attachment.name || attachment.file?.name || 'Bukti'}`, `Bukti_${shortId}`);
           const remote = await uploadBlob(driveId, evidenceFolder.id, remoteName, attachment.file, interactive);
           applyRemoteMetadata(attachment, remote, remoteName, `Pegawai/${employeeFolder.name}/Bukti_Dukung/${remoteName}`);
+          if (attachment.cutiEvidence?.automatic) {
+            attachment.cutiEvidence = {
+              ...attachment.cutiEvidence,
+              copiedToTukin: true,
+              copiedAt: new Date().toISOString()
+            };
+          }
           uploaded.push(attachment);
         }
       }
