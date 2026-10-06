@@ -43,7 +43,7 @@
     sharePointRun: null,
     pendingSharePointDeletes: [],
     sharePointBusy: false,
-    supportIntegration: { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: '' }
+    supportIntegration: { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, linkedRecords: 0, cutiLinkedRecords: 0, assignmentLinkedRecords: 0, message: '' }
   };
 
   function esc(value) {
@@ -253,7 +253,7 @@
   function supportIntegrationAlert() {
     const info = state.supportIntegration || {};
     if (info.status === 'loading') {
-      return `<div class="alert alert-info"><div class="alert-title">Mencocokkan Cuti & Surat Tugas</div>Data pendukung pegawai sedang dicocokkan dengan tanggal yang memerlukan verifikasi.</div>`;
+      return `<div class="alert alert-info"><div class="alert-title">Mencocokkan Cuti & Surat Tugas</div>Data pendukung pegawai sedang dicocokkan dengan seluruh tanggal pada daftar hadir periode berjalan.</div>`;
     }
     if (info.status === 'error') {
       return `<div class="alert alert-warning"><div class="alert-title">Integrasi data pendukung belum diterapkan</div>${esc(info.message || 'Data Cuti/Surat Tugas tidak dapat dibaca oleh akun ini.')} Koreksi manual tetap dapat dilakukan.</div>`;
@@ -267,18 +267,24 @@
     const conflicts = Number(info.conflictRecords || 0);
     const manual = Number(info.preservedManualRecords || 0);
     const evidence = Number(info.evidenceFiles || 0);
-    if (!adjusted && !assignmentInformational && !conflicts && !manual) return '';
+    const linked = Number(info.linkedRecords || 0);
+    const cutiLinked = Number(info.cutiLinkedRecords || 0);
+    const assignmentLinked = Number(info.assignmentLinkedRecords || 0);
+    if (!linked && !adjusted && !assignmentInformational && !conflicts && !manual) return '';
 
+    const synced = linked
+      ? `<div class="alert alert-info"><div class="alert-title">${linked} tanggal data pendukung tersinkron</div>Cuti dan Surat Tugas dicocokkan dengan seluruh daftar hadir, termasuk tanggal yang tidak memerlukan koreksi.${cutiLinked ? ` ${cutiLinked} tanggal terkait Cuti.` : ''}${assignmentLinked ? ` ${assignmentLinked} tanggal terkait Surat Tugas.` : ''}</div>`
+      : '';
     const success = adjusted
-      ? `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari data pendukung</div>${adjusted} tanggal otomatis disesuaikan menjadi <strong>0%</strong>${cutiAdjusted ? ` · ${cutiAdjusted} dari Cuti` : ''}${assignmentAdjusted ? ` · ${assignmentAdjusted} dari Surat Tugas Dinas Luar / Perjalanan Dinas` : ''}. Nilai hasil presensi tetap ditampilkan pada kolom <strong>Otomatis</strong>.${evidence ? ` ${evidence} file bukti dukung unik siap disalin satu kali saat Simpan.` : ''}${manual ? ` ${manual} koreksi manual dipertahankan.` : ''}</div>`
+      ? `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari data pendukung</div>${adjusted} tanggal otomatis disesuaikan menjadi <strong>0%</strong>${cutiAdjusted ? ` &middot; ${cutiAdjusted} dari Cuti` : ''}${assignmentAdjusted ? ` &middot; ${assignmentAdjusted} dari Surat Tugas Dinas Luar / Perjalanan Dinas` : ''}. Nilai hasil presensi tetap ditampilkan pada kolom <strong>Otomatis</strong>.${evidence ? ` ${evidence} file bukti dukung unik siap disalin satu kali saat Simpan.` : ''}${manual ? ` ${manual} koreksi manual dipertahankan.` : ''}</div>`
       : '';
     const information = assignmentInformational
-      ? `<div class="alert alert-info"><div class="alert-title">${assignmentInformational} tanggal memiliki Surat Tugas sebagai data pendukung</div>Jenis <strong>Pengaturan Kerja</strong> atau <strong>Lainnya</strong> tidak mengubah persentase secara otomatis. Jika diperlukan, penyesuaian dapat dilakukan melalui tombol <strong>Edit</strong> pada Proses Tukin.</div>`
+      ? `<div class="alert alert-info"><div class="alert-title">${assignmentInformational} tanggal memiliki Surat Tugas informasional</div>Jenis <strong>Pengaturan Kerja</strong> atau <strong>Lainnya</strong> tidak mengubah persentase secara otomatis. Jika diperlukan, penyesuaian dapat dilakukan melalui tombol <strong>Edit</strong> pada Proses Tukin.</div>`
       : '';
     const conflict = conflicts
       ? `<div class="alert alert-warning"><div class="alert-title">${conflicts} konflik Cuti dan Surat Tugas</div>Pada tanggal yang sama ditemukan Cuti dan Surat Tugas. Sistem tidak menerapkan 0% secara otomatis; tanggal tersebut tetap memerlukan verifikasi manual.</div>`
       : '';
-    return `${success}${information}${conflict}`;
+    return `${synced}${success}${information}${conflict}`;
   }
 
   async function syncSupportingAdjustments(options) {
@@ -385,14 +391,19 @@
     const employee = employeeByKey(state.drawerEmployeeKey);
     if (!employee) return '';
     const summary = rules.summarizeEmployee(employee);
-    const records = Object.values(employee.records || {})
-      .filter((record) => record.needsVerification || record.adjustedPercent !== null || (record.evidence || []).length || record.adjustmentNote)
-      .sort((a, b) => a.key.localeCompare(b.key));
+    const records = Object.values(employee.records || {}).sort((a, b) => a.key.localeCompare(b.key));
+    const rows = records.map((record) => {
+      const needsCorrection = Boolean(record.needsVerification);
+      const rowClass = needsCorrection ? 'tukin-row-needs-correction' : '';
+      const correctionBadge = needsCorrection ? '<div class="tukin-row-status"><span class="tukin-badge warn">Perlu koreksi</span></div>' : '';
+      return `<tr class="${rowClass}"><td class="nowrap">${esc(rules.formatDate(record.date, true))}</td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${esc(record.status || '-')}${record.flags?.length ? `<div class="card-subtitle">${esc(record.flags.join(', '))}</div>` : ''}${correctionBadge}</td><td>${esc(record.tlCategory)}<div class="card-subtitle">${pct(record.tlPercent)}</div></td><td>${esc(record.pswCategory)}<div class="card-subtitle">${pct(record.pswPercent)}</div></td><td class="tukin-pct">${pct(record.autoTotalPercent)}</td><td class="tukin-pct ${record.adjustedPercent !== null && record.adjustedPercent !== undefined ? 'tukin-ok' : ''}">${pct(rules.recordFinalPercent(record))}${adjustmentLabel(record) ? `<div class="card-subtitle">${esc(adjustmentLabel(record))}</div>` : ''}</td><td><div class="tukin-reason">${esc(record.adjustmentNote || record.reason || '-')}</div>${record.cutiAdjustment?.automatic ? `<div class="tukin-cuti-ref"><span class="tukin-badge edit">Data Cuti</span><span>${esc(record.cutiAdjustment.leaveType || 'Cuti')} &middot; ${esc(record.cutiAdjustment.startDate || '')}${record.cutiAdjustment.endDate && record.cutiAdjustment.endDate !== record.cutiAdjustment.startDate ? ` s.d. ${esc(record.cutiAdjustment.endDate)}` : ''}</span></div>` : ''}${assignmentReferenceMarkup(record)}${record.adjustmentConflict?.automatic ? '<div class="tukin-cuti-ref"><span class="tukin-badge warn">Konflik Data</span><span>Cuti dan Surat Tugas ditemukan pada tanggal yang sama.</span></div>' : ''}${(record.evidence || []).length ? `<div class="tukin-files">${record.evidence.map((evidence) => `${esc(evidence.name)} ${attachmentOpenLink(evidence, 'Buka')}`).join('<br>')}</div>` : ''}</td><td><button class="btn btn-secondary btn-sm" data-edit-record="${esc(record.key)}" data-employee="${esc(rules.employeeKey(employee))}" type="button">Edit</button></td></tr>`;
+    }).join('');
 
-    return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer tukin-drawer"><div class="tukin-drawer-header"><div class="drawer-header"><div><h3>Detail Potongan Pegawai</h3><div class="card-subtitle">Log tanggal yang menyebabkan potongan atau memerlukan verifikasi.</div></div><button class="icon-btn" data-action="close-drawer" type="button">×</button></div><div class="profile"><div class="profile-avatar">${esc(employee.name.charAt(0).toUpperCase())}</div><div><div class="profile-name">${esc(employee.name)}</div><div class="profile-meta">NIP ${esc(employee.nip || '-')} · Anak Satker ${esc(employee.anakSatker || '-')}</div></div><button class="btn btn-secondary btn-sm" style="margin-left:auto" data-edit-employee="${esc(rules.employeeKey(employee))}" type="button">Data Pegawai</button></div></div>
+    return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer tukin-drawer"><div class="tukin-drawer-header"><div class="drawer-header"><div><h3>Detail Potongan Pegawai</h3><div class="card-subtitle">Seluruh daftar hadir pada periode absensi. Baris yang perlu koreksi ditandai dan semua tanggal dapat diedit.</div></div><button class="icon-btn" data-action="close-drawer" type="button">&times;</button></div><div class="profile"><div class="profile-avatar">${esc(employee.name.charAt(0).toUpperCase())}</div><div><div class="profile-name">${esc(employee.name)}</div><div class="profile-meta">NIP ${esc(employee.nip || '-')} &middot; Anak Satker ${esc(employee.anakSatker || '-')}</div></div><button class="btn btn-secondary btn-sm" style="margin-left:auto" data-edit-employee="${esc(rules.employeeKey(employee))}" type="button">Data Pegawai</button></div></div>
       <div class="tukin-detail-summary"><div><span>Pot. Absensi</span><strong>${pct(summary.attendancePercent)}</strong></div><div><span>Pot. SKP</span><strong>${pct(summary.skpPercent)}</strong></div><div><span>Pot. Final</span><strong>${pct(summary.finalPercent)}</strong></div><div><span>Potongan Rupiah</span><strong>${money(summary.cutAmount)}</strong></div></div>
       ${(employee.sourceFiles || []).length ? `<div class="card card-pad" style="margin-bottom:14px"><div class="card-title">File Absensi Asli</div><div class="tukin-files">${employee.sourceFiles.map((file) => `<div>${esc(file.name || file.file?.name || 'File Absensi')} ${attachmentOpenLink(file, 'Buka')}</div>`).join('')}</div></div>` : ''}
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>Tanggal</th><th>Masuk</th><th>Pulang</th><th>Status</th><th>TL</th><th>PSW</th><th>Otomatis</th><th>Final</th><th>Alasan / Bukti</th><th>Aksi</th></tr></thead><tbody>${records.map((record) => `<tr><td class="nowrap">${esc(rules.formatDate(record.date, true))}</td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${esc(record.status || '-')}${record.flags?.length ? `<div class="card-subtitle">${esc(record.flags.join(', '))}</div>` : ''}</td><td>${esc(record.tlCategory)}<div class="card-subtitle">${pct(record.tlPercent)}</div></td><td>${esc(record.pswCategory)}<div class="card-subtitle">${pct(record.pswPercent)}</div></td><td class="tukin-pct">${pct(record.autoTotalPercent)}</td><td class="tukin-pct ${record.adjustedPercent !== null ? 'tukin-ok' : ''}">${pct(rules.recordFinalPercent(record))}${adjustmentLabel(record) ? `<div class="card-subtitle">${esc(adjustmentLabel(record))}</div>` : ''}</td><td><div class="tukin-reason">${esc(record.adjustmentNote || record.reason || '-')}</div>${record.cutiAdjustment?.automatic ? `<div class="tukin-cuti-ref"><span class="tukin-badge edit">Data Cuti</span><span>${esc(record.cutiAdjustment.leaveType || 'Cuti')} · ${esc(record.cutiAdjustment.startDate || '')}${record.cutiAdjustment.endDate && record.cutiAdjustment.endDate !== record.cutiAdjustment.startDate ? ` s.d. ${esc(record.cutiAdjustment.endDate)}` : ''}</span></div>` : ''}${assignmentReferenceMarkup(record)}${record.adjustmentConflict?.automatic ? '<div class="tukin-cuti-ref"><span class="tukin-badge warn">Konflik Data</span><span>Cuti dan Surat Tugas ditemukan pada tanggal yang sama.</span></div>' : ''}${(record.evidence || []).length ? `<div class="tukin-files">${record.evidence.map((evidence) => `${esc(evidence.name)} ${attachmentOpenLink(evidence, 'Buka')}`).join('<br>')}</div>` : ''}</td><td><button class="btn btn-secondary btn-sm" data-edit-record="${esc(record.key)}" data-employee="${esc(rules.employeeKey(employee))}" type="button">Edit</button></td></tr>`).join('') || '<tr><td colspan="10" class="text-center">Tidak ada tanggal yang menghasilkan potongan atau memerlukan verifikasi.</td></tr>'}</tbody></table></div></aside>`;
+      <div class="tukin-detail-legend"><span class="tukin-detail-legend-swatch" aria-hidden="true"></span><span>Baris berwarna menandai data presensi yang perlu koreksi/verifikasi. Tombol <strong>Edit</strong> tersedia untuk seluruh daftar hadir.</span></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Tanggal</th><th>Masuk</th><th>Pulang</th><th>Status</th><th>TL</th><th>PSW</th><th>Otomatis</th><th>Final</th><th>Alasan / Bukti</th><th>Aksi</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="text-center">Tidak ada data daftar hadir pada periode ini.</td></tr>'}</tbody></table></div></aside>`;
   }
 
   function renderEditModal() {
@@ -400,15 +411,24 @@
     const employee = employeeByKey(state.editDraft.employeeKey);
     const record = recordByKey(employee, state.editRecordKey);
     if (!employee || !record) return '';
+    const cutiApplied = record.cutiAdjustment?.adjustmentApplied === true || (record.cutiAdjustment?.automatic && record.adjustmentSource === 'cuti');
+    const cutiSupport = record.cutiAdjustment?.automatic
+      ? `Data ${record.cutiAdjustment.leaveType || 'Cuti'} ${record.cutiAdjustment.startDate || ''}${record.cutiAdjustment.endDate && record.cutiAdjustment.endDate !== record.cutiAdjustment.startDate ? ` s.d. ${record.cutiAdjustment.endDate}` : ''} telah tersinkron sebagai data pendukung.`
+      : '';
+    const assignmentSupport = record.assignmentAdjustment?.assignments?.length
+      ? `Surat Tugas ${record.assignmentAdjustment.assignments.map((item) => item.letterNumber || item.assignmentId || '').filter(Boolean).join(', ') || 'terkait'} telah tersinkron sebagai data pendukung.`
+      : '';
     const automaticContext = record.adjustmentConflict?.automatic
-      ? `<div class="alert alert-warning"><div class="alert-title">Konflik Cuti dan Surat Tugas</div>${esc(record.adjustmentNote || '')}</div>`
-      : record.cutiAdjustment?.automatic
+      ? `<div class="alert alert-warning"><div class="alert-title">Konflik Cuti dan Surat Tugas</div>${esc(record.adjustmentNote || 'Data Cuti dan Surat Tugas ditemukan pada tanggal yang sama.')}</div>`
+      : cutiApplied
         ? `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Data Cuti</div>${esc(record.adjustmentNote || '')}</div>`
-        : record.assignmentAdjustment?.adjustmentApplied || record.assignmentAdjustment?.automatic
-          ? `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Surat Tugas</div>${esc(record.adjustmentNote || '')}</div>`
-          : record.assignmentAdjustment?.informational
-            ? `<div class="alert alert-info"><div class="alert-title">Data pendukung Surat Tugas</div>${esc(record.adjustmentNote || '')}</div>`
-            : '';
+        : record.cutiAdjustment?.automatic
+          ? `<div class="alert alert-info"><div class="alert-title">Data pendukung Cuti</div>${esc(cutiSupport)}</div>`
+          : record.assignmentAdjustment?.adjustmentApplied || record.assignmentAdjustment?.automatic
+            ? `<div class="alert alert-success"><div class="alert-title">Penyesuaian otomatis dari Surat Tugas</div>${esc(record.adjustmentNote || '')}</div>`
+            : record.assignmentAdjustment?.informational
+              ? `<div class="alert alert-info"><div class="alert-title">Data pendukung Surat Tugas</div>${esc(assignmentSupport || record.adjustmentNote || '')}</div>`
+              : '';
     return `<div class="tukin-modal-backdrop"><div class="tukin-modal"><div class="tukin-modal-head"><div><h3>Koreksi Perhitungan</h3><p>${esc(employee.name)} · ${esc(rules.formatDate(record.date, true))}</p></div><button class="icon-btn" data-action="close-edit" type="button">×</button></div><div class="alert alert-warning"><div class="alert-title">Hasil otomatis ${pct(record.autoTotalPercent)}</div>${esc(record.reason || '')}</div>${automaticContext}
       <div class="tukin-form-grid section-gap"><div class="field"><label>% Potongan Hasil Penyesuaian</label><input id="edit-percent" type="number" min="0" max="2.5" step="0.01" value="${esc(state.editDraft.percent)}"></div><div class="field"><label>Bukti Dukung</label><input id="edit-evidence" type="file" multiple accept="application/pdf,image/png,image/jpeg,image/webp"></div><div class="full field"><label>Keterangan</label><textarea id="edit-note" placeholder="Contoh: Dinas berdasarkan Surat Tugas ...">${esc(state.editDraft.note)}</textarea></div></div>
       <div class="tukin-evidence-list">${state.editDraft.evidence.length ? state.editDraft.evidence.map((evidence, i) => `<div class="tukin-evidence"><span>${esc(evidence.name)} · ${bytes(evidence.size || 0)} ${attachmentOpenLink(evidence, 'Buka')}</span><button data-remove-evidence="${i}" type="button">Hapus</button></div>`).join('') : '<div class="card-subtitle">Belum ada bukti dukung.</div>'}</div>
@@ -464,7 +484,7 @@
     state.currentRunId = null;
     state.sharePointRun = null;
     state.pendingSharePointDeletes = [];
-    state.supportIntegration = { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: '' };
+    state.supportIntegration = { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, linkedRecords: 0, cutiLinkedRecords: 0, assignmentLinkedRecords: 0, message: '' };
   }
 
   function resetProcess() {
@@ -488,7 +508,7 @@
     state.currentRunId = null;
     state.sharePointRun = null;
     state.pendingSharePointDeletes = [];
-    state.supportIntegration = { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: '' };
+    state.supportIntegration = { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, linkedRecords: 0, cutiLinkedRecords: 0, assignmentLinkedRecords: 0, message: '' };
   }
 
   function addFiles(fileList) {
@@ -501,7 +521,7 @@
     state.validationResults = [];
     state.employees = [];
     state.generated = null;
-    state.supportIntegration = { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: '' };
+    state.supportIntegration = { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, linkedRecords: 0, cutiLinkedRecords: 0, assignmentLinkedRecords: 0, message: '' };
     if (state.files.length) {
       resources?.warm?.('xlsx');
       window.MasterDataService?.getEmployees?.(false).catch(() => {});
@@ -1132,7 +1152,7 @@
       state.files.splice(Number(button.dataset.removeFile), 1);
       state.validationResults = [];
       state.employees = [];
-      state.supportIntegration = { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: '' };
+      state.supportIntegration = { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, linkedRecords: 0, cutiLinkedRecords: 0, assignmentLinkedRecords: 0, message: '' };
       render();
     }));
     document.querySelector('[data-action="calculate"]')?.addEventListener('click', calculate);
@@ -1192,10 +1212,12 @@
         const evidenceCount = Number(result.evidenceFiles || 0);
         const informationalCount = Number(result.assignmentInformationalRecords || 0);
         const conflictCount = Number(result.conflictRecords || 0);
+        const linkedCount = Number(result.linkedRecords || 0);
         const evidenceText = evidenceCount ? ` ${evidenceCount} file bukti unik siap disalin satu kali saat Simpan.` : '';
         const informationText = informationalCount ? ` ${informationalCount} tanggal Surat Tugas Pengaturan Kerja/Lainnya ditampilkan sebagai data pendukung tanpa mengubah persentase otomatis.` : '';
         const conflictText = conflictCount ? ` ${conflictCount} tanggal memiliki konflik Cuti dan Surat Tugas dan tetap memerlukan verifikasi.` : '';
-        alert(count ? `${count} tanggal berhasil disesuaikan otomatis berdasarkan Cuti/Surat Tugas.${informationText}${evidenceText}${conflictText}` : `Sinkronisasi Cuti & Surat Tugas selesai.${informationText}${evidenceText}${conflictText}`);
+        const adjustedText = count ? ` ${count} tanggal memerlukan penyesuaian dan otomatis diset menjadi 0%.` : '';
+        alert(`Sinkronisasi Cuti & Surat Tugas selesai. ${linkedCount} tanggal pada daftar hadir memiliki data pendukung tersinkron.${adjustedText}${informationText}${evidenceText}${conflictText}`);
       }
     });
     document.querySelector('[data-action="reload-sharepoint-attendance"]')?.addEventListener('click', reloadAttendanceFromSharePoint);

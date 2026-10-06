@@ -127,10 +127,13 @@
   }
 
   function isAutomaticAdjustment(record) {
-    return ['cuti', 'surat_tugas', 'conflict'].includes(String(record?.adjustmentSource || '')) ||
-      record?.cutiAdjustment?.automatic === true ||
+    const source = String(record?.adjustmentSource || '');
+    if (source === 'manual') return false;
+    return ['cuti', 'surat_tugas', 'conflict'].includes(source) ||
+      record?.cutiAdjustment?.adjustmentApplied === true ||
+      (record?.cutiAdjustment?.automatic === true && source === 'cuti') ||
       record?.assignmentAdjustment?.adjustmentApplied === true ||
-      (record?.assignmentAdjustment?.automatic === true && record?.adjustmentSource === 'surat_tugas') ||
+      (record?.assignmentAdjustment?.automatic === true && source === 'surat_tugas') ||
       record?.adjustmentConflict?.automatic === true;
   }
 
@@ -311,12 +314,10 @@
     if (!hasAutomaticSupport(record)) return { cleared: false, removed: [] };
     const removed = detachAutomaticEvidence(record);
     const protectedManual = hasProtectedManualAdjustment(record);
-    if (!protectedManual && isAutomaticAdjustment(record)) {
-      record.adjustedPercent = null;
+    if (!protectedManual) {
+      if (isAutomaticAdjustment(record)) record.adjustedPercent = null;
       record.adjustmentNote = '';
-      record.adjustmentSource = '';
-    } else if (!protectedManual && record?.assignmentAdjustment?.informational) {
-      record.adjustmentNote = '';
+      if (record.adjustmentSource !== 'manual') record.adjustmentSource = '';
     }
     record.cutiAdjustment = null;
     record.assignmentAdjustment = null;
@@ -324,9 +325,13 @@
     return { cleared: true, removed };
   }
 
-  function leaveMeta(leave) {
+  function leaveMeta(leave, options) {
+    const opts = options || {};
     return {
       automatic: true,
+      linkedAutomatically: true,
+      adjustmentApplied: Boolean(opts.adjustmentApplied),
+      informational: Boolean(opts.informational),
       leaveId: leave.id,
       leaveType: leave.leaveType,
       startDate: leave.startDate,
@@ -363,6 +368,12 @@
     return `Penyesuaian otomatis menjadi 0% berdasarkan data ${leave.leaveType} pada modul Cuti (${period}${number}).`;
   }
 
+  function leaveInformationNote(leave) {
+    const period = leave.startDate === leave.endDate ? leave.startDate : `${leave.startDate} s.d. ${leave.endDate}`;
+    const number = leave.documentNumber ? `, dokumen ${leave.documentNumber}` : '';
+    return `Data ${leave.leaveType} pada modul Cuti (${period}${number}) tersinkron sebagai data pendukung. Hasil presensi otomatis pada tanggal ini sudah 0%, sehingga tidak diperlukan penyesuaian persentase.`;
+  }
+
   function assignmentNote(assignments) {
     const items = assignments || [];
     if (!items.length) return 'Penyesuaian otomatis menjadi 0% berdasarkan Surat Tugas Dinas Luar / Perjalanan Dinas.';
@@ -370,6 +381,15 @@
     const first = items[0];
     const period = first.startDate === first.endDate ? first.startDate : `${first.startDate} s.d. ${first.endDate}`;
     return `Penyesuaian otomatis menjadi 0% berdasarkan Surat Tugas ${numbers} (${period}) dengan jenis Dinas Luar / Perjalanan Dinas.`;
+  }
+
+  function assignmentAutoZeroInformationNote(assignments) {
+    const items = (assignments || []).filter(assignmentUsesAutoZero);
+    if (!items.length) return 'Data Surat Tugas tersinkron sebagai data pendukung.';
+    const numbers = items.map((item) => item.letterNumber || item.id).filter(Boolean).join(', ');
+    const first = items[0];
+    const period = first.startDate === first.endDate ? first.startDate : `${first.startDate} s.d. ${first.endDate}`;
+    return `Surat Tugas ${numbers} (${period}) dengan jenis Dinas Luar / Perjalanan Dinas tersinkron sebagai data pendukung. Hasil presensi otomatis pada tanggal ini sudah 0%, sehingga tidak diperlukan penyesuaian persentase.`;
   }
 
   function assignmentInformationNote(assignments) {
@@ -407,7 +427,17 @@
     record.adjustedPercent = 0;
     record.adjustmentSource = 'cuti';
     record.adjustmentNote = leaveNote(leave);
-    record.cutiAdjustment = leaveMeta(leave);
+    record.cutiAdjustment = leaveMeta(leave, { adjustmentApplied: true, informational: false });
+    record.assignmentAdjustment = null;
+    record.adjustmentConflict = null;
+    return mergeAutomaticEvidence(record, desiredLeaveEvidence(leave, includeEvidence));
+  }
+
+  function applyLeaveInformation(record, leave, includeEvidence) {
+    record.adjustedPercent = null;
+    record.adjustmentSource = '';
+    record.adjustmentNote = leaveInformationNote(leave);
+    record.cutiAdjustment = leaveMeta(leave, { adjustmentApplied: false, informational: true });
     record.assignmentAdjustment = null;
     record.adjustmentConflict = null;
     return mergeAutomaticEvidence(record, desiredLeaveEvidence(leave, includeEvidence));
@@ -419,6 +449,16 @@
     record.adjustmentNote = assignmentNote(assignments.filter(assignmentUsesAutoZero));
     record.cutiAdjustment = null;
     record.assignmentAdjustment = assignmentMeta(assignments, { adjustmentApplied: true, informational: false });
+    record.adjustmentConflict = null;
+    return mergeAutomaticEvidence(record, desiredAssignmentEvidence(evidenceAssignments));
+  }
+
+  function applyAssignmentSupport(record, assignments, evidenceAssignments) {
+    record.adjustedPercent = null;
+    record.adjustmentSource = '';
+    record.adjustmentNote = assignmentAutoZeroInformationNote(assignments);
+    record.cutiAdjustment = null;
+    record.assignmentAdjustment = assignmentMeta(assignments, { adjustmentApplied: false, informational: true });
     record.adjustmentConflict = null;
     return mergeAutomaticEvidence(record, desiredAssignmentEvidence(evidenceAssignments));
   }
@@ -438,8 +478,8 @@
     record.adjustedPercent = null;
     record.adjustmentSource = 'conflict';
     record.adjustmentNote = conflictNote(leave, assignments);
-    record.cutiAdjustment = leaveMeta(leave);
-    record.assignmentAdjustment = assignmentMeta(assignments, { adjustmentApplied: false, informational: false });
+    record.cutiAdjustment = leaveMeta(leave, { adjustmentApplied: false, informational: true });
+    record.assignmentAdjustment = assignmentMeta(assignments, { adjustmentApplied: false, informational: true });
     record.adjustmentConflict = {
       automatic: true,
       type: 'cuti_vs_surat_tugas',
@@ -447,6 +487,28 @@
       assignmentIds: assignments.map((item) => item.id)
     };
     return evidenceResult;
+  }
+
+  function attachSupportToManual(record, leave, assignments, leaveEvidenceOwner, assignmentOwnerById) {
+    const desired = [];
+    if (leave && !assignments.length && leaveEvidenceOwner === record) {
+      desired.push(...desiredLeaveEvidence(leave, true));
+    }
+    if (!leave && assignments.length) {
+      const evidenceAssignments = assignments.filter((assignment) => assignmentOwnerById.get(assignment.id) === record);
+      desired.push(...desiredAssignmentEvidence(evidenceAssignments));
+    }
+    record.cutiAdjustment = leave ? leaveMeta(leave, { adjustmentApplied: false, informational: true }) : null;
+    record.assignmentAdjustment = assignments.length ? assignmentMeta(assignments, { adjustmentApplied: false, informational: true }) : null;
+    record.adjustmentConflict = leave && assignments.length
+      ? {
+          automatic: true,
+          type: 'cuti_vs_surat_tugas',
+          leaveId: leave.id,
+          assignmentIds: assignments.map((item) => item.id)
+        }
+      : null;
+    return mergeAutomaticEvidence(record, desired);
   }
 
   function sourceMatchesDate(source, key) {
@@ -479,6 +541,9 @@
     let matchedEmployees = 0;
     let unresolvedEmployees = 0;
     let evidenceFiles = 0;
+    let linkedRecords = 0;
+    let cutiLinkedRecords = 0;
+    let assignmentLinkedRecords = 0;
     const removedEvidence = [];
 
     for (const employee of list) {
@@ -499,7 +564,7 @@
         const owner = records.find((record) => {
           const key = dateKey(record.key || record.date);
           const assignmentsOnDate = employeeAssignments.filter((assignment) => sourceMatchesDate(assignment, key));
-          return sourceMatchesDate(leave, key) && !assignmentsOnDate.length && record.needsVerification && !hasProtectedManualAdjustment(record);
+          return sourceMatchesDate(leave, key) && !assignmentsOnDate.length;
         }) || null;
         if (owner) leaveOwnerById.set(leave.id, owner);
       }
@@ -508,7 +573,7 @@
         const owner = records.find((record) => {
           const key = dateKey(record.key || record.date);
           const leaveOnDate = employeeLeaves.find((leave) => sourceMatchesDate(leave, key));
-          return sourceMatchesDate(assignment, key) && !leaveOnDate && record.needsVerification && !hasProtectedManualAdjustment(record);
+          return sourceMatchesDate(assignment, key) && !leaveOnDate;
         }) || null;
         if (owner) assignmentOwnerById.set(assignment.id, owner);
       }
@@ -518,30 +583,47 @@
         const matchingLeave = employeeLeaves.find((leave) => sourceMatchesDate(leave, key)) || null;
         const matchingAssignments = employeeAssignments.filter((assignment) => sourceMatchesDate(assignment, key));
 
-        if (record.needsVerification && (matchingLeave || matchingAssignments.length)) {
-          if (hasProtectedManualAdjustment(record)) {
-            preservedManualRecords += 1;
-            continue;
-          }
+        if (matchingLeave || matchingAssignments.length) {
+          linkedRecords += 1;
+          if (matchingLeave) cutiLinkedRecords += 1;
+          if (matchingAssignments.length) assignmentLinkedRecords += 1;
 
           let evidenceResult = { linked: 0, removed: [] };
-          const autoZeroAssignments = matchingAssignments.filter(assignmentUsesAutoZero);
-          if (matchingLeave && matchingAssignments.length) {
-            evidenceResult = applyConflict(record, matchingLeave, matchingAssignments);
-            conflictRecords += 1;
-          } else if (matchingLeave) {
-            evidenceResult = applyLeave(record, matchingLeave, leaveOwnerById.get(matchingLeave.id) === record);
-            adjustedRecords += 1;
-            cutiAdjustedRecords += 1;
+          if (hasProtectedManualAdjustment(record)) {
+            preservedManualRecords += 1;
+            evidenceResult = attachSupportToManual(
+              record,
+              matchingLeave,
+              matchingAssignments,
+              matchingLeave ? leaveOwnerById.get(matchingLeave.id) : null,
+              assignmentOwnerById
+            );
           } else {
-            const evidenceAssignments = matchingAssignments.filter((assignment) => assignmentOwnerById.get(assignment.id) === record);
-            if (autoZeroAssignments.length) {
-              evidenceResult = applyAssignments(record, matchingAssignments, evidenceAssignments);
-              adjustedRecords += 1;
-              assignmentAdjustedRecords += 1;
+            const autoZeroAssignments = matchingAssignments.filter(assignmentUsesAutoZero);
+            if (matchingLeave && matchingAssignments.length) {
+              evidenceResult = applyConflict(record, matchingLeave, matchingAssignments);
+              conflictRecords += 1;
+            } else if (matchingLeave) {
+              const includeEvidence = leaveOwnerById.get(matchingLeave.id) === record;
+              if (record.needsVerification) {
+                evidenceResult = applyLeave(record, matchingLeave, includeEvidence);
+                adjustedRecords += 1;
+                cutiAdjustedRecords += 1;
+              } else {
+                evidenceResult = applyLeaveInformation(record, matchingLeave, includeEvidence);
+              }
             } else {
-              evidenceResult = applyAssignmentInformation(record, matchingAssignments, evidenceAssignments);
-              assignmentInformationalRecords += 1;
+              const evidenceAssignments = matchingAssignments.filter((assignment) => assignmentOwnerById.get(assignment.id) === record);
+              if (record.needsVerification && autoZeroAssignments.length) {
+                evidenceResult = applyAssignments(record, matchingAssignments, evidenceAssignments);
+                adjustedRecords += 1;
+                assignmentAdjustedRecords += 1;
+              } else if (autoZeroAssignments.length) {
+                evidenceResult = applyAssignmentSupport(record, matchingAssignments, evidenceAssignments);
+              } else {
+                evidenceResult = applyAssignmentInformation(record, matchingAssignments, evidenceAssignments);
+                assignmentInformationalRecords += 1;
+              }
             }
           }
           evidenceFiles += Number(evidenceResult.linked || 0);
@@ -569,6 +651,9 @@
       unresolvedEmployees,
       preservedManualRecords,
       evidenceFiles,
+      linkedRecords,
+      cutiLinkedRecords,
+      assignmentLinkedRecords,
       removedEvidence
     };
   }

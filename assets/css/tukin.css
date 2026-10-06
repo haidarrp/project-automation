@@ -41,3 +41,11 @@
   line-height: 1.45;
   color: #5b6b7c;
 }
+
+/* Detail Tukin: seluruh daftar hadir ditampilkan, baris yang perlu koreksi dibuat lebih menonjol. */
+.tukin-detail-legend{display:flex;align-items:center;gap:8px;margin:10px 0 8px;padding:9px 11px;border:1px solid #efdcae;border-radius:10px;background:#fffdf7;color:#6d5a25;font-size:10px;line-height:1.45}
+.tukin-detail-legend-swatch{width:16px;height:16px;flex:0 0 16px;border-radius:4px;background:var(--warning-soft);box-shadow:inset 3px 0 0 var(--warning);border:1px solid #efdcae}
+.tukin-row-needs-correction>td{background:var(--warning-soft)!important}
+.tukin-row-needs-correction>td:first-child{box-shadow:inset 4px 0 0 var(--warning)}
+.tukin-row-status{margin-top:6px}
+
