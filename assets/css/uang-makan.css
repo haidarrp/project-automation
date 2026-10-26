@@ -99,7 +99,18 @@
 .um-modal-footer{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 24px;border-top:1px solid var(--line);background:#fff}
 .um-emptycard{text-align:center;padding:45px 14px;font-size:12px;color:var(--muted)}
 .um-emptycard strong{display:block;margin-bottom:7px;font-size:14px;color:var(--ink)}
-.um-table.export{min-width:720px}
+/* Pratinjau Excel: garis kisi pada setiap sel, tanpa mengubah format file hasil ekspor. */
+.um-preview-scroll{border-color:var(--line-strong)}
+.um-table.export{width:max-content;min-width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.um-table.export th,.um-table.export td{border:1px solid #d5dde5;padding:10px 8px;vertical-align:middle}
+.um-table.export thead th{border-color:#c9d3dd;background:var(--bg-soft);text-align:center}
+.um-table.export tbody tr:hover td{background:#f7f9fb}
+.um-table.export th:first-child,.um-table.export td:first-child{min-width:46px;text-align:center}
+.um-table.export th:nth-child(2),.um-table.export td:nth-child(2){min-width:166px;white-space:nowrap}
+.um-table.export th:nth-child(3),.um-table.export td:nth-child(3){min-width:190px;max-width:210px;overflow-wrap:anywhere}
+.um-table.export .um-preview-day{min-width:35px;width:35px;padding:10px 5px;text-align:center}
+.um-table.export tbody td.um-preview-day{color:var(--ink);font-weight:650}
+.um-preview-period{justify-content:flex-end}
 .um-legend{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--muted)}
 .um-fine{color:var(--muted);font-size:10px;line-height:1.6}
 .um-busy{opacity:.75;pointer-events:none}
