@@ -13,6 +13,8 @@
     jan: 0, feb: 1, mar: 2, apr: 3, jun: 5, jul: 6, agu: 7, ags: 7, sep: 8, okt: 9, nov: 10, des: 11
   };
 
+  // Simpan pilihan urutan saat modul me-render ulang tabel akibat perubahan filter.
+  const rememberedSorts = new Map();
   const pendingRoots = new Set();
   let scanQueued = false;
 
@@ -120,19 +122,19 @@
     });
   }
 
-  function createToolbar(table) {
+  function createToolbar(table, hasExternalSearch) {
     const toolbar = document.createElement('div');
-    toolbar.className = 'table-tools-bar';
+    toolbar.className = `table-tools-bar${hasExternalSearch ? ' table-tools-bar-compact' : ''}`;
     toolbar.innerHTML = `
-      <label class="table-tools-search-wrap">
+      ${hasExternalSearch ? '' : `<label class="table-tools-search-wrap">
         <span class="table-tools-search-icon" aria-hidden="true">⌕</span>
         <input class="table-tools-search" type="search" placeholder="Cari pada tabel..." autocomplete="off" aria-label="Cari pada tabel">
-      </label>
+      </label>`}
       <div class="table-tools-actions">
         <span class="table-tools-count" aria-live="polite"></span>
         <label class="table-tools-page-size-wrap"><span>Tampil</span><select class="table-tools-page-size" aria-label="Jumlah baris per halaman">${PAGE_SIZES.map((size) => `<option value="${size}" ${size === DEFAULT_PAGE_SIZE ? 'selected' : ''}>${size}</option>`).join('')}</select></label>
         <div class="table-tools-pager" aria-label="Navigasi halaman tabel"><button class="table-tools-page-prev" type="button" aria-label="Halaman sebelumnya">‹</button><span class="table-tools-page-label">1 / 1</span><button class="table-tools-page-next" type="button" aria-label="Halaman berikutnya">›</button></div>
-        <button class="table-tools-reset" type="button">Reset</button>
+        ${hasExternalSearch ? '' : '<button class="table-tools-reset" type="button">Reset</button>'}
       </div>`;
     table.parentNode.insertBefore(toolbar, table);
     return toolbar;
@@ -216,7 +218,7 @@
     if (options?.resetPage) tools.page = 1;
     const rows = dataRows(table);
     const originalEmpty = originalEmptyRows(table);
-    const globalQuery = normalize(tools.search.value);
+    const globalQuery = normalize(tools.search?.value || '');
     const columnQueries = new Map();
     tools.filterRow?.querySelectorAll('.table-tools-column-filter').forEach((input) => {
       const query = normalize(input.value);
@@ -254,6 +256,14 @@
     updateToolbar(table, matched.length, rows.length, start, end, totalPages);
   }
 
+  function sortCellValue(cell) {
+    if (cell?.hasAttribute('data-sort-value')) {
+      const value = String(cell.dataset.sortValue || '').trim();
+      return value ? { type: 'text', value } : { type: 'empty', value: '' };
+    }
+    return comparable(cellText(cell));
+  }
+
   function sortTable(table, columnIndex, direction) {
     const tbody = table.tBodies[0];
     if (!tbody) return;
@@ -262,8 +272,13 @@
       if (row.dataset.tableOriginalOrder == null || row.dataset.tableOriginalOrder === '') row.dataset.tableOriginalOrder = String(index);
     });
     rows.sort((rowA, rowB) => {
-      const a = comparable(cellText(rowA.cells[columnIndex]));
-      const b = comparable(cellText(rowB.cells[columnIndex]));
+      const a = sortCellValue(rowA.cells[columnIndex]);
+      const b = sortCellValue(rowB.cells[columnIndex]);
+      // Data lama tanpa createdAt tidak ditampilkan lebih baru daripada data valid.
+      if (a.type === 'empty' || b.type === 'empty') {
+        if (a.type !== b.type) return a.type === 'empty' ? 1 : -1;
+        return Number(rowA.dataset.tableOriginalOrder) - Number(rowB.dataset.tableOriginalOrder);
+      }
       let result = 0;
       if (a.type === 'number' && b.type === 'number') result = a.value - b.value;
       else result = String(a.value).localeCompare(String(b.value), 'id-ID', { numeric: true, sensitivity: 'base' });
@@ -281,6 +296,7 @@
       const indicator = column.th.querySelector('.table-sort-indicator');
       if (indicator) indicator.textContent = active ? (direction === 'asc' ? '↑' : '↓') : '↕';
     });
+    if (table.id) rememberedSorts.set(table.id, { columnIndex, direction });
     table.dataset.tableSortColumn = String(columnIndex);
     table.dataset.tableSortDirection = direction;
     table.__tableTools.page = 1;
@@ -290,7 +306,7 @@
   function resetTable(table) {
     const tools = table.__tableTools;
     if (!tools) return;
-    tools.search.value = '';
+    if (tools.search) tools.search.value = '';
     tools.filterRow?.querySelectorAll('.table-tools-column-filter').forEach((input) => { input.value = ''; });
     tools.pageSize.value = String(DEFAULT_PAGE_SIZE);
     tools.page = 1;
@@ -300,6 +316,7 @@
       rows.sort((a, b) => Number(a.dataset.tableOriginalOrder || 0) - Number(b.dataset.tableOriginalOrder || 0));
       rows.forEach((row) => tbody.appendChild(row));
     }
+    if (table.id) rememberedSorts.delete(table.id);
     delete table.dataset.tableSortColumn;
     delete table.dataset.tableSortDirection;
     getColumns(table).forEach((column) => {
@@ -321,8 +338,11 @@
     table.classList.add('table-tools-enabled');
     dataRows(table).forEach((row, index) => { row.dataset.tableOriginalOrder = String(index); });
 
-    const toolbar = createToolbar(table);
-    const filterRow = createFilterRow(table, columns);
+    const hasExternalSearch = table.dataset.tableSearch === 'external';
+    const toolbar = createToolbar(table, hasExternalSearch);
+    // Filter per kolom hanya muncul bila diaktifkan eksplisit pada tabel tertentu.
+    const filterRow = !hasExternalSearch && table.dataset.tableColumnFilters === 'true'
+      ? createFilterRow(table, columns) : null;
     addSortControls(columns);
     const tools = {
       toolbar,
@@ -340,21 +360,23 @@
     table.__tableTools = tools;
 
     const debouncedFilter = debounce(() => applyFilters(table, { resetPage: true }), FILTER_DEBOUNCE_MS);
-    tools.search.addEventListener('input', debouncedFilter);
+    tools.search?.addEventListener('input', debouncedFilter);
     filterRow?.addEventListener('input', (event) => {
       if (event.target.classList.contains('table-tools-column-filter')) debouncedFilter();
     });
     tools.pageSize.addEventListener('change', () => { tools.page = 1; applyFilters(table); });
     tools.prev.addEventListener('click', () => { tools.page = Math.max(1, tools.page - 1); applyFilters(table); });
     tools.next.addEventListener('click', () => { tools.page += 1; applyFilters(table); });
-    tools.reset.addEventListener('click', () => resetTable(table));
+    tools.reset?.addEventListener('click', () => resetTable(table));
 
     columns.forEach((column) => {
       if (column.isAction || column.isNumber) return;
       const activateSort = () => {
         const currentColumn = Number(table.dataset.tableSortColumn);
         const currentDirection = table.dataset.tableSortDirection;
-        const direction = currentColumn === column.index && currentDirection === 'asc' ? 'desc' : 'asc';
+        const direction = currentColumn === column.index
+          ? (currentDirection === 'asc' ? 'desc' : 'asc')
+          : (column.th.dataset.sortDefault === 'desc' ? 'desc' : 'asc');
         sortTable(table, column.index, direction);
       };
       column.th.addEventListener('click', activateSort);
@@ -363,7 +385,12 @@
       });
     });
 
-    applyFilters(table);
+    const remembered = table.id ? rememberedSorts.get(table.id) : null;
+    if (remembered && columns.some((column) => column.index === remembered.columnIndex && !column.isAction && !column.isNumber)) {
+      sortTable(table, remembered.columnIndex, remembered.direction);
+    } else {
+      applyFilters(table);
+    }
   }
 
   function refreshPreparedTable(table) {

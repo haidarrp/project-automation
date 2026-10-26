@@ -45,3 +45,11 @@
 .assignment-form-grid .field textarea::placeholder{
   color:#8f969c;
 }
+
+/* Semua nama dan unit/bidang pada daftar Surat Tugas terlihat tanpa +N pegawai. */
+.assignment-table { min-width: 1490px; }
+.assignment-table th:nth-child(2), .assignment-table td:nth-child(2) { min-width: 210px; max-width: 310px; white-space: normal; overflow-wrap: anywhere; }
+.assignment-table th:nth-child(3), .assignment-table td:nth-child(3) { min-width: 140px; max-width: 230px; white-space: normal; overflow-wrap: anywhere; }
+.assignment-people-cell, .assignment-units-cell { display: flex; flex-direction: column; gap: 6px; line-height: 1.5; }
+.assignment-people-cell .assignment-person { font-weight: 700; }
+.assignment-people-cell .assignment-person + .assignment-person { border-top: 1px dashed var(--line); padding-top: 6px; }

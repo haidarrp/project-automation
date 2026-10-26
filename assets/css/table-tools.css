@@ -130,3 +130,7 @@
 @media print {
   .table-tools-page-size-wrap, .table-tools-pager { display:none !important; }
 }
+
+/* Daftar yang sudah memiliki filter modul: jangan tambahkan pencarian kedua. */
+.table-tools-bar-compact { justify-content: flex-end; min-width: 0; }
+.table-tools-bar-compact .table-tools-actions { flex-wrap: wrap; justify-content: flex-end; }

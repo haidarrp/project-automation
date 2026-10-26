@@ -125,6 +125,32 @@
     return new Intl.DateTimeFormat('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }).format(date);
   }
 
+
+  // Gunakan createdAt (waktu pencatatan awal), bukan tanggal surat/periode.
+  // Data lama tanpa createdAt tetap kosong; jangan menebak dari updatedAt.
+  function inputTimestamp(value) {
+    if (!value) return null;
+    let date;
+    if (typeof value.toDate === 'function') date = value.toDate();
+    else if (typeof value.seconds === 'number') date = new Date(value.seconds * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1e6));
+    else if (typeof value._seconds === 'number') date = new Date(value._seconds * 1000 + Math.floor(Number(value._nanoseconds || 0) / 1e6));
+    else date = value instanceof Date ? value : new Date(value);
+    return date instanceof Date && Number.isFinite(date.getTime()) ? date : null;
+  }
+
+  function inputDateSortValue(value) {
+    return inputTimestamp(value)?.toISOString() || '';
+  }
+
+  function formatInputDate(value) {
+    const date = inputTimestamp(value);
+    if (!date) return '—';
+    return new Intl.DateTimeFormat('id-ID', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).format(date);
+  }
+
   function formatDateRange(row) {
     const start = String(row?.startDate || '');
     const end = String(row?.endDate || '');
@@ -368,9 +394,9 @@
   function leaveMiniTable(rows, kind) {
     if (!rows.length) return '<div class="leave-empty"><strong>Tidak ada data</strong>Belum terdapat pegawai pada kategori ini.</div>';
     if (kind === 'today') {
-      return `<div class="leave-table-wrap"><table class="data-table leave-table"><thead><tr><th>Pegawai</th><th>Unit/Bidang</th><th>Jenis Cuti</th><th>Periode</th></tr></thead><tbody>${rows.slice(0, 8).map((item) => `<tr><td><button class="leave-link" type="button" data-leave-detail="${esc(item.id)}">${esc(employeeIdentity(item.employeeId).name || 'Pegawai')}</button></td><td>${esc(unitLabel(item.employeeId))}</td><td>${esc(item.leaveType)}</td><td class="nowrap">${esc(formatDateRange(item))}</td></tr>`).join('')}</tbody></table></div>`;
+      return `<div class="leave-table-wrap"><table data-table-search="external" class="data-table leave-table"><thead><tr><th>Pegawai</th><th>Unit/Bidang</th><th>Jenis Cuti</th><th>Periode</th></tr></thead><tbody>${rows.slice(0, 8).map((item) => `<tr><td><button class="leave-link" type="button" data-leave-detail="${esc(item.id)}">${esc(employeeIdentity(item.employeeId).name || 'Pegawai')}</button></td><td>${esc(unitLabel(item.employeeId))}</td><td>${esc(item.leaveType)}</td><td class="nowrap">${esc(formatDateRange(item))}</td></tr>`).join('')}</tbody></table></div>`;
     }
-    return `<div class="leave-table-wrap"><table class="data-table leave-table"><thead><tr><th>Pegawai</th><th>Unit/Bidang</th><th>Mulai</th><th>Jenis Cuti</th><th>Jumlah Hari</th></tr></thead><tbody>${rows.slice(0, 8).map((item) => `<tr><td><button class="leave-link" type="button" data-leave-detail="${esc(item.id)}">${esc(employeeIdentity(item.employeeId).name || 'Pegawai')}</button></td><td>${esc(unitLabel(item.employeeId))}</td><td class="nowrap">${esc(formatDate(item.startDate))}</td><td>${esc(item.leaveType)}</td><td>${esc(item.days)}</td></tr>`).join('')}</tbody></table></div>`;
+    return `<div class="leave-table-wrap"><table data-table-search="external" class="data-table leave-table"><thead><tr><th>Pegawai</th><th>Unit/Bidang</th><th>Mulai</th><th>Jenis Cuti</th><th>Jumlah Hari</th></tr></thead><tbody>${rows.slice(0, 8).map((item) => `<tr><td><button class="leave-link" type="button" data-leave-detail="${esc(item.id)}">${esc(employeeIdentity(item.employeeId).name || 'Pegawai')}</button></td><td>${esc(unitLabel(item.employeeId))}</td><td class="nowrap">${esc(formatDate(item.startDate))}</td><td>${esc(item.leaveType)}</td><td>${esc(item.days)}</td></tr>`).join('')}</tbody></table></div>`;
   }
 
   function recordMatchesMonth(item, year, month) {
@@ -410,11 +436,11 @@
     return `<div class="leave-page">
       <div class="leave-head"><div><h1>Data Cuti</h1><p>Pencatatan cuti yang telah diajukan pegawai. Modul ini tidak menjalankan workflow persetujuan.</p></div><div class="leave-head-actions"><button class="btn btn-primary" type="button" data-action="add-leave">+ Tambah Data Cuti</button></div></div>
       ${dataFilterCard()}
-      <section class="card leave-card"><div class="leave-card-head"><div><h2>Daftar Cuti</h2><p>Filter dapat dikombinasikan berdasarkan tahun, bulan, unit, jenis cuti, serta nama/NIP.</p></div><span class="card-subtitle">${rows.length} data</span></div>
-      <div class="leave-table-wrap"><table class="data-table leave-table leave-table-wide"><thead><tr><th>Pegawai</th><th>NIP</th><th>Unit/Bidang</th><th>Jenis Cuti</th><th>Periode</th><th>Hari</th><th>Dokumen</th><th>Aksi</th></tr></thead><tbody>${rows.length ? rows.map((item) => {
+      <section class="card leave-card"><div class="leave-card-head"><div><h2>Daftar Cuti</h2><p>Gunakan filter di atas dan klik judul kolom, termasuk Tanggal Input, untuk mengurutkan data.</p></div><span class="card-subtitle">${rows.length} data</span></div>
+      <div class="leave-table-wrap"><table id="leave-data-table" data-table-search="external" class="data-table leave-table leave-table-wide"><thead><tr><th>Pegawai</th><th>NIP</th><th>Unit/Bidang</th><th>Jenis Cuti</th><th>Periode</th><th data-sort-default="desc">Tanggal Input</th><th>Hari</th><th>Dokumen</th><th>Aksi</th></tr></thead><tbody>${rows.length ? rows.map((item) => {
         const identity = employeeIdentity(item.employeeId);
-        return `<tr><td><button class="leave-link" type="button" data-leave-detail="${esc(item.id)}">${esc(identity.name || 'Pegawai')}</button></td><td class="nowrap">${esc(identity.nip || '—')}</td><td>${esc(identity.unit || 'Belum diisi')}</td><td>${esc(item.leaveType)}</td><td class="nowrap">${esc(formatDateRange(item))}</td><td>${esc(item.days)}${item.manualOverride ? '<span class="leave-sub">koreksi manual</span>' : ''}</td><td>${item.documentNumber ? `${esc(item.documentNumber)}<span class="leave-sub">${esc(formatDate(item.documentDate))}</span>` : '—'}</td><td><div class="leave-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-leave-detail="${esc(item.id)}">Detail</button><button class="btn btn-secondary btn-sm" type="button" data-leave-edit="${esc(item.id)}">Edit</button><button class="btn btn-danger btn-sm" type="button" data-leave-delete="${esc(item.id)}">Hapus</button></div></td></tr>`;
-      }).join('') : '<tr><td colspan="8"><div class="leave-empty"><strong>Data tidak ditemukan</strong>Ubah filter atau tambahkan data cuti.</div></td></tr>'}</tbody></table></div></section>
+        return `<tr><td><button class="leave-link" type="button" data-leave-detail="${esc(item.id)}">${esc(identity.name || 'Pegawai')}</button></td><td class="nowrap">${esc(identity.nip || '—')}</td><td>${esc(identity.unit || 'Belum diisi')}</td><td>${esc(item.leaveType)}</td><td class="nowrap">${esc(formatDateRange(item))}</td><td class="nowrap" data-sort-value="${esc(inputDateSortValue(item.createdAt))}" title="${item.createdAt ? 'Waktu data pertama kali disimpan' : 'Waktu input tidak tersedia pada data lama'}">${esc(formatInputDate(item.createdAt))}</td><td>${esc(item.days)}${item.manualOverride ? '<span class="leave-sub">koreksi manual</span>' : ''}</td><td>${item.documentNumber ? `${esc(item.documentNumber)}<span class="leave-sub">${esc(formatDate(item.documentDate))}</span>` : '—'}</td><td><div class="leave-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-leave-detail="${esc(item.id)}">Detail</button><button class="btn btn-secondary btn-sm" type="button" data-leave-edit="${esc(item.id)}">Edit</button><button class="btn btn-danger btn-sm" type="button" data-leave-delete="${esc(item.id)}">Hapus</button></div></td></tr>`;
+      }).join('') : '<tr><td colspan="9"><div class="leave-empty"><strong>Data tidak ditemukan</strong>Ubah filter atau tambahkan data cuti.</div></td></tr>'}</tbody></table></div></section>
     </div>`;
   }
 
@@ -449,7 +475,7 @@
   }
 
   function calendarList(rows) {
-    return `<div class="leave-table-wrap"><table class="data-table leave-table"><thead><tr><th>Pegawai</th><th>Unit/Bidang</th><th>Jenis Cuti</th><th>Periode</th><th>Hari</th></tr></thead><tbody>${rows.length ? rows.map((item) => `<tr><td><button class="leave-link" type="button" data-leave-detail="${esc(item.id)}">${esc(employeeIdentity(item.employeeId).name || 'Pegawai')}</button></td><td>${esc(unitLabel(item.employeeId))}</td><td>${esc(item.leaveType)}</td><td class="nowrap">${esc(formatDateRange(item))}</td><td>${esc(item.days)}</td></tr>`).join('') : '<tr><td colspan="5"><div class="leave-empty"><strong>Tidak ada data</strong>Tidak ada cuti pada bulan dan filter yang dipilih.</div></td></tr>'}</tbody></table></div>`;
+    return `<div class="leave-table-wrap"><table data-table-search="external" class="data-table leave-table"><thead><tr><th>Pegawai</th><th>Unit/Bidang</th><th>Jenis Cuti</th><th>Periode</th><th>Hari</th></tr></thead><tbody>${rows.length ? rows.map((item) => `<tr><td><button class="leave-link" type="button" data-leave-detail="${esc(item.id)}">${esc(employeeIdentity(item.employeeId).name || 'Pegawai')}</button></td><td>${esc(unitLabel(item.employeeId))}</td><td>${esc(item.leaveType)}</td><td class="nowrap">${esc(formatDateRange(item))}</td><td>${esc(item.days)}</td></tr>`).join('') : '<tr><td colspan="5"><div class="leave-empty"><strong>Tidak ada data</strong>Tidak ada cuti pada bulan dan filter yang dipilih.</div></td></tr>'}</tbody></table></div>`;
   }
 
   function calendarView() {
@@ -479,7 +505,7 @@
     return `<div class="leave-page">
       <div class="leave-head"><div><h1>Data Pegawai</h1><p>Ringkasan penggunaan cuti dari master pegawai existing. Klik pegawai untuk melihat riwayat dan saldo tahun yang dipilih.</p></div><div class="leave-head-actions"><div class="field leave-year-field"><label>Tahun</label>${yearSelect('leave-employee-year', year)}</div></div></div>
       <section class="card leave-filter-card"><div class="leave-filter-grid employee-filter"><div class="search"><input id="leave-employee-search" type="search" value="${esc(state.filters.search)}" placeholder="Cari nama/NIP..." autocomplete="off"></div></div></section>
-      <section class="card leave-card"><div class="leave-card-head"><div><h2>Daftar Pegawai</h2><p>Penggunaan dan sisa pada tabel mengacu pada saldo Cuti Tahunan.</p></div><span class="card-subtitle">${rows.length} pegawai</span></div><div class="leave-table-wrap"><table class="data-table leave-table"><thead><tr><th>Pegawai</th><th>Unit/Bidang</th><th>Hak + Saldo</th><th>Digunakan</th><th>Sisa</th><th>Cuti Terakhir</th><th>Aksi</th></tr></thead><tbody>${rows.length ? rows.map((employee) => {
+      <section class="card leave-card"><div class="leave-card-head"><div><h2>Daftar Pegawai</h2><p>Penggunaan dan sisa pada tabel mengacu pada saldo Cuti Tahunan.</p></div><span class="card-subtitle">${rows.length} pegawai</span></div><div class="leave-table-wrap"><table data-table-search="external" class="data-table leave-table"><thead><tr><th>Pegawai</th><th>Unit/Bidang</th><th>Hak + Saldo</th><th>Digunakan</th><th>Sisa</th><th>Cuti Terakhir</th><th>Aksi</th></tr></thead><tbody>${rows.length ? rows.map((employee) => {
         const balance = balanceSummary(employee.id, year);
         const latest = latestLeave(employee.id, year);
         return `<tr><td><button class="leave-link" type="button" data-employee-leave-detail="${esc(employee.id)}">${esc(employee.name)}</button><span class="leave-sub">${employee.nip ? `NIP ${esc(employee.nip)}` : 'NIP belum tersedia'}</span></td><td>${esc(employee.unit || 'Belum diisi')}</td><td>${balance.entitlement + balance.carryOver}</td><td>${balance.usage}</td><td><strong>${balance.remaining}</strong></td><td>${latest ? `${esc(formatDateRange(latest))}<span class="leave-sub">${esc(latest.leaveType)}</span>` : '—'}</td><td><button class="btn btn-secondary btn-sm" type="button" data-employee-leave-detail="${esc(employee.id)}">Detail</button></td></tr>`;
@@ -488,7 +514,7 @@
   }
 
   function balanceTableMarkup(rows, withActions) {
-    return `<div class="leave-table-wrap"><table class="data-table leave-table"><thead><tr><th>Pegawai</th><th>Hak</th><th>Saldo Tahun Lalu</th><th>Digunakan</th><th>Sisa</th>${withActions ? '<th>Aksi</th>' : ''}</tr></thead><tbody>${rows.length ? rows.map(({ employee, balance }) => `<tr><td>${esc(employee.name)}<span class="leave-sub">${esc(employee.unit || 'Belum diisi')}</span></td><td>${balance.entitlement}</td><td>${balance.carryOver}</td><td>${balance.usage}</td><td><strong>${balance.remaining}</strong></td>${withActions ? `<td><button class="btn btn-secondary btn-sm" type="button" data-balance-edit="${esc(employee.id)}">Edit Saldo</button></td>` : ''}</tr>`).join('') : `<tr><td colspan="${withActions ? 6 : 5}"><div class="leave-empty"><strong>Belum ada pegawai</strong>Master pegawai belum tersedia.</div></td></tr>`}</tbody></table></div>`;
+    return `<div class="leave-table-wrap"><table data-table-search="external" class="data-table leave-table"><thead><tr><th>Pegawai</th><th>Hak</th><th>Saldo Tahun Lalu</th><th>Digunakan</th><th>Sisa</th>${withActions ? '<th>Aksi</th>' : ''}</tr></thead><tbody>${rows.length ? rows.map(({ employee, balance }) => `<tr><td>${esc(employee.name)}<span class="leave-sub">${esc(employee.unit || 'Belum diisi')}</span></td><td>${balance.entitlement}</td><td>${balance.carryOver}</td><td>${balance.usage}</td><td><strong>${balance.remaining}</strong></td>${withActions ? `<td><button class="btn btn-secondary btn-sm" type="button" data-balance-edit="${esc(employee.id)}">Edit Saldo</button></td>` : ''}</tr>`).join('') : `<tr><td colspan="${withActions ? 6 : 5}"><div class="leave-empty"><strong>Belum ada pegawai</strong>Master pegawai belum tersedia.</div></td></tr>`}</tbody></table></div>`;
   }
 
   function balanceView() {
@@ -528,7 +554,7 @@
         <div class="field"><label>Jenis Cuti</label>${typeSelect('leave-report-type', f.type, true)}</div>
       </div></section>
       <div class="leave-metrics leave-report-metrics">${metric('Jumlah Record', rows.length, 'Sesuai filter')}${metric('Total Hari', totalDays, 'Akumulasi jumlah hari')}</div>
-      <section class="card leave-card leave-report-card"><div class="leave-card-head"><div><h2>Rekap Cuti</h2><p>Periode laporan ${esc(formatDate(f.startDate))} s.d. ${esc(formatDate(f.endDate))}.</p></div></div><div class="leave-table-wrap"><table class="data-table leave-table leave-table-wide"><thead><tr><th>No</th><th>Pegawai</th><th>NIP</th><th>Unit</th><th>Jenis Cuti</th><th>Periode</th><th>Jumlah Hari</th></tr></thead><tbody>${rows.length ? rows.map((item, index) => {
+      <section class="card leave-card leave-report-card"><div class="leave-card-head"><div><h2>Rekap Cuti</h2><p>Periode laporan ${esc(formatDate(f.startDate))} s.d. ${esc(formatDate(f.endDate))}.</p></div></div><div class="leave-table-wrap"><table data-table-search="external" class="data-table leave-table leave-table-wide"><thead><tr><th>No</th><th>Pegawai</th><th>NIP</th><th>Unit</th><th>Jenis Cuti</th><th>Periode</th><th>Jumlah Hari</th></tr></thead><tbody>${rows.length ? rows.map((item, index) => {
         const identity = employeeIdentity(item.employeeId);
         return `<tr><td>${index + 1}</td><td>${esc(identity.name || 'Pegawai')}</td><td>${esc(identity.nip || '—')}</td><td>${esc(identity.unit || 'Belum diisi')}</td><td>${esc(item.leaveType)}</td><td class="nowrap">${esc(formatDateRange(item))}</td><td>${esc(item.days)}</td></tr>`;
       }).join('') : '<tr><td colspan="7"><div class="leave-empty"><strong>Tidak ada data</strong>Tidak ada record yang sesuai filter laporan.</div></td></tr>'}</tbody></table></div></section>

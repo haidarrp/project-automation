@@ -94,6 +94,32 @@
     return new Intl.DateTimeFormat('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }).format(date);
   }
 
+
+  // Gunakan createdAt (waktu pencatatan awal), bukan tanggal surat/periode.
+  // Data lama tanpa createdAt tetap kosong; jangan menebak dari updatedAt.
+  function inputTimestamp(value) {
+    if (!value) return null;
+    let date;
+    if (typeof value.toDate === 'function') date = value.toDate();
+    else if (typeof value.seconds === 'number') date = new Date(value.seconds * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1e6));
+    else if (typeof value._seconds === 'number') date = new Date(value._seconds * 1000 + Math.floor(Number(value._nanoseconds || 0) / 1e6));
+    else date = value instanceof Date ? value : new Date(value);
+    return date instanceof Date && Number.isFinite(date.getTime()) ? date : null;
+  }
+
+  function inputDateSortValue(value) {
+    return inputTimestamp(value)?.toISOString() || '';
+  }
+
+  function formatInputDate(value) {
+    const date = inputTimestamp(value);
+    if (!date) return '—';
+    return new Intl.DateTimeFormat('id-ID', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).format(date);
+  }
+
   function formatDateRange(item) {
     if (!item?.startDate) return '—';
     if (!item.endDate || item.endDate === item.startDate) return formatDate(item.startDate);
@@ -249,11 +275,15 @@
       .sort((a, b) => b.startDate.localeCompare(a.startDate) || b.letterDate.localeCompare(a.letterDate));
   }
 
-  function peopleCompact(item) {
+  function peopleList(item) {
     const people = assignmentPeople(item);
     if (!people.length) return '<span class="assignment-sub">Belum ada pegawai</span>';
-    const first = people[0];
-    return `<div class="assignment-person">${esc(first.name || 'Pegawai')}</div><div class="assignment-person-sub">${first.nip ? `NIP ${esc(first.nip)} · ` : ''}${esc(first.unit || 'Unit belum diisi')}${people.length > 1 ? ` · +${people.length - 1} pegawai` : ''}</div>`;
+    return `<div class="assignment-people-cell">${people.map((person) => `<div class="assignment-person">${esc(person.name || 'Pegawai')}</div>`).join('')}</div>`;
+  }
+
+  function assignmentUnitList(item) {
+    const units = [...new Set(assignmentPeople(item).map((person) => person.unit || 'Belum diisi'))];
+    return `<div class="assignment-units-cell">${units.map((unit) => `<div>${esc(unit)}</div>`).join('')}</div>`;
   }
 
   function dashboardView() {
@@ -278,7 +308,7 @@
   function dataView() {
     const rows = filteredAssignments();
     return `<div class="assignment-page">
-      <div class="assignment-head"><div><h1>Data Surat Tugas</h1><p>Satu record dapat mencakup beberapa pegawai dan satu rentang tanggal penugasan.</p></div><div class="assignment-head-actions"><button class="btn btn-primary" type="button" data-action="add-assignment">+ Tambah Surat Tugas</button></div></div>
+      <div class="assignment-head"><div><h1>Data Surat Tugas</h1><p>Seluruh nama pegawai ditampilkan, dengan unit/bidang pada kolom terpisah. Klik Tanggal Input untuk mengurutkan berdasarkan waktu pencatatan.</p></div><div class="assignment-head-actions"><button class="btn btn-primary" type="button" data-action="add-assignment">+ Tambah Surat Tugas</button></div></div>
       <section class="card assignment-filter-card"><div class="assignment-filter-grid">
         <div class="search"><input id="assignment-filter-search" type="search" value="${esc(state.filters.search)}" placeholder="Cari nomor ST, kegiatan, pegawai, NIP, lokasi"></div>
         <div class="field"><label>Tahun</label><select id="assignment-filter-year">${yearOptions(state.filters.year)}</select></div>
@@ -286,11 +316,11 @@
         <div class="field"><label>Status</label><select id="assignment-filter-status"><option value="">Semua Status</option><option value="upcoming" ${state.filters.status === 'upcoming' ? 'selected' : ''}>Akan datang</option><option value="active" ${state.filters.status === 'active' ? 'selected' : ''}>Berjalan</option><option value="done" ${state.filters.status === 'done' ? 'selected' : ''}>Selesai</option></select></div>
         <button class="btn btn-secondary" type="button" data-action="reset-filter">Reset</button>
       </div></section>
-      <section class="card assignment-card"><div class="assignment-table-wrap"><table class="data-table assignment-table"><thead><tr><th>No</th><th>Pegawai</th><th>Nomor Surat</th><th>Tanggal Surat</th><th>Periode Tugas</th><th>Kegiatan</th><th>Lokasi</th><th>Status</th><th>Dokumen</th><th>Aksi</th></tr></thead><tbody>${rows.length ? rows.map((item, index) => {
+      <section class="card assignment-card"><div class="assignment-table-wrap"><table id="assignment-data-table" data-table-search="external" class="data-table assignment-table"><thead><tr><th>No</th><th>Pegawai</th><th>Unit/Bidang</th><th>Nomor Surat</th><th>Tanggal Surat</th><th>Periode Tugas</th><th data-sort-default="desc">Tanggal Input</th><th>Kegiatan</th><th>Lokasi</th><th>Status</th><th>Dokumen</th><th>Aksi</th></tr></thead><tbody>${rows.length ? rows.map((item, index) => {
         const status = statusOf(item);
         const doc = primaryDocument(item);
-        return `<tr><td>${index + 1}</td><td>${peopleCompact(item)}</td><td><strong>${esc(item.letterNumber || '—')}</strong></td><td class="nowrap">${esc(formatDate(item.letterDate))}</td><td class="nowrap">${esc(formatDateRange(item))}</td><td><strong>${esc(item.activity || '—')}</strong><div class="assignment-sub">${esc(assignmentTypeLabel(item.assignmentType))}${item.note ? ` · ${esc(item.note)}` : ''}</div></td><td>${esc(item.location || '—')}</td><td><span class="assignment-pill ${status.key}">${esc(status.label)}</span></td><td>${doc?.file?.itemId ? `<span class="assignment-pill">Tersimpan</span><div class="assignment-sub">${esc(doc.file.name || doc.file.remoteName || 'Surat Tugas')}</div>` : '<span class="assignment-sub">Belum ada file</span>'}</td><td><div class="assignment-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-assignment-detail="${esc(item.id)}">Detail</button><button class="btn btn-secondary btn-sm" type="button" data-assignment-edit="${esc(item.id)}">Edit</button></div></td></tr>`;
-      }).join('') : '<tr><td colspan="10"><div class="assignment-empty"><strong>Tidak ada data</strong>Tidak ada Surat Tugas yang sesuai filter.</div></td></tr>'}</tbody></table></div></section>
+        return `<tr><td>${index + 1}</td><td>${peopleList(item)}</td><td>${assignmentUnitList(item)}</td><td><strong>${esc(item.letterNumber || '—')}</strong></td><td class="nowrap">${esc(formatDate(item.letterDate))}</td><td class="nowrap">${esc(formatDateRange(item))}</td><td class="nowrap" data-sort-value="${esc(inputDateSortValue(item.createdAt))}" title="${item.createdAt ? 'Waktu data pertama kali disimpan' : 'Waktu input tidak tersedia pada data lama'}">${esc(formatInputDate(item.createdAt))}</td><td><strong>${esc(item.activity || '—')}</strong><div class="assignment-sub">${esc(assignmentTypeLabel(item.assignmentType))}${item.note ? ` · ${esc(item.note)}` : ''}</div></td><td>${esc(item.location || '—')}</td><td><span class="assignment-pill ${status.key}">${esc(status.label)}</span></td><td>${doc?.file?.itemId ? `<span class="assignment-pill">Tersimpan</span><div class="assignment-sub">${esc(doc.file.name || doc.file.remoteName || 'Surat Tugas')}</div>` : '<span class="assignment-sub">Belum ada file</span>'}</td><td><div class="assignment-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-assignment-detail="${esc(item.id)}">Detail</button><button class="btn btn-secondary btn-sm" type="button" data-assignment-edit="${esc(item.id)}">Edit</button></div></td></tr>`;
+      }).join('') : '<tr><td colspan="12"><div class="assignment-empty"><strong>Tidak ada data</strong>Tidak ada Surat Tugas yang sesuai filter.</div></td></tr>'}</tbody></table></div></section>
     </div>`;
   }
 
