@@ -735,6 +735,7 @@
   }
 
   function render() {
+    document.body.classList.toggle('wide-records', state.view === 'data');
     if (state.loading) {
       app.innerHTML = window.AppShell.render({
         module: 'leave',

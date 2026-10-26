@@ -1,0 +1,243 @@
+/* Desktop: use the full content area, but only on the Data Cuti/Surat Tugas tab. */
+body.wide-records .content {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  padding-left: clamp(12px, 1.35vw, 26px);
+  padding-right: clamp(12px, 1.35vw, 26px);
+}
+body.wide-records .leave-card,
+body.wide-records .assignment-card,
+body.wide-records .leave-table-wrap,
+body.wide-records .assignment-table-wrap {
+  min-width: 0;
+}
+body.wide-records .leave-table-wrap,
+body.wide-records .assignment-table-wrap {
+  width: 100%;
+  overflow-x: visible;
+}
+/* Fixed columns fill the available width, with text wrapping instead of a horizontal scrollbar. */
+#leave-data-table,
+#assignment-data-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+#leave-data-table :is(th, td),
+#assignment-data-table :is(th, td) {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  padding: 9px 6px;
+  line-height: 1.45;
+  vertical-align: top;
+}
+#leave-data-table thead tr:first-child th,
+#assignment-data-table thead tr:first-child th {
+  white-space: normal;
+  letter-spacing: .018em;
+  font-size: 9px;
+  vertical-align: middle;
+}
+#leave-data-table tbody td,
+#assignment-data-table tbody td { font-size: 10px; }
+#leave-data-table .nowrap,
+#assignment-data-table .nowrap { white-space: normal; }
+#leave-data-table :is(strong, span, button, .leave-link),
+#assignment-data-table :is(strong, span, button) { max-width: 100%; overflow-wrap: anywhere; }
+#leave-data-table .leave-sub,
+#assignment-data-table .assignment-sub { white-space: normal; }
+#assignment-data-table .assignment-pill { max-width: 100%; white-space: normal; text-align: center; }
+#leave-data-table .leave-row-actions,
+#assignment-data-table .assignment-row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 5px;
+  min-width: 0;
+  white-space: normal;
+}
+#leave-data-table .leave-row-actions .btn,
+#assignment-data-table .assignment-row-actions .btn {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 27px;
+  padding: 5px 3px;
+  border-radius: 7px;
+  font-size: 9px;
+  line-height: 1.25;
+  white-space: normal;
+}
+/* Data Cuti: 9 columns = 100%. */
+#leave-data-table thead th:nth-child(1) { width: 14%; }  /* Pegawai */
+#leave-data-table thead th:nth-child(2) { width: 13%; }  /* NIP */
+#leave-data-table thead th:nth-child(3) { width: 12%; }  /* Unit/Bidang */
+#leave-data-table thead th:nth-child(4) { width: 10%; }  /* Jenis Cuti */
+#leave-data-table thead th:nth-child(5) { width: 14%; }  /* Periode */
+#leave-data-table thead th:nth-child(6) { width: 12%; }  /* Tanggal Input */
+#leave-data-table thead th:nth-child(7) { width: 5%; }   /* Hari */
+#leave-data-table thead th:nth-child(8) { width: 12%; }  /* Dokumen */
+#leave-data-table thead th:nth-child(9) { width: 8%; }   /* Aksi */
+/* Data Surat Tugas: 12 columns = 100%. */
+#assignment-data-table thead th:nth-child(1) { width: 3%; }   /* No */
+#assignment-data-table thead th:nth-child(2) { width: 13%; }  /* Pegawai */
+#assignment-data-table thead th:nth-child(3) { width: 9%; }  /* Unit/Bidang */
+#assignment-data-table thead th:nth-child(4) { width: 13%; }  /* Nomor Surat */
+#assignment-data-table thead th:nth-child(5) { width: 7%; }   /* Tanggal Surat */
+#assignment-data-table thead th:nth-child(6) { width: 9%; }   /* Periode Tugas */
+#assignment-data-table thead th:nth-child(7) { width: 9%; }   /* Tanggal Input */
+#assignment-data-table thead th:nth-child(8) { width: 9%; }  /* Kegiatan */
+#assignment-data-table thead th:nth-child(9) { width: 7%; }   /* Lokasi */
+#assignment-data-table thead th:nth-child(10) { width: 7%; }  /* Status */
+#assignment-data-table thead th:nth-child(11) { width: 7%; }  /* Dokumen */
+#assignment-data-table thead th:nth-child(12) { width: 7%; }  /* Aksi */
+/* Pagination remains visible even when the module is narrow. */
+body.wide-records .table-tools-bar-compact {
+  min-width: 0;
+  width: 100%;
+  flex-wrap: wrap;
+}
+body.wide-records .table-tools-bar-compact .table-tools-actions {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+/* Responsive card rows: all fields remain visible on smaller displays, without side-scrolling. */
+@media (max-width: 1250px) {
+  #assignment-data-table { display: block; border-collapse: separate; }
+  #assignment-data-table thead { display: block; }
+  #assignment-data-table thead tr { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 12px; }
+  #assignment-data-table thead th { display: none; }
+  #assignment-data-table thead th[data-sort-default] {
+    display: inline-flex;
+    width: auto;
+    min-height: 30px;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 5px 10px;
+    background: #fff;
+  }
+  #assignment-data-table thead th[data-sort-default]::before { content: 'Urutkan: '; margin-right: 3px; font-weight: 500; }
+  #assignment-data-table tbody { display: block; padding: 0 12px 12px; }
+  #assignment-data-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-top: 9px;
+    padding: 3px 7px;
+    background: #fff;
+  }
+  #assignment-data-table tbody td {
+    display: block;
+    width: auto;
+    border-bottom: 0;
+    padding: 8px;
+    min-width: 0;
+  }
+  #assignment-data-table tbody td:not([colspan])::before {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-weight: 720;
+    color: var(--muted-2);
+  }
+  #assignment-data-table tbody td[colspan] { grid-column: 1 / -1; }
+  #assignment-data-table tbody td[colspan]::before { content: none !important; display: none !important; }
+  #assignment-data-table tbody td:nth-child(1)::before { content: 'No'; }
+  #assignment-data-table tbody td:nth-child(2)::before { content: 'Pegawai'; }
+  #assignment-data-table tbody td:nth-child(3)::before { content: 'Unit/Bidang'; }
+  #assignment-data-table tbody td:nth-child(4)::before { content: 'Nomor Surat'; }
+  #assignment-data-table tbody td:nth-child(5)::before { content: 'Tanggal Surat'; }
+  #assignment-data-table tbody td:nth-child(6)::before { content: 'Periode Tugas'; }
+  #assignment-data-table tbody td:nth-child(7)::before { content: 'Tanggal Input'; }
+  #assignment-data-table tbody td:nth-child(8)::before { content: 'Kegiatan'; }
+  #assignment-data-table tbody td:nth-child(9)::before { content: 'Lokasi'; }
+  #assignment-data-table tbody td:nth-child(10)::before { content: 'Status'; }
+  #assignment-data-table tbody td:nth-child(11)::before { content: 'Dokumen'; }
+  #assignment-data-table tbody td:nth-child(12)::before { content: 'Aksi'; }
+  #assignment-data-table .assignment-row-actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; }
+  #assignment-data-table .assignment-row-actions .btn { width: auto; min-width: 55px; padding: 5px 9px; }
+}
+@media (max-width: 1000px) {
+  #leave-data-table { display: block; border-collapse: separate; }
+  #leave-data-table thead { display: block; }
+  #leave-data-table thead tr { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 12px; }
+  #leave-data-table thead th { display: none; }
+  #leave-data-table thead th[data-sort-default] {
+    display: inline-flex;
+    width: auto;
+    min-height: 30px;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 5px 10px;
+    background: #fff;
+  }
+  #leave-data-table thead th[data-sort-default]::before { content: 'Urutkan: '; margin-right: 3px; font-weight: 500; }
+  #leave-data-table tbody { display: block; padding: 0 12px 12px; }
+  #leave-data-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-top: 9px;
+    padding: 3px 7px;
+    background: #fff;
+  }
+  #leave-data-table tbody td {
+    display: block;
+    width: auto;
+    height: auto;
+    border-bottom: 0;
+    padding: 8px;
+    min-width: 0;
+  }
+  #leave-data-table tbody td:not([colspan])::before {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-weight: 720;
+    color: var(--muted-2);
+  }
+  #leave-data-table tbody td[colspan] { grid-column: 1 / -1; }
+  #leave-data-table tbody td[colspan]::before { content: none !important; display: none !important; }
+  #leave-data-table tbody td:nth-child(1)::before { content: 'Pegawai'; }
+  #leave-data-table tbody td:nth-child(2)::before { content: 'NIP'; }
+  #leave-data-table tbody td:nth-child(3)::before { content: 'Unit/Bidang'; }
+  #leave-data-table tbody td:nth-child(4)::before { content: 'Jenis Cuti'; }
+  #leave-data-table tbody td:nth-child(5)::before { content: 'Periode'; }
+  #leave-data-table tbody td:nth-child(6)::before { content: 'Tanggal Input'; }
+  #leave-data-table tbody td:nth-child(7)::before { content: 'Hari'; }
+  #leave-data-table tbody td:nth-child(8)::before { content: 'Dokumen'; }
+  #leave-data-table tbody td:nth-child(9)::before { content: 'Aksi'; }
+  #leave-data-table .leave-row-actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; }
+  #leave-data-table .leave-row-actions .btn { width: auto; min-width: 48px; padding: 5px 9px; }
+}
+@media (max-width: 780px) {
+  #assignment-data-table tbody tr { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+@media (max-width: 520px) {
+  #leave-data-table tbody tr,
+  #assignment-data-table tbody tr { grid-template-columns: 1fr; }
+  #assignment-data-table tbody td,
+  #leave-data-table tbody td { padding: 7px 8px; }
+}
+@media print {
+  body.wide-records .content { max-width: none; padding: 0; }
+  #leave-data-table, #assignment-data-table { table-layout: auto; }
+}

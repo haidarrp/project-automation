@@ -445,6 +445,7 @@
   }
 
   function render() {
+    document.body.classList.toggle('wide-records', state.view === 'data');
     if (state.loading) {
       app.innerHTML = window.AppShell.render({ module: 'assignment', view: state.view, viewLabel: VIEW_LABELS[state.view], content: '<div class="card assignment-loading"><strong>Memuat modul Surat Tugas</strong>Membaca master pegawai dan arsip penugasan dari Cloud Firestore...</div>' });
       return;
