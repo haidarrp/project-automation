@@ -70,17 +70,19 @@
     if(!weekday||!saturday||weekday.getAttribute('s')===saturday.getAttribute('s'))return null;
     return {weekday:weekday.getAttribute('s'),weekend:saturday.getAttribute('s')};
   }
-  function styleWeekends(row,year,month,rowNo,styles){
+  function styleWeekends(row,year,month,rowNo,styles,holidays){
     if(!styles)return;
     const map=new Map(Array.from(row.children).filter(c=>c.localName==='c').map(c=>[c.getAttribute('r'),c]));
     for(let day=1;day<=31;day++){
       const cell=map.get(`${colName(day+3)}${rowNo}`);
       if(!cell)continue;
-      const isWeekend=day<=R.periodDays(year,month)&&R.weekend(R.key(year,month,day));
+      const date=R.key(year,month,day);
+      const isWeekend=day<=R.periodDays(year,month)&&(R.weekend(date)||holidays.has(date));
       cell.setAttribute('s',isWeekend?styles.weekend:styles.weekday);
     }
   }
-  function createWorksheet(year,month,employees,settings){
+  function createWorksheet(year,month,employees,settings,holidayDates=[]){
+    const holidays=new Set(holidayDates);
     const finalRow=Math.max(settings.baseEndRow,employees.length+4);
     const doc=document.implementation.createDocument(NS,'worksheet',null);
     const root=doc.documentElement;
@@ -107,17 +109,18 @@
     setNumber(doc,rows.get(2),'B2',year);
     setString(doc,rows.get(2),'C2',`Uang_Makan_${R.MONTHS[month-1].toUpperCase()}_${year}`);
     setString(doc,rows.get(3),'B3',String(month).padStart(2,'0'));
-    styleWeekends(rows.get(4),year,month,4,getStyles(rows.get(4),4));
+    styleWeekends(rows.get(4),year,month,4,getStyles(rows.get(4),4),holidays);
     for(let index=0;index<employees.length;index++){
       const rowNo=index+5,employee=employees[index],row=rows.get(rowNo);
-      styleWeekends(row,year,month,rowNo,getStyles(row,rowNo));
+      styleWeekends(row,year,month,rowNo,getStyles(row,rowNo),holidays);
       setNumber(doc,row,`A${rowNo}`,index+1);
       setString(doc,row,`B${rowNo}`,R.normalizeNip(employee.nip));
       setString(doc,row,`C${rowNo}`,employee.name);
       let total=0;
       for(let day=1;day<=R.periodDays(year,month);day++){
-        const attendance=employee.days?.[R.key(year,month,day)];
-        if(attendance?.value===1){setNumber(doc,row,`${colName(day+3)}${rowNo}`,1);total++;}
+        const date=R.key(year,month,day),attendance=employee.days?.[date];
+        // Aturan hari nonkerja tidak dapat dilewati oleh koreksi manual atau riwayat lama.
+        if(attendance?.value===1&&!R.weekend(date)&&!holidays.has(date)&&!attendance.isHoliday){setNumber(doc,row,`${colName(day+3)}${rowNo}`,1);total++;}
       }
       setFormula(doc,row,`AI${rowNo}`,`SUM(D${rowNo}:AH${rowNo})`,total);
       setFormula(doc,row,`AJ${rowNo}`,`COUNTA(D${rowNo}:AH${rowNo})`,total);
@@ -134,7 +137,7 @@
     return new XMLSerializer().serializeToString(doc);
   }
   function encodeXml(text){return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-  function createPackage(year,month,employees,settings){
+  function createPackage(year,month,employees,settings,options={}){
     const zip=new JSZip(),finalRow=Math.max(settings.baseEndRow,employees.length+4);
     const now=new Date().toISOString().replace(/\.\d{3}Z$/,'Z');
     const ns='http://schemas.openxmlformats.org';
@@ -147,7 +150,7 @@
     zip.file('xl/_rels/workbook.xml.rels',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${ns}/package/2006/relationships"><Relationship Type="${ns}/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet1.xml" Id="rId1"/><Relationship Type="${ns}/officeDocument/2006/relationships/styles" Target="styles.xml" Id="rId2"/><Relationship Type="${ns}/officeDocument/2006/relationships/theme" Target="theme/theme1.xml" Id="rId3"/></Relationships>`);
     zip.file('xl/styles.xml',settings.stylesXml);
     zip.file('xl/theme/theme1.xml',settings.themeXml);
-    zip.file('xl/worksheets/sheet1.xml',createWorksheet(year,month,employees,settings));
+    zip.file('xl/worksheets/sheet1.xml',createWorksheet(year,month,employees,settings,options.holidays||[]));
     return zip;
   }
   function verifyInput(year,month,employees){
@@ -160,7 +163,7 @@
     if(!window.JSZip)throw new Error('Pustaka pembuat Excel belum tersedia.');
     const format=window.UangMakanFormat;
     if(!format?.rowCells||!format?.stylesXml||!format?.themeXml)throw new Error('Konfigurasi format PUSDATIN tidak tersedia.');
-    const blob=await createPackage(year,month,employees,format).generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});
+    const blob=await createPackage(year,month,employees,format,options).generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});
     const filename=`Uang_Makan_PUSDATIN_${R.MONTHS[month-1]}_${year}.xlsx`;
     if(options.download!==false){
       const url=URL.createObjectURL(new Blob([blob],{type:MIME}));
