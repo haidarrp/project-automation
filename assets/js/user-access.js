@@ -218,10 +218,10 @@
     ],
     lembur:[
       ['[data-action="start-process"],[data-action="new-period"]','process.view'],
-      ['[data-action="add-holiday"],[data-remove-holiday]','process.holiday'],
+      ['[data-action="add-holiday"],[data-remove-holiday],[data-action="confirm-holiday-preview"]',()=>document.querySelector('.lm-editor')?.dataset.historyEdit==='true'?'history.edit':'process.holiday'],
       ['[data-action="choose-files"],#file-input,[data-remove-file]','process.upload'],
       ['[data-action="validate"],[data-action="process-data"]','process.calculate'],
-      ['[data-overtime-key]','process.correct'],
+      ['[data-review-edit],[data-action="save-review-edit"],[data-overtime-key]',()=>document.querySelector('.lm-editor')?.dataset.historyEdit==='true'?'history.edit':'process.correct'],
       ['[data-action="generate"]',()=>can('lembur','process.generate')?'process.generate':'history.edit'],
       ['[data-action="save-history-edit"],[data-edit-history-id],[data-action="edit-current-run"]','history.edit'],
       ['[data-delete-history-id]','history.delete'],
