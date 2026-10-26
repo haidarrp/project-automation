@@ -494,6 +494,7 @@
   }
 
   function openAssignmentModal(id) {
+    if (!window.UserAccess.assert('surat',id?'data.edit':'data.create')) return;
     const existing = id ? state.assignments.find((item) => item.id === id) : null;
     const selected = new Set((existing?.employees || []).map((employee) => employee.employeeId));
     state.detailId = '';
@@ -546,6 +547,8 @@
   }
 
   async function saveAssignment(button) {
+    if (!window.UserAccess.assert('surat',state.modal?.record?.id?'data.edit':'data.create')) return;
+    if (document.getElementById('assignment-file')?.files?.length && !window.UserAccess.assert('surat','documents.upload')) return;
     if (!state.modal) return;
     const selectedIds = selectedEmployeeIdsFromForm();
     const letterNumber = String(document.getElementById('assignment-letter-number')?.value || '').trim();
@@ -568,7 +571,7 @@
     if (endDate < startDate) { alert('Tanggal selesai tugas tidak boleh lebih awal dari tanggal mulai.'); return; }
     if (!selectedIds.size) { alert('Pilih sekurang-kurangnya satu pegawai yang ditugaskan.'); return; }
     if (!activity) { alert('Kegiatan/keperluan wajib diisi.'); return; }
-    if (!selectedFile && !existingFile?.itemId) { alert('Upload berkas Surat Tugas terlebih dahulu.'); return; }
+    if (!selectedFile && !existingFile?.itemId && window.UserAccess.can('surat','documents.upload')) { alert('Upload berkas Surat Tugas terlebih dahulu.'); return; }
 
     const docRef = existing.id ? db().collection('assignmentRecords').doc(existing.id) : db().collection('assignmentRecords').doc();
     const id = docRef.id;
@@ -646,6 +649,7 @@
   }
 
   async function deleteAssignment(id) {
+    if (!window.UserAccess.assert('surat','data.delete')) return;
     const item = state.assignments.find((row) => row.id === id);
     if (!item) return;
     if (!window.confirm(`Hapus Surat Tugas ${item.letterNumber || ''}?\n\nData ini tidak akan lagi digunakan pada sinkronisasi Tukin.`)) return;
@@ -673,6 +677,7 @@
   }
 
   async function loadAssignmentPreview(id) {
+    if (!window.UserAccess.can('surat','documents.view')) return;
     const item = state.assignments.find((row) => row.id === id);
     const doc = primaryDocument(item);
     if (!doc?.file?.driveId || !doc?.file?.itemId) return;
@@ -703,6 +708,7 @@
   }
 
   async function previewAssignmentDocument(assignmentId, documentId) {
+    if (!window.UserAccess.assert('surat','documents.view')) return;
     const item = state.assignments.find((row) => row.id === assignmentId);
     const doc = (item?.documents || []).find((row) => row.id === documentId);
     if (!doc?.file?.driveId || !doc?.file?.itemId) { alert('File SharePoint untuk Surat Tugas ini tidak tersedia.'); return; }
@@ -729,6 +735,7 @@
   }
 
   async function downloadAssignmentDocument(assignmentId, documentId, button) {
+    if (!window.UserAccess.assert('surat','documents.download')) return;
     const item = state.assignments.find((row) => row.id === assignmentId);
     const doc = (item?.documents || []).find((row) => row.id === documentId);
     if (!doc?.file?.driveId || !doc?.file?.itemId) { alert('File SharePoint untuk Surat Tugas ini tidak tersedia.'); return; }
@@ -837,8 +844,12 @@
   });
 
   async function init() {
-    await window.FirebaseClient.requireAdmin();
+    if (!(await window.UserAccess.requireModule('surat'))) return;
     state.view = viewFromHash();
+    if (!location.hash || !window.UserAccess.canView('surat',state.view)) {
+      state.view = window.UserAccess.firstView('surat') || 'dashboard';
+      history.replaceState(null, '', '#'+state.view);
+    }
     if (!location.hash) history.replaceState(null, '', '#dashboard');
     await loadData();
   }

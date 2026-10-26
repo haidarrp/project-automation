@@ -2,178 +2,285 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAllowedUser() {
+    // Wajib deploy rules ini bersama kode. Pengaturan UI saja tidak cukup.
+    function isVerifiedPKP() {
       return request.auth != null
         && request.auth.token.email is string
         && request.auth.token.email_verified == true
         && request.auth.token.email.matches('^.*@pkp\\.go\\.id$');
     }
-
-    function isOwner(userId) {
-      return isAllowedUser() && request.auth.uid == userId;
-    }
-
     function isAdmin() {
-      return isAllowedUser()
+      return isVerifiedPKP()
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
     }
-
-    function canManageSharedRun(data) {
-      return isAllowedUser()
-        && (data.ownerUid == request.auth.uid || isAdmin());
+    function permissionExists() {
+      return exists(/databases/$(database)/documents/userPermissions/$(request.auth.uid));
     }
+    function isAllowedUser() {
+      return isVerifiedPKP() && (
+        isAdmin() || !permissionExists()
+        || get(/databases/$(database)/documents/userPermissions/$(request.auth.uid)).data.active != false
+      );
+    }
+    function isOwner(userId) {
+      return isAllowedUser() && request.auth.uid == userId;
+    }
+    function hasGrant(module, key) {
+      return isAllowedUser() && (
+        isAdmin() || (
+          !permissionExists() && (module == 'tukin' || module == 'lembur')
+        ) || (
+          permissionExists()
+          && get(/databases/$(database)/documents/userPermissions/$(request.auth.uid)).data.grants.get(module, {}).get(key, false) == true
+        )
+      );
+    }
+    function canView(module, section) {
+      return hasGrant(module, section + '.view');
+    }
+    function canDo(module, section, action) {
+      return canView(module, section) && hasGrant(module, section + '.' + action);
+    }
+    function anyLeaveView() {
+      return canView('cuti','dashboard') || canView('cuti','data')
+        || canView('cuti','kalender') || canView('cuti','pegawai')
+        || canView('cuti','saldo') || canView('cuti','laporan');
+    }
+    function anyAssignmentView() {
+      return canView('surat','dashboard') || canView('surat','data') || canView('surat','kalender');
+    }
+    function anyTrainingView() {
+      return canView('pelatihan','dashboard') || canView('pelatihan','pegawai') || canView('pelatihan','data');
+    }
+    function anyTukinView() {
+      return canView('tukin','dashboard') || canView('tukin','process') || canView('tukin','history');
+    }
+    function anyLemburView() {
+      return canView('lembur','dashboard') || canView('lembur','process') || canView('lembur','history');
+    }
+    function canReadLeave() { return anyLeaveView() || canView('tukin','process'); }
+    function canReadAssignments() { return anyAssignmentView() || canView('tukin','process'); }
+    function canReadDirectory() {
+      return isAdmin() || anyLeaveView() || anyAssignmentView() || anyTrainingView();
+    }
+    function canManageRun(data, module) {
+      return isAllowedUser() && (data.ownerUid == request.auth.uid || isAdmin());
+    }
+    function leaveDocumentOnlyChange() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['documents','updatedAt','updatedBy'])
+        && canView('cuti','data') && canView('cuti','documents');
+    }
+    function documentEditAllowed() {
+      return leaveDocumentOnlyChange() && (
+        (canDo('cuti','documents','create')
+          && request.resource.data.get('documents', []).size() == resource.data.get('documents', []).size() + 1)
+        || (canDo('cuti','documents','edit')
+          && request.resource.data.get('documents', []).size() == resource.data.get('documents', []).size())
+        || (canDo('cuti','documents','delete')
+          && request.resource.data.get('documents', []).size() + 1 == resource.data.get('documents', []).size())
+      );
+    }
+    function canSyncBalance() {
+      return canDo('cuti','data','create') || canDo('cuti','data','edit') || canDo('cuti','data','delete');
+    }
+    function isValidBalance() {
+      return request.resource.data.entitlement is number
+        && request.resource.data.carryOver is number
+        && request.resource.data.usage is number
+        && request.resource.data.remaining is number
+        && request.resource.data.entitlement >= 0
+        && request.resource.data.carryOver >= 0
+        && request.resource.data.usage >= 0
+        && request.resource.data.remaining == request.resource.data.entitlement + request.resource.data.carryOver - request.resource.data.usage;
+    }
+    function canReadRun(module) {
+      return module == 'tukin' ? anyTukinView() : anyLemburView();
+    }
+    function canCreateRun(module) {
+      return module == 'tukin' ? canDo('tukin','process','save') : canDo('lembur','process','generate');
+    }
+    function canUpdateRun(module) { return canDo(module,'history','edit'); }
+    function canDeleteRun(module) { return canDo(module,'history','delete'); }
 
-    // Dokumen penanda administrator dibuat manual melalui Firebase Console.
-    // Pengguna biasa hanya boleh membaca status admin miliknya sendiri.
+    // Admin ditetapkan hanya di Firebase Console, tidak dari aplikasi web.
     match /admins/{userId} {
-      allow read: if isAllowedUser() && request.auth.uid == userId;
+      allow read: if isVerifiedPKP() && (request.auth.uid == userId || isAdmin());
       allow write: if false;
     }
-
-    // Area privat lama tetap dipertahankan agar data riwayat versi sebelumnya
-    // dapat dimigrasikan oleh pemilik akun ke koleksi riwayat bersama.
+    // Hak akses dapat dibaca pengguna sendiri dan seluruh admin. Mutasi hanya admin.
+    match /userPermissions/{userId} {
+      allow read: if isVerifiedPKP() && (request.auth.uid == userId || isAdmin());
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['uid','active','grants','revision','updatedAt','updatedByUid','updatedByEmail','schemaVersion'])
+        && request.resource.data.uid == userId
+        && request.resource.data.active is bool
+        && request.resource.data.grants is map
+        && request.resource.data.revision is int
+        && request.resource.data.revision >= 1;
+      allow delete: if false;
+    }
+    // Profil publik internal hanya dapat ditulis pemilik pada field profil non-otoritatif.
     match /users/{userId} {
-      allow read, create, update: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId)
+        && request.resource.data.keys().hasOnly(['uid','email','displayName','photoURL','lastLoginAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email;
+      allow update: if isOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid','email','displayName','photoURL','lastLoginAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email;
       allow delete: if false;
-
-      match /{document=**} {
-        allow read, write: if isOwner(userId);
-      }
     }
-
-
-
-    // Koleksi riwayat privat versi lama. Pemilik tetap dapat mengelola datanya,
-    // dan admin diberi hak delete agar hard-delete shared history juga dapat
-    // membersihkan sumber legacy milik akun lain.
     match /users/{userId}/lemburRuns/{runId} {
-      allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      allow read: if (isOwner(userId) || isAdmin()) && canReadRun('lembur');
+      allow create: if isOwner(userId) && canCreateRun('lembur');
+      allow update: if (isOwner(userId) || isAdmin()) && canUpdateRun('lembur');
+      allow delete: if (isOwner(userId) || isAdmin()) && canDeleteRun('lembur');
       match /employees/{employeeId} {
-        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+        allow read: if (isOwner(userId) || isAdmin()) && canReadRun('lembur');
+        allow create: if isOwner(userId) && canCreateRun('lembur');
+        allow update: if (isOwner(userId) || isAdmin()) && canUpdateRun('lembur');
+        allow delete: if (isOwner(userId) || isAdmin()) && canDeleteRun('lembur');
       }
     }
-
     match /users/{userId}/tukinRuns/{runId} {
-      allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      allow read: if (isOwner(userId) || isAdmin()) && canReadRun('tukin');
+      allow create: if isOwner(userId) && canCreateRun('tukin');
+      allow update: if (isOwner(userId) || isAdmin()) && canUpdateRun('tukin');
+      allow delete: if (isOwner(userId) || isAdmin()) && canDeleteRun('tukin');
       match /employees/{employeeId} {
-        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+        allow read: if (isOwner(userId) || isAdmin()) && canReadRun('tukin');
+        allow create: if isOwner(userId) && canCreateRun('tukin');
+        allow update: if (isOwner(userId) || isAdmin()) && canUpdateRun('tukin');
+        allow delete: if (isOwner(userId) || isAdmin()) && canDeleteRun('tukin');
       }
     }
-
-    // Riwayat Lembur bersama.
-    // Semua akun instansi yang terverifikasi dapat membaca seluruh riwayat.
-    // Riwayat hanya dapat dibuat oleh akun yang sedang login dan hanya dapat
-    // diubah/dihapus oleh pembuatnya atau administrator.
     match /lemburRuns/{runId} {
-      allow read: if isAllowedUser();
-      allow create: if isAllowedUser()
-        && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if canManageSharedRun(resource.data)
+      allow read: if canReadRun('lembur');
+      allow create: if canCreateRun('lembur') && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if canUpdateRun('lembur') && canManageRun(resource.data,'lembur')
         && request.resource.data.ownerUid == resource.data.ownerUid;
-      allow delete: if canManageSharedRun(resource.data);
-
+      allow delete: if canDeleteRun('lembur') && canManageRun(resource.data,'lembur');
       match /employees/{employeeId} {
-        allow read: if isAllowedUser();
-        allow create, update, delete: if isAllowedUser()
-          && canManageSharedRun(
-            get(/databases/$(database)/documents/lemburRuns/$(runId)).data
-          );
+        allow read: if canReadRun('lembur');
+        allow create: if canCreateRun('lembur')
+          && canManageRun(get(/databases/$(database)/documents/lemburRuns/$(runId)).data,'lembur');
+        allow update: if canUpdateRun('lembur')
+          && canManageRun(get(/databases/$(database)/documents/lemburRuns/$(runId)).data,'lembur');
+        allow delete: if (canUpdateRun('lembur') || canDeleteRun('lembur'))
+          && canManageRun(get(/databases/$(database)/documents/lemburRuns/$(runId)).data,'lembur');
       }
     }
-
-    // Tombstone penghapusan Lembur. Dokumen ini sengaja dipertahankan
-    // agar data legacy tidak dapat dimigrasikan kembali setelah riwayat dihapus.
-    match /lemburRunDeletions/{runId} {
-      allow read: if isAllowedUser();
-      allow create: if isAdmin() || (
-        isAllowedUser()
-        && request.resource.data.ownerUid == request.auth.uid
-      );
-      allow update: if isAllowedUser()
-        && (resource.data.ownerUid == request.auth.uid || isAdmin())
-        && request.resource.data.ownerUid == resource.data.ownerUid;
-      allow delete: if false;
-    }
-
-    // Riwayat Tunjangan Kinerja bersama, dengan model akses yang sama.
     match /tukinRuns/{runId} {
-      allow read: if isAllowedUser();
-      allow create: if isAllowedUser()
-        && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if canManageSharedRun(resource.data)
+      allow read: if canReadRun('tukin');
+      allow create: if canCreateRun('tukin') && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if canUpdateRun('tukin') && canManageRun(resource.data,'tukin')
         && request.resource.data.ownerUid == resource.data.ownerUid;
-      allow delete: if canManageSharedRun(resource.data);
-
+      allow delete: if canDeleteRun('tukin') && canManageRun(resource.data,'tukin');
       match /employees/{employeeId} {
-        allow read: if isAllowedUser();
-        allow create, update, delete: if isAllowedUser()
-          && canManageSharedRun(
-            get(/databases/$(database)/documents/tukinRuns/$(runId)).data
-          );
+        allow read: if canReadRun('tukin');
+        allow create: if canCreateRun('tukin')
+          && canManageRun(get(/databases/$(database)/documents/tukinRuns/$(runId)).data,'tukin');
+        allow update: if canUpdateRun('tukin')
+          && canManageRun(get(/databases/$(database)/documents/tukinRuns/$(runId)).data,'tukin');
+        allow delete: if (canUpdateRun('tukin') || canDeleteRun('tukin'))
+          && canManageRun(get(/databases/$(database)/documents/tukinRuns/$(runId)).data,'tukin');
       }
     }
-
-    // Tombstone penghapusan Tukin, dengan tujuan yang sama seperti Lembur.
-    match /tukinRunDeletions/{runId} {
-      allow read: if isAllowedUser();
-      allow create: if isAdmin() || (
-        isAllowedUser()
-        && request.resource.data.ownerUid == request.auth.uid
-      );
-      allow update: if isAllowedUser()
+    match /lemburRunDeletions/{runId} {
+      allow read: if canReadRun('lembur');
+      allow create: if canDeleteRun('lembur')
+        && (request.resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow update: if canDeleteRun('lembur')
         && (resource.data.ownerUid == request.auth.uid || isAdmin())
         && request.resource.data.ownerUid == resource.data.ownerUid;
       allow delete: if false;
     }
-
-    // Master operasional hanya memuat hash identitas dan parameter yang diperlukan aplikasi.
-    // Seluruh pengguna terverifikasi pada domain instansi boleh membaca; hanya admin boleh mengubah.
+    match /tukinRunDeletions/{runId} {
+      allow read: if canReadRun('tukin');
+      allow create: if canDeleteRun('tukin')
+        && (request.resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow update: if canDeleteRun('tukin')
+        && (resource.data.ownerUid == request.auth.uid || isAdmin())
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if false;
+    }
     match /masterEmployees/{masterId} {
-      allow read: if isAllowedUser();
+      allow read: if isAllowedUser() && (canReadDirectory() || anyTukinView() || anyLemburView());
       allow create, update, delete: if isAdmin();
     }
-
-    // Direktori plaintext (Nama/NIP/Unit) hanya untuk tampilan dan pengelolaan oleh admin.
     match /masterDirectory/{masterId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read: if canReadDirectory();
+      allow create, update, delete: if isAdmin();
     }
-
-    // Pengaturan operasional dibaca aplikasi dan hanya dapat diubah administrator.
     match /appSettings/{settingId} {
       allow read: if isAllowedUser();
       allow create, update, delete: if isAdmin();
     }
-
-    // Arsip pelatihan bersifat internal Pusdatin dan dikelola oleh administrator aplikasi.
     match /trainings/{trainingId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read: if anyTrainingView();
+      allow create: if canDo('pelatihan','data','create');
+      // Status/catatan peserta dan metadata dokumen disimpan di array participants.
+      // Perubahan array dibatasi ke field participants, bukan kolom utama pelatihan.
+      allow update: if canDo('pelatihan','data','edit') || (
+        canView('pelatihan','data')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants','participantIds','updatedAt','updatedBy','schemaVersion'])
+        && (canDo('pelatihan','participants','edit')
+          || canDo('pelatihan','documents','create')
+          || canDo('pelatihan','documents','edit')
+          || canDo('pelatihan','documents','delete'))
+      );
+      allow delete: if canDo('pelatihan','data','delete');
     }
-
-    // Pencatatan cuti internal TU. Modul ini bukan workflow persetujuan.
     match /leaveRecords/{leaveId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read: if canReadLeave();
+      allow create: if canDo('cuti','data','create')
+        && (request.resource.data.get('documents', []).size() == 0 || canDo('cuti','documents','create'));
+      allow update: if (
+        canDo('cuti','data','edit')
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['documents'])
+          || canDo('cuti','documents','edit'))
+      ) || documentEditAllowed();
+      allow delete: if canDo('cuti','data','delete');
     }
-
-    // Saldo Cuti Tahunan disimpan terpisah per pegawai per tahun.
     match /leaveBalances/{balanceId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read: if canReadLeave();
+      allow create: if isValidBalance() && (
+        canDo('cuti','saldo','edit_balance') ||
+        (canSyncBalance() && request.resource.data.entitlement == 0 && request.resource.data.carryOver == 0)
+      );
+      allow update: if isValidBalance() && (
+        canDo('cuti','saldo','edit_balance') ||
+        (canSyncBalance() && request.resource.data.entitlement == resource.data.entitlement
+          && request.resource.data.carryOver == resource.data.carryOver
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usage','remaining','updatedAt','updatedBy','schemaVersion','employeeId','year']))
+      );
+      allow delete: if isAdmin();
     }
-
-    // Arsip Surat Tugas/penugasan dinas internal TU. Satu record dapat memuat
-    // beberapa pegawai dan menjadi data pendukung pada proses Tukin.
     match /assignmentRecords/{assignmentId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read: if canReadAssignments();
+      allow create: if canDo('surat','data','create') && (canDo('surat','documents','upload') || (request.resource.data.get('documents',[]).size() == 1 && request.resource.data.documents[0].get('file',null) == null));
+      allow update: if canDo('surat','data','edit') && (
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['documents'])
+        || canDo('surat','documents','upload')
+        || (resource.data.get('documents',[]).size()>0
+          && request.resource.data.get('documents',[]).size()>0
+          && resource.data.documents[0].get('file',null) == request.resource.data.documents[0].get('file',null))
+      );
+      allow delete: if canDo('surat','data','delete');
     }
-
-    // Audit log bersifat append-only dari halaman admin.
     match /adminAudit/{auditId} {
       allow read: if isAdmin();
-      allow create: if isAdmin();
+      allow create: if isAllowedUser()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.actorEmail == request.auth.token.email
+        && request.resource.data.action is string
+        && request.resource.data.target is string
+        && request.resource.data.detail is string;
       allow update, delete: if false;
     }
-
-    // Default deny untuk seluruh path lain.
     match /{document=**} {
       allow read, write: if false;
     }

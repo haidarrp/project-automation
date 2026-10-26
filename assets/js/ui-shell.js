@@ -78,6 +78,9 @@
   function moduleGroup(module, activeModule, activeView) {
     const config = MODULES[module];
     if (!config) return '';
+    const permissionModule = {training:'pelatihan',leave:'cuti',assignment:'surat',tukin:'tukin',lembur:'lembur'}[module];
+    const items = config.items.filter(item => window.UserAccess?.canView?.(permissionModule,item.view) === true);
+    if (!items.length) return '';
     const active = activeModule === module;
     return `<div class="nav-group ${active ? 'active-group open' : ''}" data-nav-group="${module}">
       <button class="nav-group-title" type="button" aria-expanded="${active ? 'true' : 'false'}" onclick="window.AppShell.toggleModule(this)">
@@ -86,7 +89,7 @@
         <span class="nav-chevron">${icon('chevron')}</span>
       </button>
       <div class="nav-submenu">
-        ${config.items.map((item) => `<a class="nav-sub-button ${active && activeView === item.view ? 'active' : ''}" href="${config.file}#${item.view}"><span class="nav-sub-dot"></span><span>${item.label}</span></a>`).join('')}
+        ${items.map((item) => `<a class="nav-sub-button ${active && activeView === item.view ? 'active' : ''}" href="${config.file}#${item.view}"><span class="nav-sub-dot"></span><span>${item.label}</span></a>`).join('')}
       </div>
     </div>`;
   }
@@ -112,27 +115,29 @@
 
   function navigation(activeModule, activeView) {
     const isAdmin = Boolean(window.FirebaseClient?.isAdmin?.());
-    const adminLink = isAdmin
-      ? `<a class="nav-button nav-admin ${activeModule === 'admin' ? 'active' : ''}" href="admin.html"><span class="nav-icon">${icon('admin')}</span><span class="nav-label">Administrasi</span></a>`
-      : '';
-    const trainingGroup = isAdmin ? moduleGroup('training', activeModule, activeView) : '';
-    const leaveGroup = isAdmin ? moduleGroup('leave', activeModule, activeView) : '';
-    const assignmentGroup = isAdmin ? moduleGroup('assignment', activeModule, activeView) : '';
+    const admin = isAdmin ? `<div class="nav-group ${activeModule === 'admin' ? 'active-group open' : ''}" data-nav-group="admin">
+      <button class="nav-group-title" type="button" aria-expanded="${activeModule === 'admin' ? 'true' : 'false'}" onclick="window.AppShell.toggleModule(this)">
+        <span class="nav-icon">${icon('admin')}</span><span class="nav-label">Administrasi</span><span class="nav-chevron">${icon('chevron')}</span>
+      </button>
+      <div class="nav-submenu">
+        <a class="nav-sub-button ${activeModule==='admin'&&activeView!=='users'?'active':''}" href="admin.html"><span class="nav-sub-dot"></span><span>Master Data</span></a>
+        <a class="nav-sub-button ${activeView==='users'?'active':''}" href="pengguna.html"><span class="nav-sub-dot"></span><span>Pengelolaan User</span></a>
+      </div></div>` : '';
     return `<nav class="nav nav-modules" aria-label="Navigasi utama">
       <div class="nav-groups" role="group" aria-label="Modul">
         ${moduleGroup('tukin', activeModule, activeView)}
         ${moduleGroup('lembur', activeModule, activeView)}
-        ${trainingGroup}
-        ${leaveGroup}
-        ${assignmentGroup}
+        ${moduleGroup('training', activeModule, activeView)}
+        ${moduleGroup('leave', activeModule, activeView)}
+        ${moduleGroup('assignment', activeModule, activeView)}
+        ${admin}
       </div>
-      ${adminLink}
     </nav>`;
   }
 
   function breadcrumb(module, viewLabel) {
     if (module === 'dashboard') return '<strong>Generator Dokumen</strong><span>/ Dashboard</span>';
-    if (module === 'admin') return '<strong>Generator Dokumen</strong><span>/ Administrasi / Master Data</span>';
+    if (module === 'admin') return `<strong>Generator Dokumen</strong><span>/ Administrasi / ${viewLabel || 'Master Data'}</span>`;
     if (module === 'training') return `<strong>Pusdatin PKP</strong><span>/ Pelatihan Pegawai / ${viewLabel || ''}</span>`;
     if (module === 'leave') return `<strong>Pusdatin PKP</strong><span>/ Cuti / ${viewLabel || ''}</span>`;
     if (module === 'assignment') return `<strong>Pusdatin PKP</strong><span>/ Surat Tugas / ${viewLabel || ''}</span>`;
@@ -144,7 +149,13 @@
     const opts = options || {};
     const module = opts.module || 'dashboard';
     const view = opts.view || '';
-    const content = opts.content || '';
+    let content = opts.content || '';
+    const permissionModule = {tukin:'tukin',lembur:'lembur',training:'pelatihan',leave:'cuti',assignment:'surat'}[module];
+    const pageView = String(opts.view || 'dashboard');
+    if (permissionModule && window.UserAccess && !window.UserAccess.canView(permissionModule,pageView)) {
+      content = window.UserAccess.permissionDeniedMarkup(permissionModule);
+      opts.overlays = '';
+    }
     const overlays = opts.overlays || '';
     const user = window.FirebaseClient?.getCurrentUser?.();
     const displayName = user?.displayName || (user?.email ? user.email.split('@')[0] : 'Pengguna');
@@ -153,7 +164,7 @@
     const account = user ? `<div class="topbar-account"><div class="topbar-account-copy"><strong>${displayName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</strong><span>${email.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span></div><button class="btn btn-secondary btn-sm" type="button" onclick="window.FirebaseClient.signOut()">Keluar</button></div>` : '';
     return `<div class="app-shell">
       <aside class="sidebar">
-        <div class="sidebar-brand"><a href="tukin.html#dashboard" aria-label="Buka Dashboard Tukin"><img src="assets/img/logo-pkp.png?v=2" alt="Kementerian PKP"></a></div>
+        <div class="sidebar-brand"><a href="${window.UserAccess?.homeHref?.() || 'tukin.html#dashboard'}" aria-label="Buka menu utama"><img src="assets/img/logo-pkp.png?v=2" alt="Kementerian PKP"></a></div>
         ${navigation(module, view)}
         <div class="sidebar-footer"><div class="sidebar-avatar">${initials}</div><div class="sidebar-footer-copy"><strong>${displayName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</strong>${email ? email.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : 'Kementerian PKP'}</div></div>
       </aside>

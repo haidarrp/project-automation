@@ -155,7 +155,7 @@
   }
 
   function shell(content) {
-    const view = ['dashboard', 'history', 'process'].includes(state.view) ? state.view : 'dashboard';
+    const view = state.view === 'process' && (state.resultFromHistory || state.editingHistoryId) && window.UserAccess.canView('lembur','history') ? 'history' : ['dashboard', 'history', 'process'].includes(state.view) ? state.view : 'dashboard';
     const viewLabel = view === 'dashboard' ? 'Dashboard' : view === 'history' ? 'Riwayat' : 'Proses Lembur';
     return window.AppShell.render({
       module: 'lembur',
@@ -559,6 +559,7 @@
   }
 
   async function generateDocs() {
+    if (!window.UserAccess.assert('lembur',state.editingHistoryId?'history.edit':'process.generate')) return;
     if (state.busy) return;
     state.busy = true; render();
     try {
@@ -602,6 +603,7 @@
   }
 
   async function download(kind) {
+    if (!window.UserAccess.assert('lembur','history.download')) return;
     const run = state.currentRun || {period:state.period,employees:state.employees,holidays:state.holidays};
     if (!run.employees?.length) return;
     try {
@@ -644,6 +646,7 @@
   }
 
   async function editHistory(id) {
+    if (!window.UserAccess.assert('lembur','history.edit')) return;
     try {
       const run = await storage.getRun(id);
       if (!run) throw new Error('Riwayat tidak ditemukan atau sudah dihapus.');
@@ -683,6 +686,7 @@
   }
 
   async function deleteHistory(id) {
+    if (!window.UserAccess.assert('lembur','history.delete')) return;
     try {
       const run = await storage.getRun(id);
       if (!run) throw new Error('Riwayat tidak ditemukan atau sudah dihapus.');
@@ -766,10 +770,11 @@
   });
 
   async function init() {
-    await window.FirebaseClient.requireAuth();
+    if (!(await window.UserAccess.requireModule('lembur'))) return;
     await window.AppSettingsService?.loadAndApply?.();
     applyHashRoute();
-    await storage.migrateLegacyOnce?.();
+    if (!window.UserAccess.canView('lembur',state.view)) { state.view=window.UserAccess.firstView('lembur'); history.replaceState(null,'',`lembur.html#${state.view}`); }
+    if (window.UserAccess.can('lembur','process.generate')) await storage.migrateLegacyOnce?.();
     state.historyBusy = state.view === 'history' || state.view === 'dashboard';
     historyUnsubscribe = storage.subscribeHistory?.((history) => {
       state.history = history;

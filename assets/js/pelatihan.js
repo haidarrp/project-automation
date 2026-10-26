@@ -442,12 +442,52 @@
       <div class="training-note-box">${participant.note ? esc(participant.note) : '<span>Belum ada catatan peserta.</span>'}</div>
       <div class="training-document-head"><div><div class="training-list-title">Dokumen Pelatihan</div><p>Metadata dokumen melekat pada pegawai dan pelatihan. File fisik belum disimpan oleh modul ini.</p></div><button class="btn btn-secondary btn-sm" type="button" data-add-training-document="${esc(training.id)}" data-employee-id="${esc(employeeId)}">+ Tambah Dokumen</button></div>
       <div class="training-history-list">${documents.length ? documents.map((doc) => `<div class="training-document-row"><div><strong>${esc(doc.name || doc.type || 'Dokumen')}</strong><span>${esc(doc.type || 'Dokumen Lainnya')}${doc.number ? ` · No. ${esc(doc.number)}` : ''}${doc.note ? `<br>${esc(doc.note)}` : ''}</span></div><div class="training-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-edit-training-document="${esc(doc.id)}" data-training-id="${esc(training.id)}" data-employee-id="${esc(employeeId)}">Edit</button><button class="btn btn-danger btn-sm" type="button" data-delete-training-document="${esc(doc.id)}" data-training-id="${esc(training.id)}" data-employee-id="${esc(employeeId)}">Hapus</button></div></div>`).join('') : '<div class="training-participant-empty">Belum ada metadata dokumen pelatihan.</div>'}</div>
-      <div class="training-modal-actions"><button class="btn btn-secondary" type="button" data-training-edit="${esc(training.id)}">Edit Status/Catatan</button></div>
+      <div class="training-modal-actions"><button class="btn btn-secondary" type="button" data-participants-edit="${esc(training.id)}">Edit Status/Catatan</button></div>
     </aside>`;
+  }
+
+  function participantsModal() {
+    const training = state.modal?.training || {};
+    const participants = [...(state.modal?.participants?.values() || [])];
+    return `<div class="training-modal-backdrop" data-action="close-modal"><div class="training-modal" role="dialog" aria-modal="true" data-modal-panel>
+      <div class="training-modal-head"><div><h3>Edit Status & Catatan Peserta</h3><p>${esc(training.name || '')} — mengubah status dan catatan tanpa izin edit data pelatihan.</p></div><button class="icon-btn" type="button" data-action="close-modal">×</button></div>
+      <div class="training-participant-list training-participant-list-rich">${participants.map(participant => `<div class="training-participant-option training-participant-rich">
+        <strong>${esc(employeeName(participant.employeeId) || 'Pegawai')}</strong>
+        <div class="training-participant-fields"><div class="field"><label>Status</label><select data-participant-status-select="${esc(participant.employeeId)}">${TRAINING_STATUSES.map(v=>`<option value="${esc(v)}" ${participant.status===v?'selected':''}>${esc(v)}</option>`).join('')}</select></div>
+        <div class="field"><label>Catatan</label><input data-participant-note="${esc(participant.employeeId)}" value="${esc(participant.note||'')}"></div></div>
+      </div>`).join('')}</div><div class="training-modal-actions"><button class="btn btn-secondary" type="button" data-action="close-modal">Batal</button><button class="btn btn-primary" type="button" data-action="save-training-participants">Simpan Status & Catatan</button></div></div></div>`;
+  }
+
+  function openParticipantsModal(id) {
+    if (!window.UserAccess.assert('pelatihan','participants.edit')) return;
+    const training = state.trainings.find(row=>row.id===id);
+    if (!training) return;
+    state.drawer=null;
+    state.modal={mode:'participants',training:{...training},participants:new Map((training.participants||[]).map(item=>[item.employeeId,{...item,documents:(item.documents||[]).map(doc=>({...doc}))}]))};
+    render();
+  }
+
+  async function saveParticipants(button) {
+    if (!window.UserAccess.assert('pelatihan','participants.edit') || state.modal?.mode!=='participants') return;
+    const original=state.trainings.find(t=>t.id===state.modal.training.id);
+    if (!original) return;
+    const participants=(original.participants||[]).map(item=>({
+      ...item,
+      status:String(document.querySelector(`[data-participant-status-select="${CSS.escape(item.employeeId)}"]`)?.value||item.status||'Diusulkan'),
+      note:String(document.querySelector(`[data-participant-note="${CSS.escape(item.employeeId)}"]`)?.value||'').trim()
+    }));
+    button.disabled=true;
+    try{
+      await db().collection('trainings').doc(original.id).set({participants,updatedAt:serverTimestamp(),updatedBy:user()?.email||''},{merge:true});
+      await audit('UPDATE_TRAINING_PARTICIPANTS',`trainings/${original.id}`,`${original.name} · status dan catatan ${participants.length} peserta`);
+      state.modal=null;
+      await loadData();showToast('Status dan catatan peserta berhasil diperbarui.');
+    }catch(error){button.disabled=false;alert('Gagal memperbarui status peserta: '+(error.message||error));}
   }
 
   function trainingModal() {
     if (!state.modal) return '';
+    if (state.modal.mode==='participants') return participantsModal();
     const training = state.modal.training || {};
     const participants = state.modal.participants || new Map();
     const employees = activeEmployees();
@@ -469,8 +509,8 @@
             return `<div class="training-participant-option training-participant-rich" data-participant-row data-search-name="${esc(employee.name.toLowerCase())}">
               <label class="training-participant-identity"><input type="checkbox" data-participant-id="${esc(employee.id)}" ${selected ? 'checked' : ''}><span><strong>${esc(employee.name)}</strong><small>${employee.nip ? `NIP ${esc(employee.nip)}` : 'NIP belum tersedia'}</small></span></label>
               <div class="training-participant-fields ${selected ? '' : 'hidden'}" data-participant-fields="${esc(employee.id)}">
-                <div class="field"><label>Status</label><select data-participant-status-select="${esc(employee.id)}">${TRAINING_STATUSES.map((status) => `<option value="${esc(status)}" ${(participant?.status || 'Diusulkan') === status ? 'selected' : ''}>${esc(status)}</option>`).join('')}</select></div>
-                <div class="field"><label>Catatan</label><input type="text" data-participant-note="${esc(employee.id)}" value="${esc(participant?.note || '')}" placeholder="Opsional"></div>
+                <div class="field"><label>Status</label><select data-participant-status-select="${esc(employee.id)}" ${window.UserAccess.can('pelatihan','participants.edit')?'':'disabled'}>${TRAINING_STATUSES.map((status) => `<option value="${esc(status)}" ${(participant?.status || 'Diusulkan') === status ? 'selected' : ''}>${esc(status)}</option>`).join('')}</select></div>
+                <div class="field"><label>Catatan</label><input type="text" data-participant-note="${esc(employee.id)}" ${window.UserAccess.can('pelatihan','participants.edit')?'':'disabled'} value="${esc(participant?.note || '')}" placeholder="Opsional"></div>
               </div>
             </div>`;
           }).join('') : '<div class="training-participant-empty">Master pegawai belum tersedia.</div>'}
@@ -562,12 +602,14 @@
   }
 
   function openAddModal() {
+    if (!window.UserAccess.assert('pelatihan','data.create')) return;
     state.drawer = null;
     state.modal = { training: {}, participants: new Map() };
     render();
   }
 
   function openEditModal(id) {
+    if (!window.UserAccess.assert('pelatihan','data.edit')) return;
     const training = state.trainings.find((item) => item.id === id);
     if (!training) return;
     state.drawer = null;
@@ -589,6 +631,7 @@
   }
 
   async function saveTraining(button) {
+    if (!window.UserAccess.assert('pelatihan',state.modal?.training?.id?'data.edit':'data.create')) return;
     if (!state.modal) return;
     const name = String(document.getElementById('training-name')?.value || '').trim();
     const organizer = String(document.getElementById('training-organizer')?.value || '').trim();
@@ -597,8 +640,8 @@
     const participantIds = [...state.modal.participants.keys()];
     const participants = participantIds.map((employeeId) => {
       const existing = state.modal.participants.get(employeeId) || normalizeParticipant({}, employeeId);
-      const status = String(document.querySelector(`[data-participant-status-select="${CSS.escape(employeeId)}"]`)?.value || existing.status || 'Diusulkan');
-      const note = String(document.querySelector(`[data-participant-note="${CSS.escape(employeeId)}"]`)?.value || '').trim();
+      const status = window.UserAccess.can('pelatihan','participants.edit') ? String(document.querySelector(`[data-participant-status-select="${CSS.escape(employeeId)}"]`)?.value || existing.status || 'Diusulkan') : existing.status || 'Diusulkan';
+      const note = window.UserAccess.can('pelatihan','participants.edit') ? String(document.querySelector(`[data-participant-note="${CSS.escape(employeeId)}"]`)?.value || '').trim() : existing.note || '';
       return normalizeParticipant({ ...existing, employeeId, status, note }, employeeId);
     });
 
@@ -648,6 +691,7 @@
   }
 
   async function deleteTraining(id) {
+    if (!window.UserAccess.assert('pelatihan','data.delete')) return;
     const training = state.trainings.find((item) => item.id === id);
     if (!training) return;
     const ok = window.confirm(`Hapus arsip pelatihan "${training.name}"? Data status, catatan, dan metadata dokumen peserta pada pelatihan ini juga akan terhapus.`);
@@ -665,6 +709,7 @@
   }
 
   function openDocumentModal(trainingId, employeeId, documentId) {
+    if (!window.UserAccess.assert('pelatihan',documentId?'documents.edit':'documents.create')) return;
     const training = state.trainings.find((item) => item.id === trainingId);
     if (!training) return;
     const participant = participantFor(training, employeeId);
@@ -674,6 +719,7 @@
   }
 
   async function saveTrainingDocument(button) {
+    if (!window.UserAccess.assert('pelatihan',state.documentModal?.document?.id?'documents.edit':'documents.create')) return;
     const ctx = state.documentModal;
     if (!ctx) return;
     const training = state.trainings.find((item) => item.id === ctx.trainingId);
@@ -720,6 +766,7 @@
   }
 
   async function deleteTrainingDocument(trainingId, employeeId, documentId) {
+    if (!window.UserAccess.assert('pelatihan','documents.delete')) return;
     const training = state.trainings.find((item) => item.id === trainingId);
     if (!training) return;
     const participant = participantFor(training, employeeId);
@@ -817,6 +864,7 @@
     if (action === 'close-document-modal') { state.documentModal = null; render(); return; }
     if (action === 'close-drawer') { state.drawer = null; render(); return; }
     if (action === 'save-training') { saveTraining(event.target.closest('[data-action]')); return; }
+    if (action === 'save-training-participants') { saveParticipants(event.target.closest('[data-action]')); return; }
     if (action === 'save-training-document') { saveTrainingDocument(event.target.closest('[data-action]')); return; }
 
     const employeeDetail = event.target.closest?.('[data-employee-detail]')?.dataset.employeeDetail;
@@ -841,6 +889,9 @@
     const deleteDoc = event.target.closest?.('[data-delete-training-document]');
     if (deleteDoc) { deleteTrainingDocument(deleteDoc.dataset.trainingId, deleteDoc.dataset.employeeId, deleteDoc.dataset.deleteTrainingDocument); return; }
 
+    const participantEdit = event.target.closest?.('[data-participants-edit]')?.dataset.participantsEdit;
+    if (participantEdit) { openParticipantsModal(participantEdit); return; }
+
     const trainingEdit = event.target.closest?.('[data-training-edit]')?.dataset.trainingEdit;
     if (trainingEdit) { openEditModal(trainingEdit); return; }
 
@@ -858,8 +909,12 @@
   });
 
   async function init() {
-    await window.FirebaseClient.requireAdmin();
+    if (!(await window.UserAccess.requireModule('pelatihan'))) return;
     state.view = viewFromHash();
+    if (!location.hash || !window.UserAccess.canView('pelatihan',state.view)) {
+      state.view = window.UserAccess.firstView('pelatihan') || 'dashboard';
+      history.replaceState(null, '', '#'+state.view);
+    }
     if (!location.hash) history.replaceState(null, '', '#dashboard');
     await loadData();
   }

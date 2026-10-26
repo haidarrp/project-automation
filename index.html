@@ -3,11 +3,38 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="refresh" content="0; url=tukin.html#dashboard">
-  <title>Mengarahkan ke Dashboard Tukin - Pusdatin PKP</title>
-  <script>location.replace('tukin.html#dashboard');</script>
+  <meta name="theme-color" content="#17191c">
+  <title>Beranda - Pusdatin PKP</title>
+  <link rel="icon" href="assets/img/logo-pkp-mark.png" type="image/png">
+  <link rel="stylesheet" href="assets/css/styles.css?v=13">
 </head>
 <body>
-  <p>Mengarahkan ke <a href="tukin.html#dashboard">Dashboard Tunjangan Kinerja</a>...</p>
+  <main id="app"><section class="app-boot" aria-live="polite">Memeriksa hak akses aplikasi...</section></main>
+  <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-auth-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore-compat.js" defer></script>
+  <script src="assets/js/firebase-config.js?v=2" defer></script>
+  <script src="assets/js/firebase-client.js?v=7" defer></script>
+  <script src="assets/js/user-access.js?v=2" defer></script>
+  <script>
+  document.addEventListener('DOMContentLoaded',async()=>{
+    const root=document.getElementById('app');
+    try{
+      await window.FirebaseClient.requireAuth();
+      await window.UserAccess.load();
+      const destination=window.UserAccess.homeHref();
+      if(destination!=='index.html'){
+        location.replace(destination);
+        return;
+      }
+      root.innerHTML='<section class="firebase-auth-page"><div class="firebase-auth-card"><h1>Belum Ada Fitur Aktif</h1><p>Akun Anda belum memiliki hak akses ke modul apa pun. Hubungi administrator untuk mengaktifkan fitur.</p><button class="btn btn-secondary" type="button" id="no-access-signout">Keluar</button></div></section>';
+      document.getElementById('no-access-signout').addEventListener('click',()=>window.FirebaseClient.signOut());
+    }catch(error){
+      root.innerHTML='<section class="firebase-auth-page"><div class="firebase-auth-card"><h1>Hak Akses Tidak Tersedia</h1><p>Hak akses gagal diverifikasi. Periksa koneksi Firestore atau hubungi administrator aplikasi.</p><button class="btn btn-secondary" type="button" id="auth-retry">Coba Lagi</button></div></section>';
+      document.getElementById('auth-retry').addEventListener('click',()=>location.reload());
+      console.error('Beranda gagal memuat hak akses:',error);
+    }
+  });
+  </script>
 </body>
 </html>

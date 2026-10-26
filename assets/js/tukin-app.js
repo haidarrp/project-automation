@@ -153,7 +153,7 @@
   }
 
   function shell(content) {
-    const view = ['dashboard', 'history', 'process'].includes(state.view) ? state.view : 'dashboard';
+    const view = state.view === 'process' && state.editingHistoryId && window.UserAccess.canView('tukin','history') ? 'history' : ['dashboard', 'history', 'process'].includes(state.view) ? state.view : 'dashboard';
     const leaf = view === 'dashboard' ? 'Dashboard' : view === 'history' ? 'Riwayat' : 'Proses Tukin';
     return window.AppShell.render({
       module: 'tukin',
@@ -530,6 +530,7 @@
   }
 
   async function calculate() {
+    if (!window.UserAccess.assert('tukin','process.calculate')) return;
     if (!state.files.length || state.busy) return;
     if (!validateRamadan()) return;
     state.busy = true;
@@ -569,6 +570,7 @@
   }
 
   async function saveCurrentRun(generatedName) {
+    if (!window.UserAccess.assert('tukin',state.editingHistoryId?'history.edit':'process.save')) return;
     const isEdit = Boolean(state.editingHistoryId);
     const timestamp = new Date().toISOString();
     const run = {
@@ -599,6 +601,7 @@
   }
 
   async function saveRun() {
+    if (!window.UserAccess.assert('tukin',state.editingHistoryId?'history.edit':'process.save')) return;
     if (state.busy || !state.employees.length) return;
     state.busy = true;
     state.busyAction = 'save';
@@ -672,6 +675,7 @@
   }
 
   async function downloadRun() {
+    if (!window.UserAccess.can('tukin','history.download') && !window.UserAccess.assert('tukin','process.save')) return;
     if (state.busy || !state.employees.length) return;
     state.busy = true;
     state.busyAction = 'download';
@@ -829,6 +833,7 @@
   }
 
   async function editHistory(id) {
+    if (!window.UserAccess.assert('tukin','history.edit')) return;
     state.historyBusy = true;
     render();
     try {
@@ -885,6 +890,7 @@
   }
 
   async function downloadHistory(id) {
+    if (!window.UserAccess.assert('tukin','history.download')) return;
     if (state.historyBusy || state.busy) return;
     state.historyBusy = true;
     render();
@@ -918,6 +924,7 @@
   }
 
   async function deleteHistory(id) {
+    if (!window.UserAccess.assert('tukin','history.delete')) return;
     const item = state.history.find((run) => run.id === id);
     if (item && !storage.canManage?.(item)) {
       alert('Riwayat ini dibuat oleh akun lain dan hanya dapat dihapus oleh pembuat atau administrator.');
@@ -1256,14 +1263,15 @@
   });
 
   async function init() {
-    await window.FirebaseClient.requireAuth();
+    if (!(await window.UserAccess.requireModule('tukin'))) return;
     await window.AppSettingsService?.loadAndApply?.();
     try { await microsoftAuth?.initialize?.(); } catch (error) { console.warn('Inisialisasi Microsoft gagal:', error); }
     setViewFromHash();
+    if (!window.UserAccess.canView('tukin',state.view)) {state.view=window.UserAccess.firstView('tukin');history.replaceState(null,'',`tukin.html#${state.view}`);}
     if (!location.hash) history.replaceState(null, '', 'tukin.html#dashboard');
     state.historyBusy = state.view === 'history' || state.view === 'dashboard';
     render();
-    await storage.migrateLegacyOnce?.();
+    if (window.UserAccess.can('tukin','process.save')) await storage.migrateLegacyOnce?.();
     historyUnsubscribe = storage.subscribeRuns?.((history) => {
       state.history = history;
       state.historyLoaded = true;

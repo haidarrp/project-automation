@@ -838,6 +838,7 @@
   }
 
   function openLeaveModal(id) {
+    if (!window.UserAccess.assert('cuti',id?'data.edit':'data.create')) return;
     const existing = id ? state.leaves.find((item) => item.id === id) : null;
     state.drawer = null;
     state.modal = {
@@ -887,6 +888,7 @@
   }
 
   async function saveLeave(button) {
+    if (!window.UserAccess.assert('cuti',state.modal?.record?.id?'data.edit':'data.create')) return;
     if (!state.modal) return;
     const employeeId = String(document.getElementById('leave-employee')?.value || '');
     const leaveType = String(document.getElementById('leave-type')?.value || '');
@@ -959,6 +961,7 @@
   }
 
   async function deleteLeave(id) {
+    if (!window.UserAccess.assert('cuti','data.delete')) return;
     const item = state.leaves.find((row) => row.id === id);
     if (!item) return;
     if (!window.confirm(`Hapus data ${item.leaveType} atas nama ${employeeIdentity(item.employeeId).name || 'pegawai'}?`)) return;
@@ -987,6 +990,7 @@
   }
 
   function openBalanceModal(employeeId) {
+    if (!window.UserAccess.assert('cuti','saldo.edit_balance')) return;
     state.balanceModal = { employeeId, year: Number(state.filters.year) };
     render();
   }
@@ -1001,6 +1005,7 @@
   }
 
   async function saveBalance(button) {
+    if (!window.UserAccess.assert('cuti','saldo.edit_balance')) return;
     const ctx = state.balanceModal;
     if (!ctx) return;
     const entitlement = Number(String(document.getElementById('balance-entitlement')?.value || ''));
@@ -1036,6 +1041,7 @@
   }
 
   function openDocumentModal(leaveId, documentId) {
+    if (!window.UserAccess.assert('cuti',documentId?'documents.edit':'documents.create')) return;
     const item = state.leaves.find((row) => row.id === leaveId);
     if (!item) return;
     const doc = documentId ? (item.documents || []).find((row) => row.id === documentId) : null;
@@ -1044,6 +1050,7 @@
   }
 
   async function saveLeaveDocument(button) {
+    if (!window.UserAccess.assert('cuti',state.documentModal?.document?.id?'documents.edit':'documents.create')) return;
     const ctx = state.documentModal;
     if (!ctx) return;
     const item = state.leaves.find((row) => row.id === ctx.leaveId);
@@ -1115,6 +1122,7 @@
   }
 
   async function loadLeaveDocumentPreviews(leaveId) {
+    if (!window.UserAccess.can('cuti','documents.view')) { render(); return; }
     const item = state.leaves.find((row) => row.id === leaveId);
     if (!item) {
       render();
@@ -1170,6 +1178,7 @@
   }
 
   async function previewLeaveDocument(leaveId, documentId) {
+    if (!window.UserAccess.assert('cuti','documents.view')) return;
     const item = state.leaves.find((row) => row.id === leaveId);
     const doc = (item?.documents || []).find((row) => row.id === documentId);
     if (!doc?.file?.driveId || !doc?.file?.itemId) {
@@ -1219,6 +1228,7 @@
   }
 
   async function downloadLeaveDocument(leaveId, documentId, button) {
+    if (!window.UserAccess.assert('cuti','documents.download')) return;
     const item = state.leaves.find((row) => row.id === leaveId);
     const doc = (item?.documents || []).find((row) => row.id === documentId);
     if (!doc?.file?.driveId || !doc?.file?.itemId) {
@@ -1246,6 +1256,7 @@
   }
 
   async function deleteLeaveDocument(leaveId, documentId) {
+    if (!window.UserAccess.assert('cuti','documents.delete')) return;
     const item = state.leaves.find((row) => row.id === leaveId);
     if (!item) return;
     const doc = (item.documents || []).find((row) => row.id === documentId);
@@ -1287,6 +1298,7 @@
   }
 
   function printReport() {
+    if (!window.UserAccess.assert('cuti','laporan.print')) return;
     window.print();
   }
 
@@ -1408,8 +1420,12 @@
   });
 
   async function init() {
-    await window.FirebaseClient.requireAdmin();
+    if (!(await window.UserAccess.requireModule('cuti'))) return;
     state.view = viewFromHash();
+    if (!location.hash || !window.UserAccess.canView('cuti',state.view)) {
+      state.view = window.UserAccess.firstView('cuti') || 'dashboard';
+      history.replaceState(null, '', '#'+state.view);
+    }
     if (!location.hash) history.replaceState(null, '', '#dashboard');
     await loadData();
   }
