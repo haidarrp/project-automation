@@ -76,9 +76,9 @@
       leave:days.filter(d=>d.leaves.length).length,travel:days.filter(d=>d.official.length).length,
       absence:days.filter(d=>!d.present&&isAbsenceStatus(d.status,d.flags)).length,
       manual:days.filter(d=>d.manualValue!==null&&!d.nonWorking).length,
-      missing:!employee.files?.length&&!employee.missingAcknowledged,
+      missing:false,
       missingType:!employee.jenisPegawai,coverage:!!employee.fileWarnings?.length&&!employee.coverageAcknowledged,
-      status:issues||(!employee.files?.length&&!employee.missingAcknowledged)||!employee.jenisPegawai||(employee.fileWarnings?.length&&!employee.coverageAcknowledged)?'Perlu verifikasi':'Siap'};
+      status:issues||!employee.jenisPegawai||(employee.fileWarnings?.length&&!employee.coverageAcknowledged)?'Perlu verifikasi':'Siap'};
   }
   function overall(employees){
     const s={employees:employees.length,days:0,issues:0,manual:0,missing:0,ready:0};

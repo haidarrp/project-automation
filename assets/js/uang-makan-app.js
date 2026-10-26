@@ -42,7 +42,7 @@ function fail(error){state.error=String(error?.message||error);state.message='';
 function notify(s){state.error='';state.message=String(s||'');render();}
 function summary(){return R.overall(state.employees);}
 function pendingCount(){return state.employees.filter(e=>R.overview(e).status!=='Siap').length;}
-function makeEmptyEmployee(e){return {...e,files:[],fileWarnings:[],coverageAcknowledged:false,coverageReason:'',missingAcknowledged:false,missingReason:'',days:{}};}
+function makeEmptyEmployee(e){return {...e,files:[],fileWarnings:[],coverageAcknowledged:false,coverageReason:'',days:{}};}
 function resetProcess(){state.files=[];state.parsed=[];state.employees=[];state.leaves=[];state.assignments=[];state.supportLoaded=false;state.modalId='';state.modalDate='';state.savedRun=null;state.dirty=false;state.search='';state.filter='all';state.step=1;clearNotice();}
 function pageTitle(view){return {process:'Proses Uang Makan',dashboard:'Dashboard Uang Makan',history:'Riwayat Uang Makan'}[view]||'Uang Makan';}
 function metric(label,value,description){return `<div class="um-panel um-kpi"><small>${esc(label)}</small><strong>${esc(value)}</strong><span>${esc(description||'')}</span></div>`;}
@@ -79,7 +79,7 @@ function periodPanel(){
 }
 function uploadPanel(){
  return `<section class="um-panel"><div class="um-panel-title"><div><h2>Unggah Absensi — ${R.periodLabel(state.year,state.month)}</h2><p>Pilih file absensi per pegawai seperti yang digunakan pada modul Tukin. Dapat memilih banyak file sekaligus.</p></div><span class="um-pill">${state.files.length} file</span></div>
- <div class="um-note" style="margin-bottom:14px">Hari Sabtu–Minggu dan ${holidayCount()} tanggal merah tambahan tidak dihitung meskipun terdapat presensi.</div>
+ <div class="um-note" style="margin-bottom:14px">Hanya pegawai yang memiliki file absensi diunggah yang dihitung dan masuk Excel. Pegawai di master tanpa file tidak disertakan. Hari Sabtu–Minggu dan ${holidayCount()} tanggal merah tambahan tetap tidak dihitung.</div>
  <div id="um-drop" class="um-drop" role="region" aria-label="Area unggah absensi"><div class="um-drop-icon">⇧</div><strong>Tarik file Excel absensi ke sini</strong><p>Format .xlsx atau .xls, satu atau beberapa file per pegawai.</p><button class="um-btn" type="button" data-um-action="upload">Pilih File</button><input id="um-files" type="file" accept=".xls,.xlsx" multiple hidden></div>
  ${state.files.length?`<div style="margin-top:13px">${state.files.map((f,i)=>`<div class="um-file"><span>📄</span><strong title="${esc(f.name)}">${esc(f.name)}</strong><small>${(f.size/1024).toFixed(1)} KB</small><button class="um-btn small" type="button" data-um-action="remove-file" data-index="${i}" aria-label="Hapus file ${esc(f.name)}">Hapus</button></div>`).join('')}</div>`:''}
  <div class="um-actions"><button class="um-btn" type="button" data-um-action="back">← Kembali</button><div class="um-row"><button class="um-btn gold" type="button" data-um-action="clear-files" ${state.files.length?'':'disabled'}>Bersihkan</button><button class="um-btn primary" type="button" data-um-action="calculate" ${!state.files.length||state.busy?'disabled':''}>${state.busy?'Memproses...':'Hitung & Sinkronkan →'}</button></div></div></section>`;
@@ -94,22 +94,22 @@ function visibleEmployees(){
 function verifyPanel(){
  const s=summary();
  return `${kpis(s)}<section class="um-panel"><div class="um-panel-title"><div><h2>Validasi & Verifikasi Uang Makan</h2><p>Rekap kehadiran fisik pegawai untuk sheet PUSDATIN. Klik Detail untuk memeriksa setiap tanggal.</p></div><div class="um-row"><button class="um-btn small" data-um-action="sync" type="button" ${state.busy?'disabled':''}>⟳ Sinkronkan Cuti & Surat Tugas</button></div></div>
- ${pendingCount()?`<div class="um-note warn">Terdapat ${pendingCount()} pegawai yang perlu pemeriksaan, konfirmasi cakupan file, atau kelengkapan jenis pegawai. Ekspor final hanya tersedia setelah semua status siap.</div>`:''}
+ ${pendingCount()?`<div class="um-note warn">Terdapat ${pendingCount()} pegawai dari berkas yang diunggah yang perlu pemeriksaan, konfirmasi cakupan tanggal, atau kelengkapan jenis pegawai. Ekspor final tersedia setelah pegawai yang diproses siap.</div>`:''}
  <div class="um-note" style="margin-bottom:12px">Periode ${esc(R.periodLabel(state.year,state.month))}: Sabtu–Minggu dan ${holidayCount()} tanggal merah tambahan otomatis tidak memperoleh uang makan.</div>
  <div class="um-toolbar"><input class="um-search" id="um-search" placeholder="Cari nama pegawai atau NIP..." value="${esc(state.search)}"><div class="um-row"><select id="um-filter"><option value="all" ${state.filter==='all'?'selected':''}>Semua pegawai</option><option value="pending" ${state.filter==='pending'?'selected':''}>Perlu Verifikasi</option><option value="ready" ${state.filter==='ready'?'selected':''}>Siap</option></select><span class="um-pill good">Hitung berdasarkan kehadiran fisik</span></div></div>
  <div class="um-table-outer"><table class="um-table"><thead><tr><th>No.</th><th>Nama / NIP</th><th>Anak Satker</th><th>Jenis</th><th>Hari Hadir</th><th>Cuti</th><th>Dinas Luar</th><th>Hari Uang Makan</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
- ${visibleEmployees().length?visibleEmployees().map((e,i)=>{const a=R.overview(e);return `<tr><td>${i+1}</td><td><div class="name">${esc(e.name)}</div><div class="sub">${esc(e.nip)}</div></td><td>${esc(e.anakSatker||'-')}</td><td>${esc(e.jenisPegawai||'-')}</td><td class="number">${a.present}</td><td class="number">${a.leave}</td><td class="number">${a.travel}</td><td class="number">${a.days}</td><td><span class="um-pill ${a.status==='Siap'?'good':'warn'}">${esc(a.status)}</span>${a.issues?`<div class="sub">${a.issues} tanggal perlu cek</div>`:''}</td><td><button type="button" class="um-btn small" data-um-action="verify" data-id="${esc(e.id)}">Detail →</button></td></tr>`;}).join(''):`<tr><td colspan="10" class="um-empty">Tidak ada pegawai yang sesuai filter.</td></tr>`}
- </tbody></table></div><div class="um-summary"><span>${visibleEmployees().length} dari ${state.employees.length} pegawai</span><span><b>${s.days} hari</b> uang makan · ${s.issues} tanggal belum diperiksa</span></div>
+ ${visibleEmployees().length?visibleEmployees().map((e,i)=>{const a=R.overview(e);return `<tr><td>${i+1}</td><td><div class="name">${esc(e.name)}</div><div class="sub">${esc(e.nip)}</div></td><td>${esc(e.anakSatker||'-')}</td><td>${esc(e.jenisPegawai||'-')}</td><td class="number">${a.present}</td><td class="number">${a.leave}</td><td class="number">${a.travel}</td><td class="number">${a.days}</td><td><span class="um-pill ${a.status==='Siap'?'good':'warn'}">${esc(a.status)}</span>${a.issues?`<div class="sub">${a.issues} tanggal perlu cek</div>`:''}</td><td><button type="button" class="um-btn small" data-um-action="verify" data-id="${esc(e.id)}">Detail →</button></td></tr>`;}).join(''):`<tr><td colspan="10" class="um-empty">Tidak ada pegawai dari file unggahan yang sesuai filter.</td></tr>`}
+ </tbody></table></div><div class="um-summary"><span>${visibleEmployees().length} dari ${state.employees.length} pegawai hasil unggah</span><span><b>${s.days} hari</b> uang makan · ${s.issues} tanggal belum diperiksa</span></div>
  <div class="um-actions"><button type="button" class="um-btn" data-um-action="back">← Kembali ke Unggah</button><div class="um-row"><button type="button" class="um-btn" data-um-action="restart">Ubah Periode</button><button type="button" class="um-btn primary" data-um-action="preview">Pratinjau Output Excel →</button></div></div></section>`;
 }
-function kpis(s){return `<div class="um-kpis">${metric('Pegawai Aktif',s.employees,'Sesuai Master Pegawai')}${metric('Hari Uang Makan',s.days,'Jumlah seluruh pegawai')}${metric('Tanggal Perlu Cek',s.issues,'Belum diverifikasi')}${metric('Koreksi Manual',s.manual,'Perubahan bernotasi')}</div>`;}
+function kpis(s){return `<div class="um-kpis">${metric('Pegawai Diproses',s.employees,'Dari file absensi yang diunggah')}${metric('Hari Uang Makan',s.days,'Total pegawai yang diproses')}${metric('Tanggal Perlu Cek',s.issues,'Belum diverifikasi')}${metric('Koreksi Manual',s.manual,'Perubahan bernotasi')}</div>`;}
 function previewPanel(){
  const s=summary(),pending=pendingCount(),ready=pending===0;
  const shown=state.employees.slice(0,Math.min(12,state.employees.length));
  return `${kpis(s)}<section class="um-panel"><div class="um-panel-title"><div><h2>Pratinjau Sheet PUSDATIN</h2><p>Kolom tanggal diisi angka 1 apabila memperoleh uang makan, dan kosong untuk tanggal lainnya.</p></div><span class="um-pill ${ready?'good':'warn'}">${ready?'Siap Ekspor':`${pending} pegawai belum siap`}</span></div>
- ${!ready?`<div class="um-note warn" style="margin-bottom:13px">Selesaikan verifikasi, konfirmasi file yang tidak tersedia, dan lengkapi jenis pegawai pada Master. Hasil tidak dapat diekspor sebelum selesai.</div>`:''}
+ ${!ready?`<div class="um-note warn" style="margin-bottom:13px">Selesaikan verifikasi dan kelengkapan data pegawai yang tercantum pada file absensi. Pegawai master yang tidak diunggah tidak memengaruhi ekspor.</div>`:''}
  <div class="um-table-outer"><table class="um-table export"><thead><tr><th>No.</th><th>NIP</th><th>Nama</th>${Array.from({length:R.periodDays(state.year,state.month)},(_,i)=>`<th>${i+1}</th>`).join('')}<th>Jumlah</th><th>Unit Kerja</th><th>Bank</th><th>Jenis Pegawai</th></tr></thead><tbody>${shown.map((e,i)=>`<tr><td>${i+1}</td><td>${esc(e.nip)}</td><td class="name">${esc(e.name)}</td>${R.monthDates(state.year,state.month).map(k=>`<td class="number">${e.days[k]?.value===1?'1':''}</td>`).join('')}<td class="number">${R.overview(e).days}</td><td>Pusat Data dan Informasi</td><td>${esc(e.anakSatker||'')}</td><td>${esc(e.jenisPegawai||'')}</td></tr>`).join('')}</tbody></table></div>
- ${state.employees.length>shown.length?`<p class="um-fine" style="margin-top:10px">Menampilkan ${shown.length} pegawai pertama dari ${state.employees.length}. File hasil mencakup seluruh pegawai.</p>`:''}
+ ${state.employees.length>shown.length?`<p class="um-fine" style="margin-top:10px">Menampilkan ${shown.length} pegawai pertama dari ${state.employees.length}. File hasil hanya mencakup pegawai yang diunggah.</p>`:''}
  <div class="um-summary"><span>Format PUSDATIN · D:AH tanggal 1–31 · AI jumlah hari · AM kode bank · ${holidayCount()} tanggal merah tambahan</span><span>Periode ${esc(R.periodLabel(state.year,state.month))}</span></div>
  <div class="um-actions"><button class="um-btn" type="button" data-um-action="back">← Kembali ke Verifikasi</button><div class="um-row"><button class="um-btn" type="button" data-um-action="save" ${!ready||state.busy?'disabled':''}>${state.busy?'Menyimpan...':'Simpan ke Riwayat'}</button><button class="um-btn primary" type="button" data-um-action="export" ${!ready||state.busy?'disabled':''}>Unduh Excel PUSDATIN ↓</button></div></div></section>`;
 }
@@ -139,7 +139,6 @@ function modal(){
  <div class="um-modal-head"><div><h2>${esc(e.name)}</h2><p>${esc(e.nip)} · ${esc(e.jenisPegawai||'Jenis belum dilengkapi')} · Anak Satker ${esc(e.anakSatker||'-')} · ${esc(R.periodLabel(state.year,state.month))}</p></div><button class="um-btn small" type="button" data-um-action="close-modal">Tutup ×</button></div>
  <div class="um-modal-body"><div class="um-row"><span class="um-pill good">${a.days} hari uang makan</span><span class="um-pill ${a.issues?'warn':'good'}">${a.issues} tanggal perlu cek</span><span class="um-pill">${e.files?.length||0} file absensi</span></div>
  ${!e.jenisPegawai?'<div class="um-note warn" style="margin-top:14px">Jenis pegawai belum terisi pada master. Lengkapi melalui menu Administrasi → Master Data.</div>':''}
- ${!e.files?.length?`<div class="um-note warn" style="margin-top:13px">Tidak ditemukan berkas absensi untuk pegawai ini.${e.missingAcknowledged?` Konfirmasi: ${esc(e.missingReason)}`:''}<div class="um-row" style="margin-top:9px"><input class="um-search" style="max-width:370px" id="um-missing-reason" placeholder="Alasan tidak ada berkas absensi" value="${esc(e.missingReason||'')}"><button type="button" class="um-btn small" data-um-action="acknowledge" data-kind="missing">Konfirmasi</button></div></div>`:''}
  ${e.fileWarnings?.length?`<div class="um-note warn" style="margin-top:13px">${e.fileWarnings.map(v=>esc(v)).join(' · ')}${e.coverageAcknowledged?`<div>Sudah ditinjau: ${esc(e.coverageReason||'-')}</div>`:`<div class="um-row" style="margin-top:9px"><input class="um-search" style="max-width:390px" id="um-coverage-reason" placeholder="Catatan verifikasi cakupan absensi"><button type="button" class="um-btn small" data-um-action="acknowledge" data-kind="coverage">Konfirmasi Cakupan</button></div>`}</div>`:''}
  <div class="um-weekday-row">${WEEKDAYS_MONDAY.map(day=>`<span>${day}</span>`).join('')}</div>
  <div class="um-day-grid">${Array.from({length:calendarOffset(keys[0])},()=>'<span class="um-day-placeholder" aria-hidden="true"></span>').join('')}${keys.map(k=>{const d=e.days[k],warn=d.issues.length&&!d.reviewed,cls=d.value===1?'earned':'';
@@ -165,8 +164,8 @@ async function loadMaster(){
      anakSatker:String(x.anakSatker||'').trim(),jenisPegawai:String(x.jenisPegawai||'').toUpperCase(),
      unit:'Pusat Data dan Informasi',order:Number(x.order||9999)};
  }).sort((a,b)=>a.order-b.order||a.name.localeCompare(b.name,'id'));
- if(!state.master.length)throw new Error('Tidak ada pegawai aktif di Master Pegawai.');
- if(state.master.some(e=>!e.name||!e.nip))throw new Error('Master Pegawai memiliki data nama/NIP kosong. Lengkapi sebelum menghitung Uang Makan.');
+ // Data master tidak divalidasi secara global. Hanya pegawai dari berkas yang diunggah
+ // yang perlu dicocokkan dan divalidasi saat proses perhitungan.
 }
 async function getSupportingData(){
  const year=state.year,month=state.month;
@@ -212,15 +211,51 @@ async function calculate(){
   const parsed=await window.UangMakanParser.parseFiles(state.files,state.year,state.month);
   const faulty=parsed.filter(x=>!x.ok);
   if(faulty.length)throw new Error('Beberapa file gagal dibaca:\n'+faulty.map(x=>`${x.fileName}: ${x.error}`).join('\n'));
-  const employees=state.master.map(makeEmptyEmployee),index=new Map(employees.map(e=>[e.id,e]));
-  const errors=[],list=[];
+  // Berkas unggahan adalah satu-satunya sumber daftar pegawai yang diproses.
+  // Master hanya berfungsi sebagai referensi identitas, Anak Satker, dan jenis pegawai.
+  const employees=[],selectedById=new Map(),errors=[],list=[];
   for(const item of parsed){
-    let found=await window.MasterDataService.findByIdentity(item.identity);
-    // Fallback cocokkan nama dengan ketat, tidak memakai string mirip yang ambigu.
-    if(!found){const matches=employees.filter(e=>R.normalizeName(e.name)===R.normalizeName(item.identity.name));
-      if(matches.length===1)found=matches[0];}
-    if(!found||!index.has(found.id)) {errors.push(`${item.fileName}: identitas ${item.identity.name} / ${item.identity.nip||'-'} tidak cocok dengan master aktif.`);continue;}
-    const e=index.get(found.id);e.files.push(item.fileName);list.push({file:item.fileName,employee:e.name});
+    const fileNip=R.normalizeNip(item.identity.nip);
+    const normalizedName=R.normalizeName(item.identity.name);
+    // Utamakan NIP, karena nama bisa sama atau berbeda penulisan pada laporan.
+    const candidates=fileNip
+      ?state.master.filter(e=>e.nip&&e.nip===fileNip)
+      :state.master.filter(e=>e.name&&R.normalizeName(e.name)===normalizedName);
+    let master=candidates.length===1?candidates[0]:null;
+    // Lookup hash tetap mendukung variasi nama/alias yang terdaftar di master.
+    if(!master&&candidates.length===0){
+      const found=await window.MasterDataService.findByIdentity(item.identity);
+      master=state.master.find(e=>e.id===found?.id)||null;
+      // Jangan mencocokkan berdasarkan nama jika NIP di berkas bertentangan.
+      if(master&&fileNip&&master.nip&&master.nip!==fileNip)master=null;
+    }
+    if(!master){
+      errors.push(`${item.fileName}: ${candidates.length>1?'identitas ganda pada master':'identitas tidak ditemukan atau NIP tidak cocok dengan master aktif'} (${item.identity.name} / ${fileNip||'-'}).`);
+      continue;
+    }
+    if(!selectedById.has(master.id)){
+      const e=makeEmptyEmployee({...master,
+        // Izinkan data direktori yang belum lengkap hanya jika ada identitas
+        // pengganti pada berkas absensi yang sama.
+        name:master.name||String(item.identity.name||'').trim(),
+        nip:master.nip||fileNip,
+        order:employees.length+1});
+      if(!e.name||!e.nip){
+        errors.push(`${item.fileName}: nama atau NIP pegawai yang diunggah belum lengkap. Lengkapi identitas pada Master Pegawai / file absensi.`);
+        continue;
+      }
+      selectedById.set(master.id,e);
+      employees.push(e);
+    }
+    const e=selectedById.get(master.id);
+    if(!e)continue;
+    // Hindari dua berkas dengan NIP berbeda digabung hanya karena nama sama.
+    if(fileNip&&e.nip&&fileNip!==e.nip){
+      errors.push(`${item.fileName}: NIP ${fileNip} berbeda dari NIP berkas sebelumnya (${e.nip}) untuk pegawai ${e.name}.`);
+      continue;
+    }
+    e.files.push(item.fileName);
+    list.push({file:item.fileName,employee:e.name});
     const prior=e.days;
     for(const [key,record] of Object.entries(item.rows)){
       if(prior[key]){
@@ -230,7 +265,8 @@ async function calculate(){
       }else prior[key]=record;
     }
   }
-  if(errors.length)throw new Error('Berkas yang tidak dapat dicocokkan harus diperbaiki:\n'+errors.join('\n'));
+  if(errors.length)throw new Error('Periksa identitas hanya pada berkas yang diunggah:\n'+errors.join('\n'));
+  if(!employees.length)throw new Error('Tidak ditemukan pegawai valid dari file absensi yang diunggah.');
   for(const e of employees){
     if(!e.files.length)continue;
     const observed=Object.keys(e.days).sort(),start=R.key(state.year,state.month,1),end=R.key(state.year,state.month,R.periodDays(state.year,state.month));
@@ -241,7 +277,7 @@ async function calculate(){
   state.leaves=supports.leaves;state.assignments=supports.assignments;state.supportLoaded=true;
   state.employees=computeEmployees(employees,state.leaves,state.assignments);
   state.parsed=list;state.step=3;state.savedRun=null;state.dirty=true;
-  state.message=`Berhasil mengolah ${parsed.length} berkas dan ${employees.length} pegawai; cuti dan surat tugas telah disinkronkan.`;
+  state.message=`Berhasil mengolah ${parsed.length} berkas untuk ${employees.length} pegawai yang diunggah. Pegawai master lainnya tidak ikut dihitung; cuti dan surat tugas telah disinkronkan.`;
  }catch(e){fail(e);return;}
  state.busy=false;render();
 }
@@ -269,14 +305,12 @@ function saveDay(){
  state.dirty=true;state.savedRun=null;notify('Verifikasi tanggal berhasil dicatat.');
 }
 function acknowledge(kind){
- if(!permission('process.verify'))return;
+ if(!permission('process.verify')||kind!=='coverage')return;
  const e=findEmployee(state.modalId);if(!e)return;
- const id=kind==='missing'?'um-missing-reason':'um-coverage-reason';
- const reason=String(document.getElementById(id)?.value||'').trim();
+ const reason=String(document.getElementById('um-coverage-reason')?.value||'').trim();
  if(reason.length<5){alert('Isi alasan atau catatan minimal 5 karakter.');return;}
- if(kind==='missing'){e.missingAcknowledged=true;e.missingReason=reason;}
- else {e.coverageAcknowledged=true;e.coverageReason=reason;}
- state.dirty=true;state.savedRun=null;notify('Konfirmasi sudah dicatat.');
+ e.coverageAcknowledged=true;e.coverageReason=reason;
+ state.dirty=true;state.savedRun=null;notify('Konfirmasi cakupan absensi sudah dicatat.');
 }
 function allowFinal(){
  if(!state.employees.length)throw new Error('Belum ada hasil perhitungan.');
