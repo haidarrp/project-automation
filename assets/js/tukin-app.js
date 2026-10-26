@@ -26,6 +26,10 @@
     busy: false,
     busyAction: '',
     drawerEmployeeKey: null,
+    drawerView: 'calendar',
+    drawerFilter: 'all',
+    drawerSelectedDate: null,
+    drawerDraft: null,
     editRecordKey: null,
     editDraft: null,
     editEmployeeKey: null,
@@ -183,7 +187,14 @@
       else body = renderResult();
       body = `${stepper()}${body}`;
     }
+    // Pertahankan posisi gulir modal ketika tanggal, filter atau koreksi diubah.
+    const oldDetailScroll = app.querySelector('.tukin-calendar-scroll');
+    const detailScrollTop = oldDetailScroll?.scrollTop ?? null;
     app.innerHTML = shell(`${sharePointPanel()}${body}`);
+    if (detailScrollTop !== null) {
+      const currentDetailScroll = app.querySelector('.tukin-calendar-scroll');
+      if (currentDetailScroll) currentDetailScroll.scrollTop = detailScrollTop;
+    }
     bind();
   }
 
@@ -386,24 +397,225 @@
     return record?.adjustedPercent !== null && record?.adjustedPercent !== undefined ? 'disesuaikan manual' : '';
   }
 
+  function calendarDates() {
+    const attendance = range();
+    const dates = [];
+    for (let date = new Date(attendance.start); date <= attendance.end; date = rules.addDays(date, 1)) {
+      dates.push({ key: rules.dateKey(date), date });
+    }
+    return dates;
+  }
+
+  function calendarType(record) {
+    if (!record) return 'missing';
+    // Potongan manual pada hari libur tetap harus terlihat di kalender,
+    // agar angka final tidak tersembunyi sebagai tanda libur (—).
+    if (record.isHoliday || record.isWeekend || rules.isSourceHoliday(record.status)) {
+      if (record.adjustedPercent !== null && record.adjustedPercent !== undefined && rules.recordFinalPercent(record) > 0) return 'adjusted';
+      return 'holiday';
+    }
+    if (record.adjustmentConflict?.automatic || record.adjustmentSource === 'conflict') return 'review';
+    if (record.adjustedPercent !== null && record.adjustedPercent !== undefined) return 'adjusted';
+    if (record.needsVerification) return 'review';
+    return rules.recordFinalPercent(record) > 0 ? 'deduct' : 'normal';
+  }
+
+  function calendarTypeText(type) {
+    return ({ normal: 'Tanpa potongan', deduct: 'Ada potongan', review: 'Perlu verifikasi',
+      adjusted: 'Disesuaikan', holiday: 'Libur', missing: 'Belum ada absensi' })[type] || '-';
+  }
+
+  function calendarTypeMatches(record, filter) {
+    if (!record) return false;
+    if (filter === 'all') return true;
+    if (filter === 'deduct') return rules.recordFinalPercent(record) > 0;
+    return calendarType(record) === filter;
+  }
+
+  function calendarDayCaption(record) {
+    if (!record) return 'Tanpa data';
+    const type = calendarType(record);
+    if (type === 'holiday') return 'Libur';
+    if (type === 'review') return 'Perlu cek';
+    if (type === 'adjusted') {
+      if (record.adjustmentSource === 'cuti') return 'Cuti';
+      if (record.adjustmentSource === 'surat_tugas') return 'Surat tugas';
+      return 'Disesuaikan';
+    }
+    if (type === 'deduct') return record.tlPercent > 0 ? record.tlCategory : record.pswCategory || 'Potongan';
+    return 'Normal';
+  }
+
+  function makeCalendarDraft(employeeKey, record) {
+    return {
+      employeeKey,
+      key: record.key,
+      mode: 'keep',
+      percent: rules.recordFinalPercent(record),
+      note: record.adjustmentNote || '',
+      evidence: [...(record.evidence || [])]
+    };
+  }
+
+  function syncCalendarDraftFromForm() {
+    const draft = state.drawerDraft;
+    if (!draft) return;
+    const decision = document.getElementById('tukin-calendar-decision');
+    const percent = document.getElementById('tukin-calendar-percent');
+    const note = document.getElementById('tukin-calendar-note');
+    if (decision) draft.mode = decision.value;
+    if (percent) draft.percent = percent.value;
+    if (note) draft.note = note.value;
+  }
+
+  function ensureCalendarSelection(employee, dates) {
+    const records = dates.map((item) => employee.records?.[item.key]).filter(Boolean);
+    const matching = records.filter((item) => calendarTypeMatches(item, state.drawerFilter));
+    const valid = matching.find((item) => item.key === state.drawerSelectedDate);
+    if (!valid) {
+      const next = matching.find((item) => calendarType(item) === 'review') || matching[0] || null;
+      state.drawerSelectedDate = next?.key || null;
+      state.drawerDraft = null;
+    }
+    const selected = state.drawerSelectedDate ? employee.records?.[state.drawerSelectedDate] : null;
+    if (selected && (state.drawerDraft?.key !== selected.key || state.drawerDraft?.employeeKey !== rules.employeeKey(employee))) {
+      state.drawerDraft = makeCalendarDraft(rules.employeeKey(employee), selected);
+    }
+    return selected;
+  }
+
+  function renderCalendarGrid(employee, dates) {
+    const startOffset = (dates[0].date.getDay() + 6) % 7;
+    const headings = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+    const blanks = Array.from({ length: startOffset }, () => '<span class="tukin-calendar-empty" aria-hidden="true"></span>').join('');
+    const tiles = dates.map(({ key, date }) => {
+      const record = employee.records?.[key];
+      const type = calendarType(record);
+      const visible = calendarTypeMatches(record, state.drawerFilter);
+      const selected = record && key === state.drawerSelectedDate;
+      const caption = calendarDayCaption(record);
+      const amount = record && type !== 'holiday' ? pct(rules.recordFinalPercent(record)) : '—';
+      const month = cfg.MONTHS[date.getMonth()].slice(0, 3).toUpperCase();
+      return `<button type="button" class="tukin-calendar-day ${type}${selected ? ' selected' : ''}${visible ? '' : ' muted'}"
+        ${record && visible ? `data-calendar-day="${esc(key)}"` : 'disabled'}
+        aria-pressed="${selected ? 'true' : 'false'}"
+        aria-label="${esc(rules.formatDate(date, true))}: ${esc(caption)}${record ? ', potongan final ' + pct(rules.recordFinalPercent(record)) : ''}">
+        <span class="tukin-calendar-date"><strong>${date.getDate()}</strong><small>${month}</small></span>
+        <span class="tukin-calendar-amount">${esc(amount)}</span>
+        <span class="tukin-calendar-caption">${esc(caption)}</span>
+      </button>`;
+    }).join('');
+    const endOffset = (7 - (startOffset + dates.length) % 7) % 7;
+    const trailing = Array.from({ length: endOffset }, () => '<span class="tukin-calendar-empty" aria-hidden="true"></span>').join('');
+    const attendance = range();
+    const monthText = attendance.start.getMonth() === attendance.end.getMonth() && attendance.start.getFullYear() === attendance.end.getFullYear()
+      ? `${cfg.MONTHS[attendance.start.getMonth()]} ${attendance.start.getFullYear()}`
+      : `${cfg.MONTHS[attendance.start.getMonth()]} ${attendance.start.getFullYear()} – ${cfg.MONTHS[attendance.end.getMonth()]} ${attendance.end.getFullYear()}`;
+    return `<div class="tukin-calendar-box">
+      <div class="tukin-calendar-box-head"><strong>${esc(monthText)}</strong><span>Periode absensi ${esc(rules.formatPeriodRange(attendance))}</span></div>
+      <div class="tukin-calendar-weekdays">${headings.map((day, i) => `<span class="${i > 4 ? 'weekend' : ''}">${day}</span>`).join('')}</div>
+      <div class="tukin-calendar-grid">${blanks}${tiles}${trailing}</div>
+      <div class="tukin-calendar-foot"><span>Persentase pada kalender menunjukkan <strong>potongan final</strong>, bukan hasil otomatis.</span><span>Tanggal tanpa absensi tidak dianggap 0%.</span></div>
+    </div>`;
+  }
+
+  function renderCalendarTable(employee, dates) {
+    const rows = dates.filter(({ key }) => calendarTypeMatches(employee.records?.[key], state.drawerFilter)).map(({ key, date }) => {
+      const record = employee.records[key];
+      const type = calendarType(record);
+      const note = record.adjustmentNote || record.reason || '-';
+      return `<tr class="${type === 'review' ? 'tukin-row-needs-correction' : ''}${state.drawerSelectedDate === key ? ' tukin-calendar-selected-row' : ''}">
+        <td class="nowrap">${esc(rules.formatDate(date, true))}</td>
+        <td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td>
+        <td>${esc(record.status || '-')}</td>
+        <td>${esc(record.tlCategory)}<div class="card-subtitle">${pct(record.tlPercent)}</div></td>
+        <td>${esc(record.pswCategory)}<div class="card-subtitle">${pct(record.pswPercent)}</div></td>
+        <td class="tukin-pct">${pct(record.autoTotalPercent)}</td>
+        <td class="tukin-pct ${type === 'adjusted' ? 'tukin-ok' : ''}">${pct(rules.recordFinalPercent(record))}${adjustmentLabel(record) ? `<div class="card-subtitle">${esc(adjustmentLabel(record))}</div>` : ''}</td>
+        <td><span class="tukin-calendar-status ${type}">${esc(calendarTypeText(type))}</span><div class="tukin-reason">${esc(note)}</div>${record.cutiAdjustment?.automatic ? `<div class="tukin-cuti-ref"><span class="tukin-badge edit">Data Cuti</span><span>${esc(record.cutiAdjustment.leaveType || 'Cuti')}</span></div>` : ''}${assignmentReferenceMarkup(record)}${(record.evidence || []).length ? `<div class="tukin-files">${record.evidence.map((evidence) => `${esc(evidence.name)} ${attachmentOpenLink(evidence, 'Buka')}`).join('<br>')}</div>` : ''}</td>
+        <td><button class="btn btn-secondary btn-sm" type="button" data-calendar-day="${esc(key)}">Lihat</button><button class="btn btn-secondary btn-sm" type="button" data-edit-record="${esc(key)}" data-employee="${esc(rules.employeeKey(employee))}">Edit</button></td>
+      </tr>`;
+    }).join('');
+    return `<div class="table-wrap tukin-calendar-table"><table class="data-table"><thead><tr><th>Tanggal</th><th>Masuk</th><th>Pulang</th><th>Status</th><th>TL</th><th>PSW</th><th>Otomatis</th><th>Final</th><th>Alasan / Bukti</th><th>Aksi</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="text-center">Tidak ada tanggal sesuai filter.</td></tr>'}</tbody></table></div>`;
+  }
+
+  function renderCalendarDetail(record) {
+    if (!record) {
+      return `<div class="tukin-calendar-detail tukin-calendar-detail-empty">Tidak ada tanggal dengan data absensi yang sesuai filter. Pilih "Semua tanggal" untuk melihat seluruh data.</div>`;
+    }
+    const type = calendarType(record);
+    const draft = state.drawerDraft;
+    const cuti = record.cutiAdjustment;
+    const assignment = record.assignmentAdjustment;
+    const conflict = record.adjustmentConflict?.automatic;
+    const integration = conflict
+      ? `<div class="tukin-calendar-context warning"><strong>Konflik data pendukung</strong><p>${esc(record.adjustmentNote || 'Data Cuti dan Surat Tugas ditemukan pada tanggal yang sama. Verifikasi manual diperlukan.')}</p></div>`
+      : cuti?.automatic
+        ? `<div class="tukin-calendar-context info"><strong>Sinkronisasi Data Cuti</strong><p>${esc(cuti.leaveType || 'Cuti')} · ${esc(cuti.startDate || '')}${cuti.endDate && cuti.endDate !== cuti.startDate ? ` s.d. ${esc(cuti.endDate)}` : ''}. ${esc(record.adjustmentSource === 'cuti' ? 'Penyesuaian otomatis telah diterapkan.' : 'Tersedia sebagai data pendukung.')}</p></div>`
+        : assignment?.assignments?.length
+          ? `<div class="tukin-calendar-context info"><strong>Sinkronisasi Surat Tugas</strong>${assignmentReferenceMarkup(record)}<p>${esc(record.adjustmentSource === 'surat_tugas' ? 'Penyesuaian otomatis telah diterapkan.' : 'Tersedia sebagai data pendukung.')}</p></div>`
+          : '';
+    const evidence = (draft?.evidence || []).map((item, i) => `<div class="tukin-calendar-file"><span>${esc(item.name || 'Bukti dukung')} · ${bytes(item.size || 0)} ${attachmentOpenLink(item, 'Buka')}</span><button type="button" data-calendar-remove-evidence="${i}" aria-label="Hapus ${esc(item.name || 'bukti')}">Hapus</button></div>`).join('');
+    return `<section class="tukin-calendar-detail" aria-label="Rincian verifikasi tanggal terpilih">
+      <div class="tukin-calendar-detail-head"><div><h4>Verifikasi ${esc(rules.formatDate(record.date, true))}</h4><p>Periksa potongan otomatis sebelum menyimpan hasil penyesuaian.</p></div><span class="tukin-calendar-status ${type}">${esc(calendarTypeText(type))}</span></div>
+      <div class="tukin-calendar-detail-grid">
+        <div class="tukin-calendar-detail-col"><h5>Data Kehadiran &amp; Hasil Otomatis</h5>
+          <div class="tukin-calendar-info-row"><div><span>Jam masuk</span><strong>${esc(rules.formatMinutes(record.inMinutes))}</strong></div><div><span>Jam pulang</span><strong>${esc(rules.formatMinutes(record.outMinutes))}</strong></div><div><span>Status</span><strong>${esc(record.status || '-')}</strong></div></div>
+          <div class="tukin-calendar-calc"><div><span>Terlambat (TL)</span><strong>${esc(record.tlCategory)} · ${pct(record.tlPercent)}</strong></div><div><span>Pulang sebelum waktunya (PSW)</span><strong>${esc(record.pswCategory)} · ${pct(record.pswPercent)}</strong></div><div class="tukin-calendar-calc-total"><span>Total otomatis</span><strong>${pct(record.autoTotalPercent)}</strong></div></div>
+          <div class="tukin-calendar-context"><strong>Alasan perhitungan otomatis</strong><p>${esc(record.reason || 'Tidak ada potongan otomatis.')}</p>${record.flags?.length ? `<p>Penanda absensi: ${esc(record.flags.join(', '))}</p>` : ''}</div>
+          ${type === 'review' ? '<div class="tukin-calendar-context warning"><strong>Perlu verifikasi</strong><p>Periksa kelengkapan presensi dan bukti pendukung sebelum melakukan penyesuaian.</p></div>' : ''}
+          ${integration}
+        </div>
+        <div class="tukin-calendar-detail-col"><h5>Hasil Setelah Verifikasi</h5>
+          <div class="tukin-calendar-totals"><div><span>Otomatis (referensi)</span><strong>${pct(record.autoTotalPercent)}</strong></div><div class="final"><span>Potongan final</span><strong>${pct(rules.recordFinalPercent(record))}</strong></div></div>
+          <div class="field tukin-calendar-field"><label for="tukin-calendar-decision">Keputusan verifikasi</label>
+            <select id="tukin-calendar-decision">
+              <option value="keep" ${draft?.mode === 'keep' ? 'selected' : ''}>Pertahankan hasil saat ini (${pct(rules.recordFinalPercent(record))})</option>
+              <option value="zero" ${draft?.mode === 'zero' ? 'selected' : ''}>Sesuaikan menjadi 0,00%</option>
+              <option value="custom" ${draft?.mode === 'custom' ? 'selected' : ''}>Tentukan persentase final</option>
+              <option value="auto" ${draft?.mode === 'auto' ? 'selected' : ''}>Kembali ke hasil otomatis (${pct(record.autoTotalPercent)})</option>
+            </select>
+          </div>
+          <div class="field tukin-calendar-field" id="tukin-calendar-percent-wrap" ${draft?.mode === 'custom' ? '' : 'hidden'}><label for="tukin-calendar-percent">% Potongan final (maksimum 2,50%)</label><input id="tukin-calendar-percent" type="number" min="0" max="2.5" step="0.01" value="${esc(draft?.percent ?? rules.recordFinalPercent(record))}"></div>
+          <div class="field tukin-calendar-field"><label for="tukin-calendar-note">Keterangan / alasan koreksi</label><textarea id="tukin-calendar-note" rows="3" placeholder="Jelaskan dasar koreksi (wajib jika ada penyesuaian manual)">${esc(draft?.note || '')}</textarea></div>
+          <div class="field tukin-calendar-field"><label for="tukin-calendar-evidence">Bukti pendukung (PDF atau gambar)</label><input id="tukin-calendar-evidence" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" multiple></div>
+          <div class="tukin-calendar-evidence">${evidence || '<p class="card-subtitle">Belum ada lampiran bukti dukung.</p>'}</div>
+          <div class="tukin-calendar-detail-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="calendar-reset">Gunakan Hasil Otomatis</button><button class="btn btn-primary btn-sm" type="button" data-action="calendar-save">Simpan Koreksi</button></div>
+          <p class="tukin-calendar-audit">Perubahan disimpan pada data proses saat ini dan akan masuk riwayat ketika tombol Simpan proses Tukin digunakan.</p>
+        </div>
+      </div>
+    </section>`;
+  }
+
   function renderDrawer() {
     if (!state.drawerEmployeeKey) return '';
     const employee = employeeByKey(state.drawerEmployeeKey);
     if (!employee) return '';
     const summary = rules.summarizeEmployee(employee);
-    const records = Object.values(employee.records || {}).sort((a, b) => a.key.localeCompare(b.key));
-    const rows = records.map((record) => {
-      const needsCorrection = Boolean(record.needsVerification);
-      const rowClass = needsCorrection ? 'tukin-row-needs-correction' : '';
-      const correctionBadge = needsCorrection ? '<div class="tukin-row-status"><span class="tukin-badge warn">Perlu koreksi</span></div>' : '';
-      return `<tr class="${rowClass}"><td class="nowrap">${esc(rules.formatDate(record.date, true))}</td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${esc(record.status || '-')}${record.flags?.length ? `<div class="card-subtitle">${esc(record.flags.join(', '))}</div>` : ''}${correctionBadge}</td><td>${esc(record.tlCategory)}<div class="card-subtitle">${pct(record.tlPercent)}</div></td><td>${esc(record.pswCategory)}<div class="card-subtitle">${pct(record.pswPercent)}</div></td><td class="tukin-pct">${pct(record.autoTotalPercent)}</td><td class="tukin-pct ${record.adjustedPercent !== null && record.adjustedPercent !== undefined ? 'tukin-ok' : ''}">${pct(rules.recordFinalPercent(record))}${adjustmentLabel(record) ? `<div class="card-subtitle">${esc(adjustmentLabel(record))}</div>` : ''}</td><td><div class="tukin-reason">${esc(record.adjustmentNote || record.reason || '-')}</div>${record.cutiAdjustment?.automatic ? `<div class="tukin-cuti-ref"><span class="tukin-badge edit">Data Cuti</span><span>${esc(record.cutiAdjustment.leaveType || 'Cuti')} &middot; ${esc(record.cutiAdjustment.startDate || '')}${record.cutiAdjustment.endDate && record.cutiAdjustment.endDate !== record.cutiAdjustment.startDate ? ` s.d. ${esc(record.cutiAdjustment.endDate)}` : ''}</span></div>` : ''}${assignmentReferenceMarkup(record)}${record.adjustmentConflict?.automatic ? '<div class="tukin-cuti-ref"><span class="tukin-badge warn">Konflik Data</span><span>Cuti dan Surat Tugas ditemukan pada tanggal yang sama.</span></div>' : ''}${(record.evidence || []).length ? `<div class="tukin-files">${record.evidence.map((evidence) => `${esc(evidence.name)} ${attachmentOpenLink(evidence, 'Buka')}`).join('<br>')}</div>` : ''}</td><td><button class="btn btn-secondary btn-sm" data-edit-record="${esc(record.key)}" data-employee="${esc(rules.employeeKey(employee))}" type="button">Edit</button></td></tr>`;
-    }).join('');
-
-    return `<div class="drawer-backdrop" data-action="close-drawer"></div><aside class="drawer tukin-drawer"><div class="tukin-drawer-header"><div class="drawer-header"><div><h3>Detail Potongan Pegawai</h3><div class="card-subtitle">Seluruh daftar hadir pada periode absensi. Baris yang perlu koreksi ditandai dan semua tanggal dapat diedit.</div></div><button class="icon-btn" data-action="close-drawer" type="button">&times;</button></div><div class="profile"><div class="profile-avatar">${esc(employee.name.charAt(0).toUpperCase())}</div><div><div class="profile-name">${esc(employee.name)}</div><div class="profile-meta">NIP ${esc(employee.nip || '-')} &middot; Anak Satker ${esc(employee.anakSatker || '-')}</div></div><button class="btn btn-secondary btn-sm" style="margin-left:auto" data-edit-employee="${esc(rules.employeeKey(employee))}" type="button">Data Pegawai</button></div></div>
-      <div class="tukin-detail-summary"><div><span>Pot. Absensi</span><strong>${pct(summary.attendancePercent)}</strong></div><div><span>Pot. SKP</span><strong>${pct(summary.skpPercent)}</strong></div><div><span>Pot. Final</span><strong>${pct(summary.finalPercent)}</strong></div><div><span>Potongan Rupiah</span><strong>${money(summary.cutAmount)}</strong></div></div>
-      ${(employee.sourceFiles || []).length ? `<div class="card card-pad" style="margin-bottom:14px"><div class="card-title">File Absensi Asli</div><div class="tukin-files">${employee.sourceFiles.map((file) => `<div>${esc(file.name || file.file?.name || 'File Absensi')} ${attachmentOpenLink(file, 'Buka')}</div>`).join('')}</div></div>` : ''}
-      <div class="tukin-detail-legend"><span class="tukin-detail-legend-swatch" aria-hidden="true"></span><span>Baris berwarna menandai data presensi yang perlu koreksi/verifikasi. Tombol <strong>Edit</strong> tersedia untuk seluruh daftar hadir.</span></div>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>Tanggal</th><th>Masuk</th><th>Pulang</th><th>Status</th><th>TL</th><th>PSW</th><th>Otomatis</th><th>Final</th><th>Alasan / Bukti</th><th>Aksi</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="text-center">Tidak ada data daftar hadir pada periode ini.</td></tr>'}</tbody></table></div></aside>`;
+    const dates = calendarDates();
+    ensureCalendarSelection(employee, dates);
+    const records = dates.map((item) => employee.records?.[item.key]).filter(Boolean);
+    const pending = records.filter((item) => calendarType(item) === 'review').length;
+    const selectedRecord = state.drawerSelectedDate ? employee.records?.[state.drawerSelectedDate] : null;
+    const filterOptions = [['all', 'Semua tanggal'], ['review', 'Perlu verifikasi'], ['deduct', 'Ada potongan'], ['adjusted', 'Disesuaikan'], ['holiday', 'Hari libur']];
+    const sources = (employee.sourceFiles || []).length
+      ? `<div class="tukin-calendar-sources"><strong>File absensi:</strong> ${employee.sourceFiles.map((file) => `<span>${esc(file.name || file.file?.name || 'File Absensi')} ${attachmentOpenLink(file, 'Buka')}</span>`).join('')}</div>`
+      : '';
+    return `<div class="drawer-backdrop" data-action="close-drawer"></div>
+      <aside class="drawer tukin-drawer tukin-calendar-drawer" role="dialog" aria-modal="true" aria-labelledby="tukin-calendar-title">
+        <div class="tukin-calendar-header"><div><h3 id="tukin-calendar-title">Detail Potongan Pegawai</h3><p>Kalender untuk memeriksa potongan harian. Dasar absensi: <strong>${esc(rules.formatPeriodRange(range()))}</strong>.</p></div><button class="icon-btn" data-action="close-drawer" type="button" aria-label="Tutup detail potongan">&times;</button></div>
+        <div class="tukin-calendar-scroll">
+          <div class="tukin-calendar-profile"><span class="profile-avatar">${esc(employee.name.charAt(0).toUpperCase())}</span><div><strong>${esc(employee.name)}</strong><span>NIP ${esc(employee.nip || '-')} · Anak Satker ${esc(employee.anakSatker || '-')} · Tukin ${esc(periodLabel())}</span></div><button class="btn btn-secondary btn-sm" type="button" data-edit-employee="${esc(rules.employeeKey(employee))}">Data Pegawai</button></div>
+          <div class="tukin-calendar-metrics"><div><span>Potongan Absensi</span><strong>${pct(summary.attendancePercent)}</strong><small>Akumulasi potongan final harian</small></div><div><span>Potongan SKP</span><strong>${pct(summary.skpPercent)}</strong><small>Komponen penilaian kinerja</small></div><div><span>Potongan Final</span><strong>${pct(summary.finalPercent)}</strong><small>Bobot absensi 30% dan SKP 70%</small></div><div><span>Potongan Rupiah</span><strong>${money(summary.cutAmount)}</strong><small>Besaran Tukin ${money(summary.tukin)}</small></div></div>
+          <div class="tukin-calendar-section-head"><div><h4>Kalender Periode Absensi</h4><p>Setiap tanggal menunjukkan potongan final. Pilih tanggal untuk melihat TL/PSW dan melakukan verifikasi.</p></div><span class="tukin-badge ${pending ? 'warn' : ''}">${pending ? `${pending} tanggal perlu verifikasi` : 'Tidak ada tanggal perlu verifikasi'}</span></div>
+          <div class="tukin-calendar-toolbar"><div class="tukin-calendar-switch" aria-label="Mode tampilan detail"><button type="button" class="${state.drawerView === 'calendar' ? 'active' : ''}" data-calendar-mode="calendar" aria-pressed="${state.drawerView === 'calendar'}">Kalender</button><button type="button" class="${state.drawerView === 'table' ? 'active' : ''}" data-calendar-mode="table" aria-pressed="${state.drawerView === 'table'}">Tabel</button></div><div class="tukin-calendar-select"><label for="tukin-calendar-filter">Tampilkan</label><select id="tukin-calendar-filter">${filterOptions.map(([value, label]) => `<option value="${value}" ${state.drawerFilter === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div>
+          <div class="tukin-calendar-legend"><span><i class="normal"></i>Tanpa potongan</span><span><i class="deduct"></i>Ada potongan</span><span><i class="review"></i>Perlu verifikasi</span><span><i class="adjusted"></i>Penyesuaian</span><span><i class="holiday"></i>Libur</span><span><i class="missing"></i>Tanpa data</span></div>
+          ${state.drawerView === 'table' ? renderCalendarTable(employee, dates) : renderCalendarGrid(employee, dates)}
+          ${renderCalendarDetail(selectedRecord)}
+          ${sources}
+        </div>
+        <footer class="tukin-calendar-footer"><span>Koreksi tanggal tercatat bersama data Tukin dan bukti dukung.</span><button class="btn btn-primary btn-sm" type="button" data-action="close-drawer">Selesai</button></footer>
+      </aside>`;
   }
 
   function renderEditModal() {
@@ -983,16 +1195,8 @@
     if (note) state.editDraft.note = note.value;
   }
 
-  function saveRecordEdit() {
-    const employee = employeeByKey(state.editDraft.employeeKey);
-    const record = recordByKey(employee, state.editRecordKey);
-    if (!record) return;
-    const value = Number(document.getElementById('edit-percent')?.value);
-    if (!Number.isFinite(value) || value < 0 || value > 2.5) {
-      alert('Persentase penyesuaian harus antara 0% sampai 2,5%.');
-      return;
-    }
-    const keptRemoteIds = new Set((state.editDraft.evidence || []).map((item) => item?.itemId).filter(Boolean));
+  function applyManualAdjustment(record, percent, note, evidence) {
+    const keptRemoteIds = new Set((evidence || []).map((item) => item?.itemId).filter(Boolean));
     for (const item of record.evidence || []) {
       if (item?.driveId && item?.itemId && !keptRemoteIds.has(item.itemId)) {
         state.pendingSharePointDeletes.push({ ...item, file: null });
@@ -1008,23 +1212,17 @@
           assignments: (record.assignmentAdjustment.assignments || []).map((item) => ({ ...item }))
         }
       : null;
-    record.adjustedPercent = Number(value.toFixed(2));
-    record.adjustmentNote = String(document.getElementById('edit-note')?.value || '').trim();
+    record.adjustedPercent = Number(percent.toFixed(2));
+    record.adjustmentNote = note;
     record.adjustmentSource = 'manual';
     record.cutiAdjustment = null;
     record.assignmentAdjustment = assignmentContext;
     record.adjustmentConflict = null;
-    record.evidence = [...state.editDraft.evidence];
+    record.evidence = [...evidence];
     state.generated = null;
-    state.editRecordKey = null;
-    state.editDraft = null;
-    render();
   }
 
-  function resetRecordAuto() {
-    const employee = employeeByKey(state.editDraft.employeeKey);
-    const record = recordByKey(employee, state.editRecordKey);
-    if (!record) return;
+  function applyResetToAutomatic(record) {
     record.adjustedPercent = null;
     record.adjustmentNote = '';
     record.adjustmentSource = '';
@@ -1036,8 +1234,76 @@
     }
     record.evidence = [];
     state.generated = null;
+  }
+
+  function saveRecordEdit() {
+    const employee = employeeByKey(state.editDraft.employeeKey);
+    const record = recordByKey(employee, state.editRecordKey);
+    if (!record) return;
+    const value = Number(document.getElementById('edit-percent')?.value);
+    if (!Number.isFinite(value) || value < 0 || value > 2.5) {
+      alert('Persentase penyesuaian harus antara 0% sampai 2,5%.');
+      return;
+    }
+    applyManualAdjustment(record, value, String(document.getElementById('edit-note')?.value || '').trim(), state.editDraft.evidence);
     state.editRecordKey = null;
     state.editDraft = null;
+    state.drawerDraft = null;
+    render();
+  }
+
+  function resetRecordAuto() {
+    const employee = employeeByKey(state.editDraft.employeeKey);
+    const record = recordByKey(employee, state.editRecordKey);
+    if (!record) return;
+    applyResetToAutomatic(record);
+    state.editRecordKey = null;
+    state.editDraft = null;
+    state.drawerDraft = null;
+    render();
+  }
+
+  function saveCalendarAdjustment() {
+    const draft = state.drawerDraft;
+    if (!draft || !state.drawerEmployeeKey) return;
+    syncCalendarDraftFromForm();
+    const employee = employeeByKey(state.drawerEmployeeKey);
+    const record = recordByKey(employee, state.drawerSelectedDate);
+    if (!record || draft.key !== record.key || draft.employeeKey !== state.drawerEmployeeKey) return;
+    if (draft.mode === 'auto') {
+      applyResetToAutomatic(record);
+    } else {
+      const oldFinal = rules.recordFinalPercent(record);
+      const finalValue = draft.mode === 'zero' ? 0 : draft.mode === 'custom' ? Number(draft.percent) : oldFinal;
+      if (!Number.isFinite(finalValue) || finalValue < 0 || finalValue > 2.5) {
+        alert('Persentase final harus berada pada rentang 0%–2,50%.');
+        return;
+      }
+      const newNote = String(draft.note || '').trim();
+      const oldEvidence = record.evidence || [];
+      const evidenceChanged = oldEvidence.length !== draft.evidence.length || oldEvidence.some((file, i) => file !== draft.evidence[i]);
+      const noteChanged = newNote !== (record.adjustmentNote || '');
+      if (draft.mode === 'keep' && !noteChanged && !evidenceChanged) {
+        alert('Tidak ada perubahan yang perlu disimpan.');
+        return;
+      }
+      if (!newNote && (draft.mode !== 'keep' || noteChanged || evidenceChanged)) {
+        alert('Isi keterangan atau alasan sebelum menyimpan koreksi.');
+        document.getElementById('tukin-calendar-note')?.focus();
+        return;
+      }
+      applyManualAdjustment(record, finalValue, newNote, draft.evidence);
+    }
+    state.drawerDraft = makeCalendarDraft(state.drawerEmployeeKey, record);
+    render();
+  }
+
+  function resetCalendarAdjustment() {
+    const employee = employeeByKey(state.drawerEmployeeKey);
+    const record = recordByKey(employee, state.drawerSelectedDate);
+    if (!record) return;
+    applyResetToAutomatic(record);
+    state.drawerDraft = makeCalendarDraft(state.drawerEmployeeKey, record);
     render();
   }
 
@@ -1170,8 +1436,62 @@
       clearTimeout(window.__tukinSearch);
       window.__tukinSearch = setTimeout(render, 160);
     });
-    document.querySelectorAll('[data-detail-employee]').forEach((button) => button.addEventListener('click', () => { state.drawerEmployeeKey = button.dataset.detailEmployee; render(); }));
-    document.querySelectorAll('[data-action="close-drawer"]').forEach((button) => button.addEventListener('click', () => { state.drawerEmployeeKey = null; render(); }));
+    document.querySelectorAll('[data-detail-employee]').forEach((button) => button.addEventListener('click', () => {
+      state.drawerEmployeeKey = button.dataset.detailEmployee;
+      state.drawerView = 'calendar';
+      state.drawerFilter = 'all';
+      state.drawerSelectedDate = null;
+      state.drawerDraft = null;
+      render();
+    }));
+    document.querySelectorAll('[data-action="close-drawer"]').forEach((button) => button.addEventListener('click', () => {
+      state.drawerEmployeeKey = null;
+      state.drawerSelectedDate = null;
+      state.drawerDraft = null;
+      render();
+    }));
+    document.querySelectorAll('[data-calendar-mode]').forEach((button) => button.addEventListener('click', () => {
+      syncCalendarDraftFromForm();
+      state.drawerView = button.dataset.calendarMode === 'table' ? 'table' : 'calendar';
+      render();
+    }));
+    document.getElementById('tukin-calendar-filter')?.addEventListener('change', (event) => {
+      syncCalendarDraftFromForm();
+      state.drawerFilter = event.target.value;
+      render();
+    });
+    document.querySelectorAll('[data-calendar-day]').forEach((button) => button.addEventListener('click', () => {
+      state.drawerSelectedDate = button.dataset.calendarDay;
+      state.drawerDraft = null;
+      render();
+      const selected = document.querySelector('.tukin-calendar-detail');
+      selected?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    }));
+    document.getElementById('tukin-calendar-decision')?.addEventListener('change', (event) => {
+      syncCalendarDraftFromForm();
+      const wrap = document.getElementById('tukin-calendar-percent-wrap');
+      if (wrap) wrap.hidden = event.target.value !== 'custom';
+    });
+    document.getElementById('tukin-calendar-percent')?.addEventListener('input', syncCalendarDraftFromForm);
+    document.getElementById('tukin-calendar-note')?.addEventListener('input', syncCalendarDraftFromForm);
+    document.getElementById('tukin-calendar-evidence')?.addEventListener('change', (event) => {
+      syncCalendarDraftFromForm();
+      for (const file of Array.from(event.target.files || [])) {
+        if (!/^application\/pdf$|^image\//i.test(file.type)) {
+          alert(`File ${file.name} bukan PDF atau gambar.`);
+          continue;
+        }
+        state.drawerDraft.evidence.push({ id: `${Date.now()}-${Math.random()}`, name: file.name, size: file.size, type: file.type, file });
+      }
+      render();
+    });
+    document.querySelectorAll('[data-calendar-remove-evidence]').forEach((button) => button.addEventListener('click', () => {
+      syncCalendarDraftFromForm();
+      state.drawerDraft?.evidence.splice(Number(button.dataset.calendarRemoveEvidence), 1);
+      render();
+    }));
+    document.querySelector('[data-action="calendar-save"]')?.addEventListener('click', saveCalendarAdjustment);
+    document.querySelector('[data-action="calendar-reset"]')?.addEventListener('click', resetCalendarAdjustment);
     document.querySelectorAll('[data-edit-record]').forEach((button) => button.addEventListener('click', () => openRecordEdit(button.dataset.employee, button.dataset.editRecord)));
     document.querySelector('[data-action="close-edit"]')?.addEventListener('click', () => { state.editRecordKey = null; state.editDraft = null; render(); });
     document.getElementById('edit-evidence')?.addEventListener('change', (event) => {

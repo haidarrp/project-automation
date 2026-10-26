@@ -1,0 +1,123 @@
+/* Detail Potongan Tukin: kalender 11–10, tanpa mengubah aturan perhitungan. */
+.tukin-calendar-drawer{width:min(1160px,96vw);height:min(94vh,1200px);max-height:none;padding:0;display:flex;flex-direction:column;overflow:hidden;border-radius:20px;box-shadow:0 28px 85px rgba(0,0,0,.25)}
+.tukin-calendar-header{padding:18px 25px 17px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-shrink:0;background:#fff}
+.tukin-calendar-header h3{font-size:18px;line-height:1.4;font-weight:750;margin:0}
+.tukin-calendar-header p{font-size:10.5px;color:var(--muted);margin:5px 0 0;line-height:1.6}
+.tukin-calendar-header .icon-btn{flex-shrink:0;font-size:19px}
+.tukin-calendar-scroll{padding:18px 24px 24px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;min-height:0;flex:1}
+.tukin-calendar-profile{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.tukin-calendar-profile .profile-avatar{width:46px;height:46px;margin:0;flex:0 0 auto;border-radius:12px}
+.tukin-calendar-profile>div{display:flex;flex-direction:column;gap:4px;min-width:170px;flex:1}
+.tukin-calendar-profile>div>strong{font-size:13px;line-height:1.4}
+.tukin-calendar-profile>div>span{font-size:10px;color:var(--muted)}
+.tukin-calendar-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:19px}
+.tukin-calendar-metrics>div{padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-soft);min-width:0}
+.tukin-calendar-metrics span{font-size:9px;color:var(--muted);font-weight:750;letter-spacing:.045em;text-transform:uppercase;display:block}
+.tukin-calendar-metrics strong{font-size:18px;font-variant-numeric:tabular-nums;letter-spacing:-.02em;margin:7px 0 4px;display:block;overflow-wrap:anywhere}
+.tukin-calendar-metrics small{display:block;font-size:9px;color:var(--muted);line-height:1.45}
+.tukin-calendar-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.tukin-calendar-section-head h4{font-size:14px;font-weight:750;margin:0}
+.tukin-calendar-section-head p{font-size:10px;color:var(--muted);margin:4px 0 0;line-height:1.5}
+.tukin-calendar-toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin:15px 0 10px}
+.tukin-calendar-switch{display:inline-flex;align-items:center;border:1px solid var(--line);background:var(--bg-soft);padding:3px;border-radius:10px;gap:3px}
+.tukin-calendar-switch button{border:1px solid transparent;background:transparent;color:var(--ink-soft);font-size:10px;font-weight:680;border-radius:8px;padding:8px 13px;min-width:72px}
+.tukin-calendar-switch button.active{background:#fff;border-color:var(--line);box-shadow:0 1px 3px #00000010;color:var(--navy)}
+.tukin-calendar-select{display:flex;align-items:center;gap:11px}
+.tukin-calendar-select label{color:var(--muted);font-size:10px}
+.tukin-calendar-select select{border:1px solid var(--line);border-radius:9px;background:white;color:var(--ink);font-size:10px;padding:9px 11px;min-width:160px}
+.tukin-calendar-legend{display:flex;align-items:center;gap:11px 17px;flex-wrap:wrap;margin-bottom:12px}
+.tukin-calendar-legend>span{display:inline-flex;align-items:center;gap:6px;font-size:9.5px;color:var(--ink-soft)}
+.tukin-calendar-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--line-strong)}
+.tukin-calendar-legend i.normal{background:#eaf4ef;border-color:#cfe4da}
+.tukin-calendar-legend i.deduct{background:#fff1f1;border-color:#efc8c8}
+.tukin-calendar-legend i.review{background:#fff8e8;border-color:#eed59c}
+.tukin-calendar-legend i.adjusted{background:#eef2f7;border-color:#c8d8e7}
+.tukin-calendar-legend i.holiday{background:#f2f2f0;border-style:dashed}
+.tukin-calendar-legend i.missing{background:#fff;border-style:dotted}
+.tukin-calendar-box{border:1px solid var(--line);border-radius:13px;background:#fff;padding:13px 12px;margin-bottom:15px}
+.tukin-calendar-box-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:9px;margin-bottom:12px}
+.tukin-calendar-box-head strong{font-size:10.5px;color:var(--ink-soft)}
+.tukin-calendar-box-head span{font-size:9px;color:var(--muted)}
+.tukin-calendar-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px;text-align:center;margin-bottom:7px}
+.tukin-calendar-weekdays span{font-size:10px;color:var(--muted);font-weight:730;padding:5px 0}
+.tukin-calendar-weekdays span.weekend{color:var(--danger)}
+.tukin-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}
+.tukin-calendar-day,.tukin-calendar-empty{min-width:0;min-height:71px}
+.tukin-calendar-day{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;border:1px solid var(--line);background:#fff;padding:6px 3px;color:var(--ink);text-align:center;position:relative;transition:border-color .1s,box-shadow .1s;line-height:1.2}
+.tukin-calendar-day:enabled:hover{border-color:var(--navy)}
+.tukin-calendar-day:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
+.tukin-calendar-day.selected{outline:2px solid var(--navy);outline-offset:2px;z-index:1}
+.tukin-calendar-day:disabled{opacity:1;cursor:default}
+.tukin-calendar-day.muted{opacity:.34}
+.tukin-calendar-day.normal{background:#eaf4ef;border-color:#cfe4da}
+.tukin-calendar-day.deduct{background:#fff1f1;border-color:#f1cece}
+.tukin-calendar-day.review{background:#fff8e8;border-color:#efd69c}
+.tukin-calendar-day.adjusted{background:#eef2f7;border-color:#cfdfed}
+.tukin-calendar-day.holiday{background:#f3f3f1;border-color:#e7e7e4;border-style:dashed;color:#858b92}
+.tukin-calendar-day.missing{background:#fff;border:1px dotted #c7cbd0;color:#90969d}
+.tukin-calendar-date{display:inline-flex;align-items:baseline;justify-content:center;gap:4px}
+.tukin-calendar-date strong{font-size:15px;font-weight:770;font-variant-numeric:tabular-nums}
+.tukin-calendar-date small{font-size:8px;font-weight:700;text-transform:uppercase;color:var(--muted)}
+.tukin-calendar-amount{font-size:11px;font-weight:800;font-variant-numeric:tabular-nums}
+.tukin-calendar-day.deduct .tukin-calendar-amount{color:var(--danger)}
+.tukin-calendar-day.review .tukin-calendar-amount{color:var(--warning)}
+.tukin-calendar-day.adjusted .tukin-calendar-amount{color:#385b7b}
+.tukin-calendar-caption{font-size:9px;color:var(--muted);white-space:normal;overflow-wrap:anywhere}
+.tukin-calendar-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:9px;color:var(--muted);margin-top:10px;line-height:1.5}
+.tukin-calendar-table{margin:0 0 15px;max-height:410px;overflow:auto;border:1px solid var(--line);border-radius:12px}
+.tukin-calendar-table table{min-width:1060px}
+.tukin-calendar-table th{position:sticky;top:0;background:var(--bg-soft);z-index:2}
+.tukin-calendar-table td{font-size:10px}
+.tukin-calendar-table td:last-child{white-space:nowrap}
+.tukin-calendar-table td:last-child .btn+.btn{margin-left:5px}
+.tukin-calendar-selected-row>td{box-shadow:inset 0 -2px 0 #385b7b}
+.tukin-calendar-status{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;border-radius:999px;padding:5px 8px;font-size:9px;font-weight:750;color:var(--ink-soft);background:#f2f2f1}
+.tukin-calendar-status.normal{background:var(--green-soft);color:var(--green)}
+.tukin-calendar-status.deduct{background:var(--danger-soft);color:var(--danger)}
+.tukin-calendar-status.review{background:var(--warning-soft);color:var(--warning)}
+.tukin-calendar-status.adjusted{background:#eef2f7;color:#385b7b}
+.tukin-calendar-status.holiday{color:var(--muted)}
+.tukin-calendar-detail{border:1px solid var(--line);border-radius:13px;overflow:hidden;background:#fff;margin-bottom:14px}
+.tukin-calendar-detail-empty{padding:26px;color:var(--muted);font-size:11px}
+.tukin-calendar-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;background:var(--bg-soft);border-bottom:1px solid var(--line);padding:13px 15px}
+.tukin-calendar-detail-head h4{font-size:13px;font-weight:750;margin:0}
+.tukin-calendar-detail-head p{font-size:9.5px;color:var(--muted);margin:5px 0 0}
+.tukin-calendar-detail-grid{display:grid;grid-template-columns:1fr 1fr}
+.tukin-calendar-detail-col{padding:15px;min-width:0}
+.tukin-calendar-detail-col+.tukin-calendar-detail-col{border-left:1px solid var(--line)}
+.tukin-calendar-detail-col h5{font-size:11px;font-weight:750;margin:0 0 12px}
+.tukin-calendar-info-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-bottom:10px}
+.tukin-calendar-info-row>div{border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px;min-width:0}
+.tukin-calendar-info-row span,.tukin-calendar-totals span{display:block;font-size:9px;color:var(--muted)}
+.tukin-calendar-info-row strong{font-size:11px;display:block;margin-top:5px;overflow-wrap:anywhere}
+.tukin-calendar-calc{background:var(--bg-soft);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.tukin-calendar-calc>div{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:10px;padding:8px 0;color:var(--ink-soft)}
+.tukin-calendar-calc strong{font-size:10px;font-variant-numeric:tabular-nums}
+.tukin-calendar-calc-total{border-top:1px solid var(--line);font-weight:750}
+.tukin-calendar-context{border:1px solid var(--line);background:#f8f9f7;padding:10px 12px;margin-top:9px;border-radius:10px;font-size:10px;line-height:1.5}
+.tukin-calendar-context strong{font-size:10px}
+.tukin-calendar-context p{margin:6px 0 0;color:var(--ink-soft)}
+.tukin-calendar-context.warning{background:var(--warning-soft);border-color:#eddbb5}
+.tukin-calendar-context.info{background:#f0f5f9;border-color:#d3e2ed}
+.tukin-calendar-totals{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px}
+.tukin-calendar-totals>div{padding:12px;border:1px solid var(--line);background:var(--bg-soft);border-radius:10px}
+.tukin-calendar-totals>div.final{background:var(--green-soft);border-color:#cfe4da}
+.tukin-calendar-totals strong{display:block;margin-top:5px;font-size:17px;font-variant-numeric:tabular-nums}
+.tukin-calendar-totals .final strong{color:var(--green)}
+.tukin-calendar-field{margin-bottom:10px}
+.tukin-calendar-field label{font-size:10px;display:block;margin:0 0 5px;font-weight:680}
+.tukin-calendar-field select,.tukin-calendar-field input[type='number'],.tukin-calendar-field textarea{width:100%;padding:10px 11px;border:1px solid var(--line-strong);background:#fff;border-radius:10px;font:inherit;font-size:10.5px;color:var(--ink)}
+.tukin-calendar-field textarea{resize:vertical;min-height:68px;line-height:1.5}
+.tukin-calendar-field input[type='file']{font-size:10px;max-width:100%}
+.tukin-calendar-evidence{display:flex;flex-direction:column;gap:6px;font-size:9.5px}
+.tukin-calendar-file{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 10px;background:var(--bg-soft);border:1px solid var(--line);border-radius:9px;min-width:0}
+.tukin-calendar-file span{overflow-wrap:anywhere}
+.tukin-calendar-file button{border:0;background:transparent;color:var(--danger);font-weight:700;font-size:10px}
+.tukin-calendar-detail-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:13px;flex-wrap:wrap}
+.tukin-calendar-audit{font-size:9px;color:var(--muted);line-height:1.5;margin:10px 0 0}
+.tukin-calendar-sources{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:9px 0;color:var(--muted);font-size:9.5px}
+.tukin-calendar-sources strong{color:var(--ink-soft)}
+.tukin-calendar-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;padding:12px 24px;background:#fff;border-top:1px solid var(--line)}
+.tukin-calendar-footer span{font-size:9px;color:var(--muted);line-height:1.5}
+@media(max-width:980px){.tukin-calendar-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.tukin-calendar-detail-grid{grid-template-columns:1fr}.tukin-calendar-detail-col+.tukin-calendar-detail-col{border-left:0;border-top:1px solid var(--line)}}
+@media(max-width:630px){.tukin-calendar-drawer{width:calc(100vw - 10px);height:96vh;max-height:96vh;padding:0;border-radius:13px}.tukin-calendar-header{padding:13px 14px}.tukin-calendar-header h3{font-size:15px}.tukin-calendar-scroll{padding:12px;scrollbar-gutter:auto}.tukin-calendar-profile .btn{width:auto}.tukin-calendar-metrics{gap:6px}.tukin-calendar-metrics>div{padding:10px}.tukin-calendar-metrics strong{font-size:15px}.tukin-calendar-box{padding:9px 6px}.tukin-calendar-grid,.tukin-calendar-weekdays{gap:4px}.tukin-calendar-day,.tukin-calendar-empty{min-height:62px}.tukin-calendar-day{padding:5px 2px}.tukin-calendar-date strong{font-size:12px}.tukin-calendar-date small{font-size:7px}.tukin-calendar-amount{font-size:9px}.tukin-calendar-caption{font-size:7px}.tukin-calendar-weekdays span{font-size:9px}.tukin-calendar-info-row{grid-template-columns:repeat(3,minmax(0,1fr))}.tukin-calendar-detail-col{padding:11px}.tukin-calendar-detail-head{padding:10px}.tukin-calendar-footer{padding:10px 12px}.tukin-calendar-footer span{max-width:65%;font-size:8px}}
