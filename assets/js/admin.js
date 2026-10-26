@@ -143,7 +143,7 @@
       const label = docLabel(item);
       const fields = [
         label.title, label.sub,
-        item.lemburSatkerCode, item.satker, item.anakSatker, item.tukin, item.order
+        item.lemburSatkerCode, item.satker, item.anakSatker, item.jenisPegawai, item.tukin, item.order
       ].map((x) => String(x || '').toLowerCase());
       return fields.some((x) => x.includes(q));
     });
@@ -154,7 +154,7 @@
     return `<div class="card">
       <div class="admin-card-head"><div class="admin-card-head-copy"><h2>Master Pegawai</h2><p>Satu sumber master digunakan bersama oleh modul Lembur dan Tunjangan Kinerja.</p></div><button class="btn btn-primary btn-sm" type="button" data-action="add-master">+ Tambah Master</button></div>
       <div class="admin-toolbar"><div class="search"><input id="admin-search" placeholder="Cari nama, NIP, satker, anak satker..." value="${esc(state.search)}"></div><span class="card-subtitle">${rows.length} dari ${state.employees.length} data</span></div>
-      <div class="admin-table-wrap"><table class="data-table admin-table"><thead><tr><th>Identitas</th><th>Satker Lembur</th><th>Satker Tukin</th><th>Anak Satker</th><th>Besaran Tukin</th><th>Urutan</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
+      <div class="admin-table-wrap"><table class="data-table admin-table"><thead><tr><th>Identitas</th><th>Satker Lembur</th><th>Satker Tukin</th><th>Anak Satker</th><th>Jenis Pegawai</th><th>Besaran Tukin</th><th>Urutan</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
         ${rows.length ? rows.map((item) => {
           const label = docLabel(item);
           const unresolved = !label.resolved;
@@ -163,12 +163,13 @@
             <td>${esc(item.lemburSatkerCode ?? '-')}</td>
             <td class="admin-code">${esc(item.satker || '-')}</td>
             <td>${esc(item.anakSatker || '-')}</td>
+            <td>${esc(item.jenisPegawai || '-')}</td>
             <td class="admin-money">${money(item.tukin)}</td>
             <td>${esc(item.order ?? '-')}</td>
             <td><span class="admin-badge ${item.active === false ? 'off' : ''}">${item.active === false ? 'Nonaktif' : 'Aktif'}</span></td>
             <td><div class="admin-row-actions"><button class="btn btn-secondary btn-sm" type="button" data-edit-master="${esc(item.id)}">Edit</button><button class="btn ${item.active === false ? 'btn-secondary' : 'btn-danger'} btn-sm" type="button" data-toggle-master="${esc(item.id)}">${item.active === false ? 'Aktifkan' : 'Nonaktifkan'}</button></div></td>
           </tr>`;
-        }).join('') : '<tr><td colspan="8"><div class="empty-state"><strong>Master belum tersedia</strong>Tambahkan manual atau impor file master awal.</div></td></tr>'}
+        }).join('') : '<tr><td colspan="9"><div class="empty-state"><strong>Master belum tersedia</strong>Tambahkan manual atau impor file master awal.</div></td></tr>'}
       </tbody></table></div>
     </div>`;
   }
@@ -248,6 +249,7 @@
         ${field('Kode Satker Lembur', 'm-lembur-code', existing?.lemburSatkerCode ?? '', { maxlength: 20 })}
         ${field('Kode Satker Tukin', 'm-satker', existing?.satker || window.TUKIN_CONFIG.SATKER || '')}
         ${field('Anak Satker', 'm-anak', existing?.anakSatker || '', { maxlength: 20 })}
+        <div class="field"><label for="m-jenis">Jenis Pegawai untuk Uang Makan</label><select id="m-jenis"><option value="">Belum ditentukan</option>${['PNS','PPPK','CPNS'].map(k=>`<option value="${k}" ${existing?.jenisPegawai===k?'selected':''}>${k}</option>`).join('')}</select></div>
         ${field('Besaran Tukin', 'm-tukin', existing?.tukin || window.TUKIN_CONFIG.DEFAULT_TUKIN || 0, { type: 'number', min: 0, step: 1000 })}
         ${field('Urutan', 'm-order', existing?.order || state.employees.length + 1, { type: 'number', min: 1 })}
         <div class="field"><label>Status</label><label class="admin-check"><input id="m-active" type="checkbox" ${existing?.active === false ? '' : 'checked'}><span>Aktif digunakan aplikasi</span></label></div>
@@ -325,6 +327,7 @@
         lemburSatkerCode: String(document.getElementById('m-lembur-code')?.value || '').trim(),
         satker: String(document.getElementById('m-satker')?.value || '').trim(),
         anakSatker: normalizeAnakSatker(document.getElementById('m-anak')?.value),
+        jenisPegawai: String(document.getElementById('m-jenis')?.value || ''),
         tukin: Number(document.getElementById('m-tukin')?.value || 0),
         order: Number(document.getElementById('m-order')?.value || 9999),
         active: Boolean(document.getElementById('m-active')?.checked),
@@ -466,7 +469,7 @@
               nipHash: String(item.nipHash || ''),
               nameHashes: [...new Set((item.nameHashes || (item.nameHash ? [item.nameHash] : [])).map(String).filter(Boolean))],
               lemburSatkerCode: String(item.lemburSatkerCode ?? item.code ?? '').trim(),
-              satker: String(item.satker || ''), anakSatker: normalizeAnakSatker(item.anakSatker), tukin: Number(item.tukin || 0),
+              satker: String(item.satker || ''), anakSatker: normalizeAnakSatker(item.anakSatker), jenisPegawai:String(item.jenisPegawai||''), tukin: Number(item.tukin || 0),
               order: Number(item.order || 9999), active: item.active !== false,
               schemaVersion: 4, updatedAt: serverTimestamp(), updatedBy: user()?.email || ''
             };

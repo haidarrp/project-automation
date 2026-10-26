@@ -29,7 +29,7 @@ service cloud.firestore {
     function hasGrant(module, key) {
       return isAllowedUser() && (
         isAdmin() || (
-          !permissionExists() && (module == 'tukin' || module == 'lembur')
+          !permissionExists() && (module == 'tukin' || module == 'lembur' || module == 'uangMakan')
         ) || (
           permissionExists()
           && get(/databases/$(database)/documents/userPermissions/$(request.auth.uid)).data.grants.get(module, {}).get(key, false) == true
@@ -53,16 +53,19 @@ service cloud.firestore {
     function anyTrainingView() {
       return canView('pelatihan','dashboard') || canView('pelatihan','pegawai') || canView('pelatihan','data');
     }
+    function anyUangMakanView() {
+      return canView('uangMakan','dashboard') || canView('uangMakan','process') || canView('uangMakan','history');
+    }
     function anyTukinView() {
       return canView('tukin','dashboard') || canView('tukin','process') || canView('tukin','history');
     }
     function anyLemburView() {
       return canView('lembur','dashboard') || canView('lembur','process') || canView('lembur','history');
     }
-    function canReadLeave() { return anyLeaveView() || canView('tukin','process'); }
-    function canReadAssignments() { return anyAssignmentView() || canView('tukin','process'); }
+    function canReadLeave() { return anyLeaveView() || canView('tukin','process') || canView('uangMakan','process'); }
+    function canReadAssignments() { return anyAssignmentView() || canView('tukin','process') || canView('uangMakan','process'); }
     function canReadDirectory() {
-      return isAdmin() || anyLeaveView() || anyAssignmentView() || anyTrainingView();
+      return isAdmin() || anyLeaveView() || anyAssignmentView() || anyTrainingView() || anyUangMakanView();
     }
     function canManageRun(data, module) {
       return isAllowedUser() && (data.ownerUid == request.auth.uid || isAdmin());
@@ -207,8 +210,23 @@ service cloud.firestore {
         && request.resource.data.ownerUid == resource.data.ownerUid;
       allow delete: if false;
     }
+    // Rekap Uang Makan: hasil per periode dan rincian harian disimpan per pegawai.
+    match /uangMakanRuns/{runId} {
+      allow read: if anyUangMakanView();
+      allow create: if canDo('uangMakan','process','save') && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if canDo('uangMakan','process','save') && canManageRun(resource.data,'uangMakan')
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if canDo('uangMakan','history','delete') && canManageRun(resource.data,'uangMakan');
+      match /employees/{employeeId} {
+        allow read: if anyUangMakanView();
+        allow create, update: if canDo('uangMakan','process','save')
+          && canManageRun(get(/databases/$(database)/documents/uangMakanRuns/$(runId)).data,'uangMakan');
+        allow delete: if canDo('uangMakan','history','delete')
+          && canManageRun(get(/databases/$(database)/documents/uangMakanRuns/$(runId)).data,'uangMakan');
+      }
+    }
     match /masterEmployees/{masterId} {
-      allow read: if isAllowedUser() && (canReadDirectory() || anyTukinView() || anyLemburView());
+      allow read: if isAllowedUser() && (canReadDirectory() || anyTukinView() || anyLemburView() || anyUangMakanView());
       allow create, update, delete: if isAdmin();
     }
     match /masterDirectory/{masterId} {

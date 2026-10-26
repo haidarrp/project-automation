@@ -30,6 +30,11 @@
       { id:'parameters',label:'Parameter Perhitungan',parent:'process',actions:[['holidays','Ubah Tanggal Merah'],['ramadan','Ubah Pengaturan Ramadan']] },
       { id:'history',label:'Riwayat Tukin',actions:[['download','Unduh Hasil'],['edit','Edit Riwayat'],['delete','Hapus Riwayat']] }
     ]},
+    { id:'uangMakan',label:'Uang Makan',sections:[
+      {id:'dashboard',label:'Dashboard Uang Makan',actions:[]},
+      {id:'process',label:'Proses Uang Makan',actions:[['upload','Unggah Absensi'],['calculate','Hitung dan Sinkronkan'],['verify','Verifikasi/Koreksi Harian'],['save','Simpan Hasil'],['export','Ekspor Excel']]},
+      {id:'history',label:'Riwayat Uang Makan',actions:[['download','Unduh Excel'],['delete','Hapus Riwayat']]}
+    ]},
     { id:'lembur',label:'Lembur',sections:[
       { id:'dashboard',label:'Dashboard Lembur',actions:[] },
       { id:'process',label:'Proses Lembur',actions:[['upload','Unggah Data Absensi'],['calculate','Jalankan Proses'],['correct','Koreksi Hasil'],['holiday','Ubah Tanggal Merah'],['generate','Buat Dokumen']] },
@@ -37,8 +42,8 @@
     ]}
   ];
   const MOD = Object.fromEntries(MODULES.map(m => [m.id,m]));
-  const PAGE_MODULE = {leave:'cuti',assignment:'surat',training:'pelatihan',tukin:'tukin',lembur:'lembur'};
-  const legacy = Object.fromEntries(['tukin','lembur'].map(id => [id,Object.fromEntries(
+  const PAGE_MODULE = {leave:'cuti',assignment:'surat',training:'pelatihan',tukin:'tukin',lembur:'lembur',uangMakan:'uangMakan'};
+  const legacy = Object.fromEntries(['tukin','lembur','uangMakan'].map(id => [id,Object.fromEntries(
     MOD[id].sections.flatMap(s => [`${s.id}.view`,...s.actions.map(a => `${s.id}.${a[0]}`)]).map(key=>[key,true]))]));
   let grants = null;
   let active = false;
@@ -109,7 +114,7 @@
     return `<div class="card permission-denied"><div class="permission-denied-icon">&#128274;</div><h2>Akses tidak tersedia</h2><p>Akun ini belum memperoleh izin untuk membuka ${escape(MOD[module]?.label || 'halaman')} atau fitur yang dipilih. Hubungi administrator aplikasi.</p>${action}</div>`;
   }
   function homeHref() {
-    const links = {tukin:'tukin.html',lembur:'lembur.html',pelatihan:'pelatihan.html',cuti:'cuti.html',surat:'surat-tugas.html'};
+    const links = {tukin:'tukin.html',lembur:'lembur.html',uangMakan:'uang-makan.html',pelatihan:'pelatihan.html',cuti:'cuti.html',surat:'surat-tugas.html'};
     for (const mod of MODULES) if (firstView(mod.id)) return `${links[mod.id]}#${firstView(mod.id)}`;
     return 'index.html';
   }
@@ -202,6 +207,15 @@
       ['[data-action="save-run"]',()=>can('tukin','process.save')?'process.save':'history.edit'],['[data-action="new-process"],[data-action="new-process-from-history"]','process.view'],
       ['[data-edit-tukin-history]','history.edit'],['[data-delete-tukin-history]','history.delete'],['[data-download-tukin-history]','history.download']
     ],
+    uangMakan:[
+      ['[data-um-action="upload"],#um-files','process.upload'],
+      ['[data-um-action="calculate"]','process.calculate'],
+      ['[data-um-action="verify"],[data-um-action="save-day"],[data-um-action="acknowledge"]','process.verify'],
+      ['[data-um-action="save"]','process.save'],
+      ['[data-um-action="export"]','process.export'],
+      ['[data-um-action="history-download"]','history.download'],
+      ['[data-um-action="history-delete"]','history.delete']
+    ],
     lembur:[
       ['[data-action="start-process"],[data-action="new-period"]','process.view'],
       ['[data-action="add-holiday"],[data-remove-holiday]','process.holiday'],
@@ -245,7 +259,7 @@
     if (document.getElementById('app')) observer.observe(document.getElementById('app'),{subtree:true,childList:true});
     document.addEventListener('click', event => {
       const page=PAGE_MODULE[document.body.dataset.permissionModule] || document.body.dataset.permissionModule;
-      const node=event.target.closest?.('[data-action],button,[data-leave-edit],[data-leave-delete],[data-balance-edit],[data-add-leave-document],[data-edit-leave-document],[data-delete-leave-document],[data-download-leave-document],[data-assignment-edit],[data-assignment-delete],[data-download-assignment-document],[data-training-edit],[data-training-delete],[data-add-training-document],[data-edit-training-document],[data-delete-training-document],[data-edit-record],[data-edit-employee],[data-edit-tukin-history],[data-delete-tukin-history],[data-download-tukin-history],[data-edit-history-id],[data-delete-history-id],[data-download]');
+      const node=event.target.closest?.('[data-action],button,[data-leave-edit],[data-leave-delete],[data-balance-edit],[data-add-leave-document],[data-edit-leave-document],[data-delete-leave-document],[data-download-leave-document],[data-assignment-edit],[data-assignment-delete],[data-download-assignment-document],[data-training-edit],[data-training-delete],[data-add-training-document],[data-edit-training-document],[data-delete-training-document],[data-edit-record],[data-edit-employee],[data-edit-tukin-history],[data-delete-tukin-history],[data-download-tukin-history],[data-edit-history-id],[data-delete-history-id],[data-download],[data-um-action]');
       const key=page&&node?requiredForElement(node,page):'';
       if (key&&!can(page,key)) {event.preventDefault();event.stopImmediatePropagation();deny();}
     },true);
@@ -259,9 +273,9 @@
       const anchor=event.target.closest?.('a[href]');
       if(!anchor) return;
       const path=anchor.getAttribute('href')||'';
-      const match=path.match(/^(cuti|surat-tugas|pelatihan|tukin|lembur)\.html(?:#([a-z]+))?$/i);
+      const match=path.match(/^(cuti|surat-tugas|pelatihan|tukin|lembur|uang-makan)\.html(?:#([a-z]+))?$/i);
       if (!match) return;
-      const module={cuti:'cuti','surat-tugas':'surat',pelatihan:'pelatihan',tukin:'tukin',lembur:'lembur'}[match[1].toLowerCase()];
+      const module={cuti:'cuti','surat-tugas':'surat',pelatihan:'pelatihan',tukin:'tukin',lembur:'lembur','uang-makan':'uangMakan'}[match[1].toLowerCase()];
       if(!canView(module,match[2]||firstView(module))) {event.preventDefault();event.stopImmediatePropagation();deny();}
     },true);
   }

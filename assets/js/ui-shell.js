@@ -4,6 +4,7 @@
   const ICONS = Object.freeze({
     home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/>',
     tukin: '<path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+    meal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16M3 10h18M12 13h6M12 16h6"/>',
     overtime: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
     training: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 5.5v16M8 7h8M8 11h6"/>',
     leave: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/><path d="m9 15 2 2 4-4"/>',
@@ -25,6 +26,10 @@
         { view: 'process', label: 'Proses Tukin' },
         { view: 'history', label: 'Riwayat' }
       ]
+    },
+    uangMakan: {
+      label: 'Uang Makan', icon:'meal', file:'uang-makan.html',
+      items:[{view:'dashboard',label:'Dashboard'},{view:'process',label:'Proses Uang Makan'},{view:'history',label:'Riwayat'}]
     },
     lembur: {
       label: 'Lembur',
@@ -78,7 +83,7 @@
   function moduleGroup(module, activeModule, activeView) {
     const config = MODULES[module];
     if (!config) return '';
-    const permissionModule = {training:'pelatihan',leave:'cuti',assignment:'surat',tukin:'tukin',lembur:'lembur'}[module];
+    const permissionModule = {training:'pelatihan',leave:'cuti',assignment:'surat',tukin:'tukin',lembur:'lembur',uangMakan:'uangMakan'}[module];
     const items = config.items.filter(item => window.UserAccess?.canView?.(permissionModule,item.view) === true);
     if (!items.length) return '';
     const active = activeModule === module;
@@ -126,6 +131,7 @@
     return `<nav class="nav nav-modules" aria-label="Navigasi utama">
       <div class="nav-groups" role="group" aria-label="Modul">
         ${moduleGroup('tukin', activeModule, activeView)}
+        ${moduleGroup('uangMakan', activeModule, activeView)}
         ${moduleGroup('lembur', activeModule, activeView)}
         ${moduleGroup('training', activeModule, activeView)}
         ${moduleGroup('leave', activeModule, activeView)}
@@ -138,6 +144,7 @@
   function breadcrumb(module, viewLabel) {
     if (module === 'dashboard') return '<strong>Generator Dokumen</strong><span>/ Dashboard</span>';
     if (module === 'admin') return `<strong>Generator Dokumen</strong><span>/ Administrasi / ${viewLabel || 'Master Data'}</span>`;
+    if (module === 'uangMakan') return `<strong>Pusdatin PKP</strong><span>/ Uang Makan / ${viewLabel || ''}</span>`;
     if (module === 'training') return `<strong>Pusdatin PKP</strong><span>/ Pelatihan Pegawai / ${viewLabel || ''}</span>`;
     if (module === 'leave') return `<strong>Pusdatin PKP</strong><span>/ Cuti / ${viewLabel || ''}</span>`;
     if (module === 'assignment') return `<strong>Pusdatin PKP</strong><span>/ Surat Tugas / ${viewLabel || ''}</span>`;
@@ -150,7 +157,7 @@
     const module = opts.module || 'dashboard';
     const view = opts.view || '';
     let content = opts.content || '';
-    const permissionModule = {tukin:'tukin',lembur:'lembur',training:'pelatihan',leave:'cuti',assignment:'surat'}[module];
+    const permissionModule = {tukin:'tukin',lembur:'lembur',training:'pelatihan',leave:'cuti',assignment:'surat',uangMakan:'uangMakan'}[module];
     const pageView = String(opts.view || 'dashboard');
     if (permissionModule && window.UserAccess && !window.UserAccess.canView(permissionModule,pageView)) {
       content = window.UserAccess.permissionDeniedMarkup(permissionModule);

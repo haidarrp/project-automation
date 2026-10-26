@@ -11,7 +11,7 @@
       ready: () => Boolean(window.ExcelJS)
     },
     jszip: {
-      src: 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
+      src: 'assets/vendor/jszip.min.js',
       ready: () => Boolean(window.JSZip)
     },
     filesaver: {
