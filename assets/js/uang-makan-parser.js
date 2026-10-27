@@ -17,9 +17,14 @@
     const h=display[ix].map(v=>String(v||'').trim().toLowerCase());
     const find=(x,fallback)=>{const index=h.indexOf(x);return index<0?fallback:index;};
     const stat=h.findIndex(x=>x==='keterangan'||x==='status');
-    return {start:ix+1,date:find('tanggal',2),in:find('masuk',3),out:find('keluar',4),status:stat<0?21:stat};
+    const workModeColumns=h.flatMap((label,index)=>{
+      const mode=R.detectWorkMode(label);
+      return mode?[{index,mode}]:[];
+    });
+    return {start:ix+1,date:find('tanggal',2),in:find('masuk',3),out:find('keluar',4),status:stat<0?21:stat,workModeColumns};
   }
   function flag(row,index){const v=String(row[index]??'').trim();return Boolean(v&&v!=='-'&&v!=='0');}
+  function markedWorkMode(row,index){const v=String(row[index]??'').trim().toLowerCase();return Boolean(v&&!['-','0','tidak','no','false','n','off'].includes(v));}
   function parseFile(file,year,month){
     if(!window.XLSX)throw new Error('Pustaka Excel tidak tersedia. Muat ulang halaman.');
     if(!/\.xlsx?$/i.test(file.name))throw new Error('Berkas harus Excel (.xls/.xlsx).');
@@ -44,8 +49,12 @@
         const flags=[['S',7],['I',8],['TK',9],['D',10],['TL',11],['TB',12],['C',13],['L',14]].filter(x=>flag(dr,x[1])).map(x=>x[0]);
         const inMinutes=parseTime(rr[info.in],dr[info.in]);
         const outMinutes=parseTime(rr[info.out],dr[info.out]);
-        const record={key:dateKey,inMinutes,outMinutes,status:String(dr[info.status]||'').trim(),flags,duplicate:seen.has(dateKey)};
-        if(record.duplicate){dupes++;const prev=rows[dateKey];record.inMinutes=record.inMinutes??prev?.inMinutes??null;record.outMinutes=record.outMinutes??prev?.outMinutes??null;record.flags=[...new Set([...(prev?.flags||[]),...record.flags])];}
+        // Periksa seluruh keterangan pada baris, termasuk kolom terpisah dengan
+        // header WFA/WFH yang berisi tanda 1/centang (tidak hanya status kolom V).
+        const markedMode=info.workModeColumns.find(({index})=>markedWorkMode(dr,index))?.mode||'';
+        const workMode=markedMode||R.detectWorkMode(dr.join(' | '));
+        const record={key:dateKey,inMinutes,outMinutes,status:String(dr[info.status]||'').trim(),workMode,flags,duplicate:seen.has(dateKey)};
+        if(record.duplicate){dupes++;const prev=rows[dateKey];record.inMinutes=record.inMinutes??prev?.inMinutes??null;record.outMinutes=record.outMinutes??prev?.outMinutes??null;record.flags=[...new Set([...(prev?.flags||[]),...record.flags])];record.workMode=record.workMode||prev?.workMode||'';}
         rows[dateKey]=record;seen.add(dateKey);
       }
       if(!valid)throw new Error(`Tidak ada data tanggal pada ${R.periodLabel(year,month)}.`);

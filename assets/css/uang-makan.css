@@ -144,3 +144,24 @@
 .um-holiday-footer{margin-top:15px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:10px;line-height:1.5}
 @media(max-width:1100px){.um-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.um-grid{grid-template-columns:1fr}.um-holiday-layout{grid-template-columns:1fr}}
 @media(max-width:650px){.um-header{flex-direction:column;align-items:flex-start}.um-header h1{font-size:24px}.um-kpis{grid-template-columns:1fr 1fr}.um-modal-bg{padding:7px}.um-modal{width:100%;max-height:95vh}.um-modal-body{padding:12px}.um-modal-head,.um-modal-footer{padding:14px}.um-day-grid,.um-weekday-row{gap:4px}.um-day{min-height:66px;padding:5px 2px}.um-detail-grid{grid-template-columns:1fr}.um-steps{padding:12px}.um-actions{align-items:stretch;flex-direction:column}.um-actions>.um-row{justify-content:stretch}.um-btn{white-space:normal}.um-holiday-settings{padding:13px}.um-holiday-item{grid-template-columns:1fr auto}.um-holiday-item input{grid-column:1/-1;grid-row:2}.um-holiday-item .um-btn{grid-column:2;grid-row:1}}
+
+/* Berkas sumber untuk konflik Cuti/Surat Tugas pada verifikasi Uang Makan. */
+.um-day.remote:not(.selected){background:#eef3f8;border-color:#d4dfeb}
+.um-day.remote small:last-child{font-weight:760;color:var(--navy)}
+.um-remote-policy{background:#edf3f9;border-color:#cadbe9;color:var(--navy)}
+.um-supporting-documents{margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
+.um-supporting-head{margin-bottom:12px}
+.um-supporting-head h4{margin:0 0 5px;font-size:13px;font-weight:740;color:var(--ink)}
+.um-supporting-head p{margin:0;font-size:11px;line-height:1.5;color:var(--muted)}
+.um-document-list{display:grid;grid-template-columns:1fr;gap:14px}
+.um-document-card{min-width:0;overflow:hidden;border:1px solid var(--line-strong);border-radius:12px;background:white}
+.um-document-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line)}
+.um-document-heading strong{display:block;overflow-wrap:anywhere;font-size:12px;color:var(--ink)}
+.um-document-heading small{display:block;margin-top:5px;line-height:1.45;font-size:10px;color:var(--muted)}
+.um-document-heading .um-btn{text-decoration:none}
+.um-document-frame{display:block;width:100%;height:430px;border:0;background:#fafafa}
+.um-document-status{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;min-height:130px;padding:24px 18px;text-align:center;color:var(--muted);font-size:11px;line-height:1.55}
+.um-document-status strong{font-size:12px;color:var(--ink-soft)}
+.um-document-status p{max-width:700px;margin:0;overflow-wrap:anywhere}
+.um-supporting-missing{margin-top:10px}
+@media(max-width:650px){.um-document-frame{height:310px}.um-document-heading{align-items:flex-start}.um-document-heading .um-btn{min-height:32px}}

@@ -8,7 +8,7 @@
    return {id:e.id,name:e.name,nip:e.nip,anakSatker:e.anakSatker||'',jenisPegawai:e.jenisPegawai||'',order:e.order||9999,
      files:Array.isArray(e.files)?e.files:[],fileWarnings:e.fileWarnings||[],coverageAcknowledged:Boolean(e.coverageAcknowledged),coverageReason:e.coverageReason||'',missingAcknowledged:Boolean(e.missingAcknowledged),missingReason:e.missingReason||'',
      days:Object.fromEntries(Object.entries(e.days||{}).map(([key,d])=>[key,{
-       key,inMinutes:d.inMinutes??null,outMinutes:d.outMinutes??null,status:d.status||'',flags:d.flags||[],duplicate:Boolean(d.duplicate),isHoliday:Boolean(d.isHoliday),
+       key,inMinutes:d.inMinutes??null,outMinutes:d.outMinutes??null,status:d.status||'',workMode:d.workMode||'',flags:d.flags||[],duplicate:Boolean(d.duplicate),isHoliday:Boolean(d.isHoliday),
        leaves:(d.leaves||[]).map(x=>({id:x.id,leaveType:x.leaveType,documentNumber:x.documentNumber,startDate:x.startDate,endDate:x.endDate})),
        assignments:(d.assignments||[]).map(x=>({id:x.id,assignmentType:x.assignmentType,activity:x.activity,letterNumber:x.letterNumber,startDate:x.startDate,endDate:x.endDate,employeeIds:x.employeeIds})),
        manualValue:d.manualValue??null,manualNote:d.manualNote||'',reviewed:Boolean(d.reviewed),reviewedAt:d.reviewedAt||'',reviewedBy:d.reviewedBy||''

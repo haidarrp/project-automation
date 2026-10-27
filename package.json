@@ -5,7 +5,8 @@
   "description": "Aplikasi administrasi Pusdatin PKP dengan integrasi Microsoft SharePoint untuk Tukin, Cuti, Surat Tugas, dan arsip bukti dukung.",
   "scripts": {
     "build:msal": "esbuild src/msal-global.js --bundle --minify --format=iife --platform=browser --outfile=assets/vendor/msal-browser.bundle.js && esbuild src/msal-redirect-entry.js --bundle --minify --format=iife --platform=browser --outfile=assets/vendor/msal-redirect-bridge.bundle.js",
-    "build": "npm run build:msal"
+    "build": "npm run build:msal",
+    "test:uang-makan": "node --test tests/uang-makan.test.js"
   },
   "dependencies": {
     "@azure/msal-browser": "5.23.0"

@@ -6,7 +6,7 @@ const prev=new Date();prev.setDate(1);prev.setMonth(prev.getMonth()-1);
 const state={view:'process',step:1,year:prev.getFullYear(),month:prev.getMonth()+1,master:[],
   files:[],parsed:[],employees:[],leaves:[],assignments:[],supportLoaded:false,history:[],
   busy:false,error:'',message:'',filter:'all',search:'',modalId:'',modalDate:'',savedRun:null,dirty:false,
-  holidays:[],holidayNotes:{}};
+  holidays:[],holidayNotes:{},documentPreviews:{}};
 const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const permission=key=>window.UserAccess.assert('uangMakan',key);
 const fmtTime=n=>n===null||n===undefined?'-':`${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;
@@ -43,7 +43,7 @@ function notify(s){state.error='';state.message=String(s||'');render();}
 function summary(){return R.overall(state.employees);}
 function pendingCount(){return state.employees.filter(e=>R.overview(e).status!=='Siap').length;}
 function makeEmptyEmployee(e){return {...e,files:[],fileWarnings:[],coverageAcknowledged:false,coverageReason:'',days:{}};}
-function resetProcess(){state.files=[];state.parsed=[];state.employees=[];state.leaves=[];state.assignments=[];state.supportLoaded=false;state.modalId='';state.modalDate='';state.savedRun=null;state.dirty=false;state.search='';state.filter='all';state.step=1;clearNotice();}
+function resetProcess(){state.files=[];state.parsed=[];state.employees=[];state.leaves=[];state.assignments=[];state.supportLoaded=false;state.modalId='';state.modalDate='';state.savedRun=null;state.dirty=false;state.search='';state.filter='all';state.documentPreviews={};state.step=1;clearNotice();}
 function pageTitle(view){return {process:'Proses Uang Makan',dashboard:'Dashboard Uang Makan',history:'Riwayat Uang Makan'}[view]||'Uang Makan';}
 function metric(label,value,description){return `<div class="um-panel um-kpi"><small>${esc(label)}</small><strong>${esc(value)}</strong><span>${esc(description||'')}</span></div>`;}
 function showStatus(){return `${state.error?`<div class="um-note error" role="alert" style="margin-bottom:13px">${esc(state.error)}</div>`:''}${state.message?`<div class="um-note good" role="status" style="margin-bottom:13px">${esc(state.message)}</div>`:''}`;}
@@ -105,11 +105,11 @@ function verifyPanel(){
 function kpis(s){return `<div class="um-kpis">${metric('Pegawai Diproses',s.employees,'Dari file absensi yang diunggah')}${metric('Hari Uang Makan',s.days,'Total pegawai yang diproses')}${metric('Tanggal Perlu Cek',s.issues,'Belum diverifikasi')}${metric('Koreksi Manual',s.manual,'Perubahan bernotasi')}</div>`;}
 function previewPanel(){
  const s=summary(),pending=pendingCount(),ready=pending===0;
- const shown=state.employees.slice(0,Math.min(12,state.employees.length));
+ const shown=state.employees;
  return `${kpis(s)}<section class="um-panel"><div class="um-panel-title"><div><h2>Pratinjau Sheet PUSDATIN</h2><p>Kolom tanggal diisi angka 1 apabila memperoleh uang makan, dan kosong untuk tanggal lainnya.</p></div><span class="um-pill ${ready?'good':'warn'}">${ready?'Siap Ekspor':`${pending} pegawai belum siap`}</span></div>
  ${!ready?`<div class="um-note warn" style="margin-bottom:13px">Selesaikan verifikasi dan kelengkapan data pegawai yang tercantum pada file absensi. Pegawai master yang tidak diunggah tidak memengaruhi ekspor.</div>`:''}
  <div class="um-table-outer um-preview-scroll"><table class="um-table export"><thead><tr><th>No.</th><th>NIP</th><th>Nama</th>${Array.from({length:R.periodDays(state.year,state.month)},(_,i)=>`<th class="um-preview-day">${i+1}</th>`).join('')}<th>Jumlah</th><th>Unit Kerja</th><th>Bank</th><th>Jenis Pegawai</th></tr></thead><tbody>${shown.map((e,i)=>`<tr><td>${i+1}</td><td>${esc(e.nip)}</td><td class="name">${esc(e.name)}</td>${R.monthDates(state.year,state.month).map(k=>`<td class="number um-preview-day">${e.days[k]?.value===1?'1':''}</td>`).join('')}<td class="number">${R.overview(e).days}</td><td>Pusat Data dan Informasi</td><td>${esc(e.anakSatker||'')}</td><td>${esc(e.jenisPegawai||'')}</td></tr>`).join('')}</tbody></table></div>
- ${state.employees.length>shown.length?`<p class="um-fine" style="margin-top:10px">Menampilkan ${shown.length} pegawai pertama dari ${state.employees.length}. File hasil hanya mencakup pegawai yang diunggah.</p>`:''}
+ <p class="um-fine" style="margin-top:10px">Menampilkan seluruh ${shown.length} pegawai dari berkas yang diunggah. Geser tabel ke samping untuk melihat semua tanggal.</p>
  <div class="um-summary um-preview-period"><span>Periode ${esc(R.periodLabel(state.year,state.month))}</span></div>
  <div class="um-actions"><button class="um-btn" type="button" data-um-action="back">← Kembali ke Verifikasi</button><div class="um-row"><button class="um-btn" type="button" data-um-action="save" ${!ready||state.busy?'disabled':''}>${state.busy?'Menyimpan...':'Simpan ke Riwayat'}</button><button class="um-btn primary" type="button" data-um-action="export" ${!ready||state.busy?'disabled':''}>Unduh Excel PUSDATIN ↓</button></div></div></section>`;
 }
@@ -129,6 +129,109 @@ function process(){
  ${state.step===1?periodPanel():state.step===2?uploadPanel():state.step===3?verifyPanel():previewPanel()}`;
 }
 function findEmployee(id){return state.employees.find(e=>e.id===id);}
+
+// Metadata berkas mengikuti model dokumen pada modul Cuti dan Surat Tugas.
+// Hanya metadata tersimpan yang digunakan; URL pratinjau diambil sementara
+// dari Microsoft Graph, tidak disimpan pada riwayat atau Firestore.
+function supportDocuments(raw){
+ return (Array.isArray(raw)?raw:[]).map((doc,index)=>{
+  const item=doc&&typeof doc==='object'?doc:{};
+  const f=item.file&&typeof item.file==='object'?item.file:{};
+  return {id:String(item.id||`dokumen-${index+1}`),name:String(item.name||''),type:String(item.type||''),
+    file:{name:String(f.name||f.remoteName||''),remoteName:String(f.remoteName||''),
+      driveId:String(f.driveId||''),itemId:String(f.itemId||''),webUrl:String(f.webUrl||'')}};
+ });
+}
+function conflictSupporting(day){
+ const matches=[];
+ if(day.issues?.includes('Presensi bertentangan dengan data cuti')){
+  (day.leaves||[]).forEach(item=>matches.push({kind:'cuti',id:item.id,title:`Cuti: ${item.leaveType||'Cuti'}`,
+    reference:item.documentNumber||'',documents:item.documents||[]}));
+ }
+ if(day.issues?.includes('Presensi bertentangan dengan dinas luar')){
+  (day.official||[]).forEach(item=>matches.push({kind:'dinas',id:item.id,title:`Dinas luar: ${item.activity||'Surat Tugas'}`,
+    reference:item.letterNumber||'',documents:item.documents||[]}));
+ }
+ return matches;
+}
+function documentKey(group,doc){
+ return [group.kind,group.id,doc.id,doc.file?.driveId||'',doc.file?.itemId||''].join('::');
+}
+function safeHttps(value){
+ try{const url=new URL(String(value||''));return url.protocol==='https:'?url.href:'';}catch(_){return '';}
+}
+function previewPostFields(raw){
+ return [...new URLSearchParams(String(raw||'')).entries()].map(([name,value])=>`<input type="hidden" name="${esc(name)}" value="${esc(value)}">`).join('');
+}
+function supportFilePreview(group,doc,index){
+ const file=doc.file||{},key=documentKey(group,doc),hasFile=Boolean(file.driveId&&file.itemId);
+ const ctx=state.documentPreviews[key]||{loading:true};
+ const fileName=file.name||doc.name||file.remoteName||'Berkas pendukung';
+ const sharePointUrl=safeHttps(file.webUrl);
+ const actions=sharePointUrl?`<a class="um-btn small" href="${esc(sharePointUrl)}" target="_blank" rel="noopener noreferrer">Buka SharePoint ↗</a>`:'';
+ let body='';
+ if(!hasFile)body='<div class="um-document-status">Berkas digital belum terunggah pada data sumber.</div>';
+ else if(ctx.loading)body='<div class="um-document-status">Menyiapkan pratinjau dari Microsoft 365...</div>';
+ else if(ctx.error)body=`<div class="um-document-status"><strong>Pratinjau belum tersedia</strong><p>${esc(ctx.error)}</p><button class="um-btn small" type="button" data-um-action="retry-support-preview" data-doc-key="${esc(key)}">Coba Lagi</button></div>`;
+ else if(safeHttps(ctx.getUrl))body=`<iframe class="um-document-frame" src="${esc(safeHttps(ctx.getUrl))}" title="Pratinjau ${esc(fileName)}" loading="lazy" referrerpolicy="no-referrer" allow="fullscreen"></iframe>`;
+ else if(safeHttps(ctx.postUrl)){
+  const target=`um-support-${index}`;
+  body=`<iframe class="um-document-frame" name="${target}" title="Pratinjau ${esc(fileName)}" loading="lazy" referrerpolicy="no-referrer" allow="fullscreen"></iframe><form data-um-preview-post method="post" action="${esc(safeHttps(ctx.postUrl))}" target="${target}">${previewPostFields(ctx.postParameters)}</form>`;
+ }else body='<div class="um-document-status">Microsoft 365 tidak memberikan tautan pratinjau yang valid.</div>';
+ return `<article class="um-document-card"><div class="um-document-heading"><div><strong>${esc(fileName)}</strong><small>${esc(group.title)}${group.reference?' · '+esc(group.reference):''}${doc.type?' · '+esc(doc.type):''}</small></div>${actions}</div>${body}</article>`;
+}
+function supportingFilesSection(day){
+ const groups=conflictSupporting(day);
+ if(!groups.length)return '';
+ let index=0;
+ const cards=groups.flatMap(group=>group.documents.map(doc=>supportFilePreview(group,doc,++index)));
+ const missing=groups.filter(group=>!group.documents.length);
+ return `<section class="um-supporting-documents" id="um-supporting-documents" aria-label="Pratinjau berkas pendukung konflik">
+  <div class="um-supporting-head"><h4>Berkas Pendukung Cuti / Dinas</h4><p>Dokumen terkait konflik presensi pada ${esc(dateLabel(day.key))} ditampilkan di bawah hasil verifikasi.</p></div>
+  ${cards.length?`<div class="um-document-list">${cards.join('')}</div>`:''}
+  ${missing.length?`<div class="um-note warn um-supporting-missing">Belum terdapat berkas pada ${missing.map(group=>esc(group.title)).join(' · ')}. Periksa dokumen di modul Cuti atau Surat Tugas.</div>`:''}
+ </section>`;
+}
+function submitPreviewPostForms(){
+ root.querySelectorAll('[data-um-preview-post]').forEach(form=>{
+  if(form.dataset.submitted==='1')return;
+  form.dataset.submitted='1';
+  try{form.submit();}catch(error){console.warn('[Uang Makan] Pratinjau POST gagal',error);}
+ });
+}
+function refreshSupportingFiles(){
+ const day=findEmployee(state.modalId)?.days?.[state.modalDate];
+ const node=root.querySelector('#um-supporting-documents');
+ if(day&&node){node.outerHTML=supportingFilesSection(day);window.requestAnimationFrame(submitPreviewPostForms);}
+}
+async function loadSupportingPreviews(){
+ if(!window.UserAccess?.can?.('uangMakan','process.verify'))return;
+ const employeeId=state.modalId,date=state.modalDate;
+ const day=findEmployee(employeeId)?.days?.[date];
+ if(!day)return;
+ for(const group of conflictSupporting(day)){
+  for(const doc of group.documents){
+   if(state.modalId!==employeeId||state.modalDate!==date)return;
+   if(!doc.file?.driveId||!doc.file?.itemId)continue;
+   const key=documentKey(group,doc);
+   if(state.documentPreviews[key])continue;
+   state.documentPreviews[key]={loading:true};
+   refreshSupportingFiles();
+   try{
+    if(!window.SharePointStorage?.getPreviewInfo)throw new Error('Layanan pratinjau SharePoint tidak tersedia.');
+    const preview=await window.SharePointStorage.getPreviewInfo({...doc.file,file:null},true);
+    state.documentPreviews[key]={loading:false,error:'',getUrl:preview.getUrl||'',
+      postUrl:preview.postUrl||'',postParameters:preview.postParameters||''};
+   }catch(error){
+    state.documentPreviews[key]={loading:false,error:String(error?.message||error),getUrl:'',postUrl:'',postParameters:''};
+   }
+   // Pratinjau yang sama dapat dipakai pada beberapa tanggal. Ketika pengguna
+   // berpindah tanggal saat request masih berjalan, segarkan panel yang aktif.
+   const activeDay=findEmployee(state.modalId)?.days?.[state.modalDate];
+   if(activeDay&&conflictSupporting(activeDay).some(g=>g.documents.some(d=>documentKey(g,d)===key)))refreshSupportingFiles();
+  }
+ }
+}
 function modal(){
  const e=findEmployee(state.modalId);if(!e)return '';
  const a=R.overview(e),keys=R.monthDates(state.year,state.month);
@@ -142,11 +245,12 @@ function modal(){
  ${e.fileWarnings?.length?`<div class="um-note warn" style="margin-top:13px">${e.fileWarnings.map(v=>esc(v)).join(' · ')}${e.coverageAcknowledged?`<div>Sudah ditinjau: ${esc(e.coverageReason||'-')}</div>`:`<div class="um-row" style="margin-top:9px"><input class="um-search" style="max-width:390px" id="um-coverage-reason" placeholder="Catatan verifikasi cakupan absensi"><button type="button" class="um-btn small" data-um-action="acknowledge" data-kind="coverage">Konfirmasi Cakupan</button></div>`}</div>`:''}
  <div class="um-weekday-row">${WEEKDAYS_MONDAY.map(day=>`<span>${day}</span>`).join('')}</div>
  <div class="um-day-grid">${Array.from({length:calendarOffset(keys[0])},()=>'<span class="um-day-placeholder" aria-hidden="true"></span>').join('')}${keys.map(k=>{const d=e.days[k],warn=d.issues.length&&!d.reviewed,cls=d.value===1?'earned':'';
-   const status=d.isHoliday?'Tanggal merah':d.isWeekend?'Akhir pekan':warn?'Perlu verifikasi':d.value===1?'1 hari':'Tidak dibayar';
-   return `<button class="um-day ${cls} ${warn?'warn':''} ${state.modalDate===k?'selected':''} ${d.isWeekend?'weekend':''} ${d.isHoliday?'holiday':''}" type="button" data-um-action="select-day" data-date="${k}" aria-pressed="${state.modalDate===k}" aria-label="${esc(dateLabel(k))}, ${esc(status)}" title="${esc(d.issues.join('; ')||status)}"><span class="um-day-week">${WEEKDAYS[R.weekday(k)]}</span><strong>${Number(k.slice(-2))}</strong><small>${d.nonWorking?'Libur':d.value===1?'1 hari':warn?'Periksa':'–'}</small></button>`;}).join('')}</div>
- <div class="um-detail"><h3>Verifikasi ${esc(dateLabel(day.key))}</h3><div class="um-detail-grid"><div><div class="um-fine"><b>Jam masuk:</b> ${esc(fmtTime(day.inMinutes))} · <b>Jam pulang:</b> ${esc(fmtTime(day.outMinutes))}<br><b>Status absensi:</b> ${esc(day.status||'—')}<br><b>Kode:</b> ${esc(day.flags.join(', ')||'—')}<br><b>Cuti:</b> ${day.leaves.length?esc(day.leaves.map(x=>x.leaveType||'Cuti').join(', ')):'—'}<br><b>Surat tugas:</b> ${day.assignments.length?esc(day.assignments.map(x=>x.activity||x.letterNumber||'Surat Tugas').join(', ')):'—'}<br><b>Hasil otomatis:</b> ${day.automatic===1?'1 hari':'Tidak dibayar'}</div>
+   const status=d.isHoliday?'Tanggal merah':d.isWeekend?'Akhir pekan':warn?'Perlu verifikasi':d.remoteExcluded?'WFA/WFH: 0 hari':d.value===1?'1 hari':'Tidak dibayar';
+   return `<button class="um-day ${cls} ${warn?'warn':''} ${state.modalDate===k?'selected':''} ${d.isWeekend?'weekend':''} ${d.isHoliday?'holiday':''} ${d.remoteExcluded&&!d.nonWorking?'remote':''}" type="button" data-um-action="select-day" data-date="${k}" aria-pressed="${state.modalDate===k}" aria-label="${esc(dateLabel(k))}, ${esc(status)}" title="${esc(d.issues.join('; ')||status)}"><span class="um-day-week">${WEEKDAYS[R.weekday(k)]}</span><strong>${Number(k.slice(-2))}</strong><small>${d.nonWorking?'Libur':warn?'Periksa':d.remoteExcluded?d.workMode:d.value===1?'1 hari':'–'}</small></button>`;}).join('')}</div>
+ <div class="um-detail"><h3>Verifikasi ${esc(dateLabel(day.key))}</h3><div class="um-detail-grid"><div><div class="um-fine"><b>Jam masuk:</b> ${esc(fmtTime(day.inMinutes))} · <b>Jam pulang:</b> ${esc(fmtTime(day.outMinutes))}<br><b>Status absensi:</b> ${esc(day.status||'—')}<br><b>Pola kerja:</b> ${esc(day.workMode||'—')}<br><b>Kode:</b> ${esc(day.flags.join(', ')||'—')}<br><b>Cuti:</b> ${day.leaves.length?esc(day.leaves.map(x=>x.leaveType||'Cuti').join(', ')):'—'}<br><b>Surat tugas:</b> ${day.assignments.length?esc(day.assignments.map(x=>x.activity||x.letterNumber||'Surat Tugas').join(', ')):'—'}<br><b>Hasil otomatis:</b> ${day.automatic===1?'1 hari':'Tidak dibayar'}</div>
+  ${day.remoteExcluded&&!day.nonWorking?`<div class="um-note um-remote-policy" style="margin-top:11px">${esc(day.workMode)} di luar hari Jumat: uang makan otomatis <b>0 hari</b>, meskipun jam presensi terisi.</div>`:''}
   ${day.nonWorking?'<div class="um-note" style="margin-top:11px">Tanggal tidak termasuk hari yang memperoleh uang makan.</div>':isProblem?`<div class="um-note warn" style="margin-top:11px">${day.issues.map(x=>esc(x)).join(' · ')}</div>`:'<div class="um-note good" style="margin-top:11px">Tidak ditemukan konflik otomatis.</div>'}</div>
- <div>${day.nonWorking?`<div class="um-note um-note-nonworking"><b>${day.isHoliday?'Tanggal merah':'Sabtu/Minggu'}</b><p>Hari ini otomatis bernilai 0. Presensi atau verifikasi manual tidak dapat mengubahnya menjadi hari uang makan.</p>${day.isHoliday&&state.holidayNotes[day.key]?`<p>Keterangan: ${esc(state.holidayNotes[day.key])}</p>`:''}</div>`:`<div class="um-field"><label for="um-manual">Hasil Setelah Verifikasi</label><select id="um-manual"><option value="" ${day.manualValue===null?'selected':''}>Ikuti otomatis (${day.automatic} hari)</option><option value="1" ${day.manualValue===1?'selected':''}>1 — Memperoleh Uang Makan</option><option value="0" ${day.manualValue===0?'selected':''}>0 — Tidak Memperoleh Uang Makan</option></select></div><div class="um-field" style="margin-top:11px"><label for="um-note">Catatan Verifikasi / Alasan Koreksi</label><textarea id="um-note" placeholder="Wajib diisi jika ada konflik atau koreksi manual">${esc(day.manualNote||'')}</textarea></div><div class="um-row" style="margin-top:12px"><button class="um-btn primary small" type="button" data-um-action="save-day">Simpan Verifikasi Tanggal</button>${day.reviewed?'<span class="um-pill good">Sudah diverifikasi</span>':''}</div>`}</div></div></div>
+ <div>${day.nonWorking?`<div class="um-note um-note-nonworking"><b>${day.isHoliday?'Tanggal merah':'Sabtu/Minggu'}</b><p>Hari ini otomatis bernilai 0. Presensi atau verifikasi manual tidak dapat mengubahnya menjadi hari uang makan.</p>${day.isHoliday&&state.holidayNotes[day.key]?`<p>Keterangan: ${esc(state.holidayNotes[day.key])}</p>`:''}</div>`:`<div class="um-field"><label for="um-manual">Hasil Setelah Verifikasi</label><select id="um-manual"><option value="" ${day.manualValue===null?'selected':''}>${day.remoteExcluded?'0 — Otomatis (WFA/WFH bukan Jumat)':`Ikuti otomatis (${day.automatic} hari)`}</option>${day.remoteExcluded?'':`<option value="1" ${day.manualValue===1?'selected':''}>1 — Memperoleh Uang Makan</option><option value="0" ${day.manualValue===0?'selected':''}>0 — Tidak Memperoleh Uang Makan</option>`}</select></div><div class="um-field" style="margin-top:11px"><label for="um-note">Catatan Verifikasi / Alasan Koreksi</label><textarea id="um-note" placeholder="Wajib diisi jika ada konflik atau koreksi manual">${esc(day.manualNote||'')}</textarea></div><div class="um-row" style="margin-top:12px"><button class="um-btn primary small" type="button" data-um-action="save-day">Simpan Verifikasi Tanggal</button>${day.reviewed?'<span class="um-pill good">Sudah diverifikasi</span>':''}</div>`}</div></div>${supportingFilesSection(day)}</div>
  </div><div class="um-modal-footer"><span class="um-fine">Perubahan tercatat bersama catatan, operator, dan waktu verifikasi.</span><button class="um-btn" type="button" data-um-action="close-modal">Selesai</button></div>
  </section></div>`;
 }
@@ -155,6 +259,7 @@ function render(){
  const content=`<div class="um-page ${state.busy?'um-busy':''}">${state.view==='dashboard'?dashboard():state.view==='history'?history():process()}</div>`;
  root.innerHTML=window.AppShell.render({module:'uangMakan',view:state.view,viewLabel:pageTitle(state.view),content,overlays:modal()});
  window.UserAccess?.scheduleDecoration?.();
+ window.requestAnimationFrame(submitPreviewPostForms);
 }
 async function loadMaster(){
  const bundle=await window.MasterDataService.getBundle(true);
@@ -178,14 +283,14 @@ async function getSupportingData(){
  const ls=new Map(),as=new Map();
  leaveSnaps.flatMap(s=>s.docs).forEach(doc=>{
    const x=doc.data()||{},startDate=String(x.startDate||''),endDate=String(x.endDate||x.startDate||'');
-   if(x.employeeId&&startDate<=to&&endDate>=from){ls.set(doc.id,{id:doc.id,employeeId:String(x.employeeId),startDate,endDate,leaveType:String(x.leaveType||'Cuti'),documentNumber:String(x.documentNumber||'')});}
+   if(x.employeeId&&startDate<=to&&endDate>=from){ls.set(doc.id,{id:doc.id,employeeId:String(x.employeeId),startDate,endDate,leaveType:String(x.leaveType||'Cuti'),documentNumber:String(x.documentNumber||''),documents:supportDocuments(x.documents)});}
  });
  assignmentSnaps.flatMap(s=>s.docs).forEach(doc=>{
    const x=doc.data()||{},startDate=String(x.startDate||''),endDate=String(x.endDate||x.startDate||'');
    const type=['official_travel','work_arrangement','other'].includes(x.assignmentType)?x.assignmentType:'official_travel';
    const ids=(x.employees||[]).map(e=>String(e.employeeId||e.id||'')).filter(Boolean);
    if(ids.length&&startDate<=to&&endDate>=from)as.set(doc.id,{id:doc.id,employeeIds:ids,startDate,endDate,
-     assignmentType:type,activity:String(x.activity||''),letterNumber:String(x.letterNumber||'')});
+     assignmentType:type,activity:String(x.activity||''),letterNumber:String(x.letterNumber||''),documents:supportDocuments(x.documents)});
  });
  return {leaves:Array.from(ls.values()),assignments:Array.from(as.values())};
 }
@@ -261,7 +366,8 @@ async function calculate(){
       if(prior[key]){
         const old=prior[key];
         prior[key]={...record,inMinutes:record.inMinutes??old.inMinutes,outMinutes:record.outMinutes??old.outMinutes,
-          flags:[...new Set([...(old.flags||[]),...(record.flags||[])])],status:record.status||old.status,duplicate:true};
+          flags:[...new Set([...(old.flags||[]),...(record.flags||[])])],status:record.status||old.status,
+          workMode:record.workMode||old.workMode||'',duplicate:true};
       }else prior[key]=record;
     }
   }
@@ -274,7 +380,7 @@ async function calculate(){
     if(observed[observed.length-1]<end)e.fileWarnings.push(`Tanggal terakhir yang tersedia ${observed[observed.length-1]} (seharusnya ${end})`);
   }
   const supports=await getSupportingData();
-  state.leaves=supports.leaves;state.assignments=supports.assignments;state.supportLoaded=true;
+  state.leaves=supports.leaves;state.assignments=supports.assignments;state.supportLoaded=true;state.documentPreviews={};
   state.employees=computeEmployees(employees,state.leaves,state.assignments);
   state.parsed=list;state.step=3;state.savedRun=null;state.dirty=true;
   state.message=`Berhasil mengolah ${parsed.length} berkas untuk ${employees.length} pegawai yang diunggah. Pegawai master lainnya tidak ikut dihitung; cuti dan surat tugas telah disinkronkan.`;
@@ -286,7 +392,7 @@ async function sync(){
  state.busy=true;clearNotice();render();
  try{
    const supports=await getSupportingData();
-   state.leaves=supports.leaves;state.assignments=supports.assignments;
+   state.leaves=supports.leaves;state.assignments=supports.assignments;state.documentPreviews={};
    state.employees=computeEmployees(state.employees,supports.leaves,supports.assignments);state.dirty=true;
    state.message=`Sinkronisasi selesai: ${supports.leaves.length} data cuti, ${supports.assignments.length} surat tugas.`;
  }catch(e){fail(e);return;}
@@ -298,9 +404,10 @@ function saveDay(){
  const raw=document.getElementById('um-manual')?.value||'';
  const manual=raw===''?null:Number(raw),reason=String(document.getElementById('um-note')?.value||'').trim();
  if(d.nonWorking){alert('Sabtu/Minggu atau tanggal merah selalu bernilai 0 dan tidak dapat dikoreksi menjadi 1.');return;}
+ if(d.remoteExcluded&&manual===1){alert('WFA/WFH di luar hari Jumat wajib bernilai 0 dan tidak dapat dikoreksi menjadi 1.');return;}
  if((manual!==null||d.issues.length)&&!reason){alert('Catatan verifikasi wajib diisi untuk tanggal yang memiliki konflik atau dikoreksi.');return;}
  if(manual!==null&&manual!==0&&manual!==1){alert('Pilihan hasil verifikasi tidak valid.');return;}
- d.manualValue=manual;d.manualNote=reason;d.value=manual===null?d.automatic:manual;d.reviewed=true;
+ d.manualValue=d.remoteExcluded?null:manual;d.manualNote=reason;d.value=d.remoteExcluded?0:(manual===null?d.automatic:manual);d.reviewed=true;
  d.reviewedAt=new Date().toISOString();d.reviewedBy=window.FirebaseClient.getCurrentUser()?.email||'';
  state.dirty=true;state.savedRun=null;notify('Verifikasi tanggal berhasil dicatat.');
 }
@@ -387,8 +494,13 @@ root.addEventListener('click',async event=>{
   case 'clear-files':if(permission('process.upload')){state.files=[];state.employees=[];render();}break;
   case 'calculate':await calculate();break;
   case 'sync':await sync();break;
-  case 'verify':if(permission('process.verify')){state.modalId=button.dataset.id;const e=findEmployee(state.modalId);state.modalDate=Object.keys(e?.days||{}).find(k=>e.days[k].issues.length&&!e.days[k].reviewed)||R.key(state.year,state.month,1);render();}break;
-  case 'select-day':state.modalDate=button.dataset.date;render();break;
+  case 'verify':if(permission('process.verify')){state.modalId=button.dataset.id;const e=findEmployee(state.modalId);state.modalDate=Object.keys(e?.days||{}).find(k=>e.days[k].issues.length&&!e.days[k].reviewed)||R.key(state.year,state.month,1);render();void loadSupportingPreviews();}break;
+  case 'select-day':state.modalDate=button.dataset.date;render();void loadSupportingPreviews();break;
+  case 'retry-support-preview':{
+   if(!permission('process.verify'))break;
+   delete state.documentPreviews[button.dataset.docKey];
+   refreshSupportingFiles();void loadSupportingPreviews();break;
+  }
   case 'save-day':saveDay();break;
   case 'acknowledge':acknowledge(button.dataset.kind);break;
   case 'close-modal':state.modalId='';state.modalDate='';render();break;
