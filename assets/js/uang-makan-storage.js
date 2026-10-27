@@ -13,8 +13,14 @@
    });
  }
  function sanitizeEmployee(e){
+   // Simpan hanya referensi SharePoint, bukan binary/File/Blob atau URL preview sementara.
+   const sourceFiles=(Array.isArray(e.sourceFiles)?e.sourceFiles:[]).map(source=>({
+     name:String(source.name||''),size:Number(source.size||0),type:String(source.type||''),
+     lastModified:Number(source.lastModified||0),driveId:String(source.driveId||''),
+     itemId:String(source.itemId||''),webUrl:String(source.webUrl||''),remoteName:String(source.remoteName||'')
+   }));
    return {id:e.id,name:e.name,nip:e.nip,anakSatker:e.anakSatker||'',jenisPegawai:e.jenisPegawai||'',order:e.order||9999,
-     files:Array.isArray(e.files)?e.files:[],fileWarnings:e.fileWarnings||[],coverageAcknowledged:Boolean(e.coverageAcknowledged),coverageReason:e.coverageReason||'',missingAcknowledged:Boolean(e.missingAcknowledged),missingReason:e.missingReason||'',
+     files:Array.isArray(e.files)?e.files:[],sourceFiles,fileWarnings:e.fileWarnings||[],coverageAcknowledged:Boolean(e.coverageAcknowledged),coverageReason:e.coverageReason||'',missingAcknowledged:Boolean(e.missingAcknowledged),missingReason:e.missingReason||'',
      days:Object.fromEntries(Object.entries(e.days||{}).map(([key,d])=>[key,{
        key,inMinutes:d.inMinutes??null,outMinutes:d.outMinutes??null,status:d.status||'',workMode:d.workMode||'',flags:d.flags||[],duplicate:Boolean(d.duplicate),isHoliday:Boolean(d.isHoliday),
        leaves:(d.leaves||[]).map(x=>({id:x.id,leaveType:x.leaveType,documentNumber:x.documentNumber||'',documentDate:x.documentDate||'',
@@ -34,7 +40,7 @@
    const meta={year,month,period:`${year}-${String(month).padStart(2,'0')}`,createdAt:new Date().toISOString(),
      ownerUid:a.uid,ownerEmail:a.email,ownerName:a.name,status:'writing',summary,
      holidays:Array.isArray(settings.holidays)?settings.holidays.slice():[],
-     holidayNotes:settings.holidayNotes||{},schemaVersion:3};
+     holidayNotes:settings.holidayNotes||{},archiveKey:String(settings.archiveKey||''),schemaVersion:4};
    await ref.set(meta);
    try{
      const stored=employees.map(sanitizeEmployee);

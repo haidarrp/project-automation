@@ -32,8 +32,8 @@
     ]},
     { id:'uangMakan',label:'Uang Makan',sections:[
       {id:'dashboard',label:'Dashboard Uang Makan',actions:[]},
-      {id:'process',label:'Proses Uang Makan',actions:[['upload','Unggah Absensi'],['calculate','Hitung dan Sinkronkan'],['verify','Verifikasi/Koreksi Harian'],['save','Simpan Hasil'],['export','Ekspor Excel']]},
-      {id:'history',label:'Riwayat Uang Makan',actions:[['download','Unduh Excel'],['delete','Hapus Riwayat']]}
+      {id:'process',label:'Proses Uang Makan',actions:[['upload','Unggah Absensi'],['calculate','Hitung dan Sinkronkan'],['verify','Verifikasi/Koreksi Harian'],['save','Simpan Hasil'],['export','Ekspor Excel / ZIP']]},
+      {id:'history',label:'Riwayat Uang Makan',actions:[['download','Unduh Excel / ZIP'],['delete','Hapus Riwayat']]}
     ]},
     { id:'lembur',label:'Lembur',sections:[
       { id:'dashboard',label:'Dashboard Lembur',actions:[] },
@@ -212,8 +212,8 @@
       ['[data-um-action="calculate"]','process.calculate'],
       ['[data-um-action="verify"],[data-um-action="save-day"],[data-um-action="acknowledge"]','process.verify'],
       ['[data-um-action="save"]','process.save'],
-      ['[data-um-action="export"]','process.export'],
-      ['[data-um-action="history-download"]','history.download'],
+      ['[data-um-action="export"],[data-um-action="export-zip"]','process.export'],
+      ['[data-um-action="history-download"],[data-um-action="history-download-zip"]','history.download'],
       ['[data-um-action="history-delete"]','history.delete']
     ],
     lembur:[

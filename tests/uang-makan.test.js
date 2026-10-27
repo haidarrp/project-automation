@@ -13,7 +13,7 @@ function sandbox(code,overrides={}){
 const ruleCode=fs.readFileSync(path.join(scripts,'uang-makan-rules.js'),'utf8');
 function appHarness(R){
  const code=fs.readFileSync(path.join(scripts,'uang-makan-app.js'),'utf8')
-  .replace(/\ninit\(\);\s*\}\)\(\);\s*$/,`\nwindow.__umTest={state,previewPanel,dailySupporting,supportingFilesSection,supportingRecordsSection,supportDocuments,documentKey,modal,loadSupportingPreviews,getSupportingData};\n})();`);
+  .replace(/\ninit\(\);\s*\}\)\(\);\s*$/,`\nwindow.__umTest={state,previewPanel,dailySupporting,supportingFilesSection,supportingRecordsSection,supportDocuments,documentKey,modal,loadSupportingPreviews,getSupportingData,archiveAbsences,historyTable};\n})();`);
  const root={addEventListener:()=>{},querySelector:()=>null};
  const ctx=sandbox(code,{
   window:{UangMakanRules:R,addEventListener:()=>{},UserAccess:{can:()=>true}},
@@ -263,4 +263,54 @@ test('Sinkronisasi memuat metadata rinci dari kedua koleksi sumber',async()=>{
  assert.equal(result.assignments[0].location,'Jakarta');
  assert.equal(result.assignments[0].note,'Catatan tugas');
  assert.equal(result.assignments[0].documents[0].file.itemId,'i');
+});
+
+
+test('Pratinjau dan riwayat menampilkan tombol Unduh ZIP',()=>{
+ const R=rules(),T=appHarness(R);
+ T.state.year=2026;T.state.month=9;
+ T.state.employees=[{id:'1',name:'A',nip:'123',files:['A.xlsx'],days:{}}];
+ assert.ok(T.previewPanel().includes('data-um-action="export-zip"'));
+ T.state.history=[{id:'h1',year:2026,month:9,createdAt:new Date().toISOString(),summary:{employees:1,days:20}}];
+ assert.ok(T.historyTable().includes('data-um-action="history-download-zip"'));
+});
+
+test('Arsip Uang Makan mengunggah absensi ke folder SharePoint per pegawai dan menyimpan referensi',async()=>{
+ const R=rules(),T=appHarness(R);
+ T.state.year=2026;T.state.month=9;
+ T.state.employees=[{id:'u1',name:'Pegawai A',nip:'198000000000000001',
+  files:['Asli.xlsx'],sourceFiles:[{name:'Asli.xlsx',file:{name:'Asli.xlsx',size:25}}]}];
+ let calls=0;
+ T.client.SharePointStorage={ensureReady:async(interactive)=>assert.equal(interactive,true),
+  uploadAttachment:async(source,options,interactive)=>{
+   assert.equal(interactive,true);
+   assert.equal(options.path[0],'Uang Makan');
+   assert.equal(options.path[1],'2026');
+   assert.equal(options.path[2],'09_September');
+   assert.equal(options.path[4],'Pegawai');
+   assert.equal(options.path[5],'198000000000000001_Pegawai A');
+   assert.equal(options.remoteName,'1_Asli.xlsx');
+   calls++;
+   return {...source,driveId:'d',itemId:'i',file:source.file};
+  }};
+ await T.archiveAbsences();
+ assert.equal(calls,1);
+ assert.equal(T.state.employees[0].sourceFiles[0].itemId,'i');
+ await T.archiveAbsences();
+ assert.equal(calls,1,'Berkas yang sudah terarsip tidak boleh diunggah ulang');
+});
+
+test('Riwayat menyimpan referensi absensi SharePoint tanpa menyimpan binary lokal',()=>{
+ const code=fs.readFileSync(path.join(scripts,'uang-makan-storage.js'),'utf8').replace(
+  'window.UangMakanStorage=Object.freeze({list,save,get,remove});',
+  'window.__umStorageTest={sanitizeEmployee};window.UangMakanStorage=Object.freeze({list,save,get,remove});');
+ const storage=sandbox(code).window.__umStorageTest;
+ const row=storage.sanitizeEmployee({id:'a',name:'A',nip:'123',files:['X.xlsx'],sourceFiles:[{
+  name:'X.xlsx',size:100,driveId:'d',itemId:'i',webUrl:'https://example.sharepoint.com/x',
+  file:{content:'Rahasia!'},getUrl:'https://temporary.example.com/preview'
+ }],days:{}});
+ assert.equal(row.sourceFiles[0].itemId,'i');
+ assert.equal(row.sourceFiles[0].file,undefined);
+ assert.equal(row.sourceFiles[0].getUrl,undefined);
+ assert.equal(row.sourceFiles[0].webUrl,'https://example.sharepoint.com/x');
 });

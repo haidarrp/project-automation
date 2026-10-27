@@ -5,7 +5,7 @@ const R=window.UangMakanRules;
 const prev=new Date();prev.setDate(1);prev.setMonth(prev.getMonth()-1);
 const state={view:'process',step:1,year:prev.getFullYear(),month:prev.getMonth()+1,master:[],
   files:[],parsed:[],employees:[],leaves:[],assignments:[],supportLoaded:false,history:[],
-  busy:false,error:'',message:'',filter:'all',search:'',modalId:'',modalDate:'',savedRun:null,dirty:false,
+  busy:false,error:'',message:'',filter:'all',search:'',modalId:'',modalDate:'',savedRun:null,archiveKey:'',dirty:false,
   holidays:[],holidayNotes:{},documentPreviews:{}};
 const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const permission=key=>window.UserAccess.assert('uangMakan',key);
@@ -42,8 +42,8 @@ function fail(error){state.error=String(error?.message||error);state.message='';
 function notify(s){state.error='';state.message=String(s||'');render();}
 function summary(){return R.overall(state.employees);}
 function pendingCount(){return state.employees.filter(e=>R.overview(e).status!=='Siap').length;}
-function makeEmptyEmployee(e){return {...e,files:[],fileWarnings:[],coverageAcknowledged:false,coverageReason:'',days:{}};}
-function resetProcess(){state.files=[];state.parsed=[];state.employees=[];state.leaves=[];state.assignments=[];state.supportLoaded=false;state.modalId='';state.modalDate='';state.savedRun=null;state.dirty=false;state.search='';state.filter='all';state.documentPreviews={};state.step=1;clearNotice();}
+function makeEmptyEmployee(e){return {...e,files:[],sourceFiles:[],fileWarnings:[],coverageAcknowledged:false,coverageReason:'',days:{}};}
+function resetProcess(){state.files=[];state.parsed=[];state.employees=[];state.leaves=[];state.assignments=[];state.supportLoaded=false;state.modalId='';state.modalDate='';state.savedRun=null;state.archiveKey='';state.dirty=false;state.search='';state.filter='all';state.documentPreviews={};state.step=1;clearNotice();}
 function pageTitle(view){return {process:'Proses Uang Makan',dashboard:'Dashboard Uang Makan',history:'Riwayat Uang Makan'}[view]||'Uang Makan';}
 function metric(label,value,description){return `<div class="um-panel um-kpi"><small>${esc(label)}</small><strong>${esc(value)}</strong><span>${esc(description||'')}</span></div>`;}
 function showStatus(){return `${state.error?`<div class="um-note error" role="alert" style="margin-bottom:13px">${esc(state.error)}</div>`:''}${state.message?`<div class="um-note good" role="status" style="margin-bottom:13px">${esc(state.message)}</div>`:''}`;}
@@ -109,13 +109,13 @@ function previewPanel(){
  return `${kpis(s)}<section class="um-panel"><div class="um-panel-title"><div><h2>Pratinjau Sheet PUSDATIN</h2><p>Kolom tanggal diisi angka 1 apabila memperoleh uang makan, dan kosong untuk tanggal lainnya.</p></div><span class="um-pill ${ready?'good':'warn'}">${ready?'Siap Ekspor':`${pending} pegawai belum siap`}</span></div>
  ${!ready?`<div class="um-note warn" style="margin-bottom:13px">Selesaikan verifikasi dan kelengkapan data pegawai yang tercantum pada file absensi. Pegawai master yang tidak diunggah tidak memengaruhi ekspor.</div>`:''}
  <div class="um-table-outer um-preview-scroll"><table class="um-table export"><thead><tr><th>No.</th><th>NIP</th><th>Nama</th>${Array.from({length:R.periodDays(state.year,state.month)},(_,i)=>`<th class="um-preview-day">${i+1}</th>`).join('')}<th>Jumlah</th><th>Unit Kerja</th><th>Bank</th><th>Jenis Pegawai</th></tr></thead><tbody>${shown.map((e,i)=>`<tr><td>${i+1}</td><td>${esc(e.nip)}</td><td class="name">${esc(e.name)}</td>${R.monthDates(state.year,state.month).map(k=>`<td class="number um-preview-day">${e.days[k]?.value===1?'1':''}</td>`).join('')}<td class="number">${R.overview(e).days}</td><td>Pusat Data dan Informasi</td><td>${esc(e.anakSatker||'')}</td><td>${esc(e.jenisPegawai||'')}</td></tr>`).join('')}</tbody></table></div>
- <p class="um-fine" style="margin-top:10px">Menampilkan seluruh ${shown.length} pegawai dari berkas yang diunggah. Geser tabel ke samping untuk melihat semua tanggal.</p>
+ <p class="um-fine" style="margin-top:10px">Menampilkan seluruh ${shown.length} pegawai dari berkas yang diunggah. Geser tabel ke samping untuk melihat semua tanggal. Penyimpanan riwayat akan mengarsipkan absensi asli ke SharePoint agar ZIP dapat diunduh ulang.</p>
  <div class="um-summary um-preview-period"><span>Periode ${esc(R.periodLabel(state.year,state.month))}</span></div>
- <div class="um-actions"><button class="um-btn" type="button" data-um-action="back">← Kembali ke Verifikasi</button><div class="um-row"><button class="um-btn" type="button" data-um-action="save" ${!ready||state.busy?'disabled':''}>${state.busy?'Menyimpan...':'Simpan ke Riwayat'}</button><button class="um-btn primary" type="button" data-um-action="export" ${!ready||state.busy?'disabled':''}>Unduh Excel PUSDATIN ↓</button></div></div></section>`;
+ <div class="um-actions"><button class="um-btn" type="button" data-um-action="back">← Kembali ke Verifikasi</button><div class="um-row"><button class="um-btn" type="button" data-um-action="save" ${!ready||state.busy?'disabled':''}>${state.busy?'Menyimpan...':'Simpan ke Riwayat'}</button><button class="um-btn" type="button" data-um-action="export" ${!ready||state.busy?'disabled':''}>Unduh Excel PUSDATIN ↓</button><button class="um-btn primary" type="button" data-um-action="export-zip" ${!ready||state.busy?'disabled':''}>${state.busy?'Menyiapkan...':'Unduh ZIP Lengkap ↓'}</button></div></div></section>`;
 }
 function periodCard(){return `<section class="um-panel" style="margin-bottom:16px"><h2>Periode Saat Ini</h2><p>${esc(R.periodLabel(state.year,state.month))}</p><div style="margin-top:14px"><button type="button" class="um-btn primary" data-um-action="goto-process">Proses Uang Makan →</button></div></section>`;}
 function historyTable(embedded=false){
- return `<div class="um-table-outer"><table class="um-table"><thead><tr><th>Periode</th><th>Diproses</th><th>Jumlah Pegawai</th><th>Hari Uang Makan</th><th>Operator</th><th>Aksi</th></tr></thead><tbody>${state.history.length?state.history.slice(0,embedded?7:75).map(h=>`<tr><td class="name">${esc(R.periodLabel(h.year,h.month))}</td><td>${esc(new Date(h.createdAt).toLocaleString('id-ID'))}</td><td>${Number(h.summary?.employees||0)}</td><td>${Number(h.summary?.days||0)}</td><td>${esc(h.ownerName||h.ownerEmail||'-')}</td><td><div class="um-row"><button class="um-btn small" type="button" data-um-action="history-open" data-id="${esc(h.id)}">Lihat</button><button class="um-btn small" type="button" data-um-action="history-download" data-id="${esc(h.id)}">Excel ↓</button>${!embedded&&((h.ownerUid===window.FirebaseClient?.getCurrentUser?.()?.uid)||window.FirebaseClient?.isAdmin?.())?`<button class="um-btn small danger" type="button" data-um-action="history-delete" data-id="${esc(h.id)}">Hapus</button>`:''}</div></td></tr>`).join(''):`<tr><td class="um-empty" colspan="6">Belum ada riwayat uang makan tersimpan.</td></tr>`}</tbody></table></div>`;
+ return `<div class="um-table-outer"><table class="um-table"><thead><tr><th>Periode</th><th>Diproses</th><th>Jumlah Pegawai</th><th>Hari Uang Makan</th><th>Operator</th><th>Aksi</th></tr></thead><tbody>${state.history.length?state.history.slice(0,embedded?7:75).map(h=>`<tr><td class="name">${esc(R.periodLabel(h.year,h.month))}</td><td>${esc(new Date(h.createdAt).toLocaleString('id-ID'))}</td><td>${Number(h.summary?.employees||0)}</td><td>${Number(h.summary?.days||0)}</td><td>${esc(h.ownerName||h.ownerEmail||'-')}</td><td><div class="um-row"><button class="um-btn small" type="button" data-um-action="history-open" data-id="${esc(h.id)}">Lihat</button><button class="um-btn small" type="button" data-um-action="history-download" data-id="${esc(h.id)}">Excel ↓</button><button class="um-btn small" type="button" data-um-action="history-download-zip" data-id="${esc(h.id)}">ZIP ↓</button>${!embedded&&((h.ownerUid===window.FirebaseClient?.getCurrentUser?.()?.uid)||window.FirebaseClient?.isAdmin?.())?`<button class="um-btn small danger" type="button" data-um-action="history-delete" data-id="${esc(h.id)}">Hapus</button>`:''}</div></td></tr>`).join(''):`<tr><td class="um-empty" colspan="6">Belum ada riwayat uang makan tersimpan.</td></tr>`}</tbody></table></div>`;
 }
 function dashboard(){
  const total=state.history.reduce((s,h)=>s+Number(h.summary?.days||0),0);
@@ -364,7 +364,7 @@ async function calculate(){
   // Berkas unggahan adalah satu-satunya sumber daftar pegawai yang diproses.
   // Master hanya berfungsi sebagai referensi identitas, Anak Satker, dan jenis pegawai.
   const employees=[],selectedById=new Map(),errors=[],list=[];
-  for(const item of parsed){
+  for(const [fileIndex,item] of parsed.entries()){
     const fileNip=R.normalizeNip(item.identity.nip);
     const normalizedName=R.normalizeName(item.identity.name);
     // Utamakan NIP, karena nama bisa sama atau berbeda penulisan pada laporan.
@@ -405,6 +405,10 @@ async function calculate(){
       continue;
     }
     e.files.push(item.fileName);
+    const originalFile=state.files[fileIndex];
+    if(!originalFile||originalFile.name!==item.fileName)throw new Error(`Berkas absensi ${item.fileName} tidak dapat ditautkan dengan hasil parsing.`);
+    e.sourceFiles.push({name:originalFile.name,size:originalFile.size,type:originalFile.type||'',
+      lastModified:originalFile.lastModified||0,file:originalFile});
     list.push({file:item.fileName,employee:e.name});
     const prior=e.days;
     for(const [key,record] of Object.entries(item.rows)){
@@ -427,7 +431,7 @@ async function calculate(){
   const supports=await getSupportingData();
   state.leaves=supports.leaves;state.assignments=supports.assignments;state.supportLoaded=true;state.documentPreviews={};
   state.employees=computeEmployees(employees,state.leaves,state.assignments);
-  state.parsed=list;state.step=3;state.savedRun=null;state.dirty=true;
+  state.parsed=list;state.step=3;state.savedRun=null;state.archiveKey='';state.dirty=true;
   state.message=`Berhasil mengolah ${parsed.length} berkas untuk ${employees.length} pegawai yang diunggah. Pegawai master lainnya tidak ikut dihitung; cuti dan surat tugas telah disinkronkan.`;
  }catch(e){fail(e);return;}
  state.busy=false;render();
@@ -469,30 +473,92 @@ function allowFinal(){
  if(pendingCount())throw new Error(`${pendingCount()} pegawai belum siap. Periksa status verifikasi terlebih dahulu.`);
 }
 async function exportData(){
- if(!permission('process.export'))return;
+ if(!permission('process.export')||state.busy)return;
  try{allowFinal();await window.ResourceLoader.ensure('jszip');const result=await window.UangMakanExport.generate(state.year,state.month,state.employees,{holidays:state.holidays});notify(`File ${result.filename} berhasil dibuat.`);}
  catch(e){fail(e);}
+}
+async function exportZip(){
+ if(!permission('process.export')||state.busy)return;
+ try{allowFinal();}catch(e){fail(e);return;}
+ state.busy=true;clearNotice();render();
+ try{
+  await window.ResourceLoader.ensure('jszip');
+  const result=await window.UangMakanZip.generate(state.year,state.month,state.employees,{holidays:state.holidays});
+  window.UangMakanZip.download(result);
+  state.message=`ZIP berhasil dibuat: ${result.attendanceCount} berkas absensi dan ${result.evidenceCount} bukti dukung.${result.missingEvidenceCount?' '+result.missingEvidenceCount+' dokumen belum memiliki berkas digital (lihat catatan dalam ZIP).':''}`;
+ }catch(e){fail(e);return;}
+ state.busy=false;render();
+}
+// Berkas absensi harus diarsipkan ke SharePoint sebelum menyimpan metadata
+// riwayat. Referensi file dipertahankan agar download ZIP di perangkat lain
+// tidak bergantung pada file input browser yang sudah hilang setelah reload.
+async function archiveAbsences(){
+ const toUpload=state.employees.some(e=>(e.sourceFiles||[]).some(f=>!f.driveId||!f.itemId));
+ if(!state.employees.every(e=>(e.sourceFiles||[]).length&&(e.sourceFiles||[]).length>=(e.files||[]).length)){
+  throw new Error('Ada absensi asli yang belum tersedia. Unggah dan hitung ulang berkas sebelum menyimpan riwayat.');
+ }
+ if(!toUpload)return;
+ const sharePoint=window.SharePointStorage;
+ if(!sharePoint?.uploadAttachment)throw new Error('Penyimpanan SharePoint belum tersedia untuk arsip absensi Uang Makan.');
+ await sharePoint.ensureReady(true);
+ if(!state.archiveKey){
+  const unique=window.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  state.archiveKey=String(unique).replace(/[^a-zA-Z0-9-]/g,'').slice(0,45);
+ }
+ for(const employee of state.employees){
+  for(const [index,source] of (employee.sourceFiles||[]).entries()){
+   if(source.driveId&&source.itemId)continue;
+   if(!source.file)throw new Error(`File absensi ${employee.name} tidak tersedia untuk diarsipkan.`);
+   const stored=await sharePoint.uploadAttachment(source,{
+    kind:'absensi',
+    path:['Uang Makan',String(state.year),`${String(state.month).padStart(2,'0')}_${R.MONTHS[state.month-1]}`,`Run_${state.archiveKey}`,'Pegawai',`${employee.nip}_${employee.name}`,'Absensi'],
+    remoteName:`${index+1}_${source.name||'Absensi.xlsx'}`
+   },true);
+   Object.assign(source,stored);
+  }
+ }
 }
 async function saveRun(){
  if(!permission('process.save')||state.busy)return;
  try{allowFinal();}catch(e){fail(e);return;}
  if(!state.dirty&&state.savedRun){notify('Hasil ini sudah tersimpan pada riwayat.');return;}
  state.busy=true;clearNotice();render();
- try{const run=await window.UangMakanStorage.save(state.year,state.month,state.employees,summary(),{holidays:state.holidays,holidayNotes:state.holidayNotes});state.savedRun=run;state.dirty=false;await refreshHistory();state.message='Hasil periode '+R.periodLabel(state.year,state.month)+' tersimpan di Riwayat.';}
+ try{
+  await archiveAbsences();
+  const run=await window.UangMakanStorage.save(state.year,state.month,state.employees,summary(),{
+   holidays:state.holidays,holidayNotes:state.holidayNotes,archiveKey:state.archiveKey
+  });
+  state.savedRun=run;state.dirty=false;await refreshHistory();
+  state.message='Hasil periode '+R.periodLabel(state.year,state.month)+' tersimpan di Riwayat bersama referensi arsip absensi SharePoint.';
+ }
  catch(e){fail(e);return;}
  state.busy=false;render();
 }
 async function refreshHistory(){state.history=await window.UangMakanStorage.list();}
-async function openHistory(id,download=false){
- if(!permission(download?'history.download':'history.view')||state.busy)return;
+async function openHistory(id,mode='view'){
+ if(!permission(mode==='view'?'history.view':'history.download')||state.busy)return;
  state.busy=true;clearNotice();render();
  try{
    const {meta,employees}=await window.UangMakanStorage.get(id);
-   const runSettings=cleanHolidaySettings({holidays:meta.holidays||[],holidayNotes:meta.holidayNotes||{}},Number(meta.year),Number(meta.month));
+   const year=Number(meta.year),month=Number(meta.month);
+   const runSettings=cleanHolidaySettings({holidays:meta.holidays||[],holidayNotes:meta.holidayNotes||{}},year,month);
    const holidays=new Set(runSettings.holidays);
    const hydrated=employees.map(e=>({...e,days:Object.fromEntries(Object.entries(e.days||{}).map(([key,d])=>[key,R.classifyDay({...d,isHoliday:d.isHoliday||holidays.has(key)},d.leaves||[],d.assignments||[])]))}));
-   if(download){await window.ResourceLoader.ensure('jszip');await window.UangMakanExport.generate(meta.year,meta.month,hydrated,{holidays:runSettings.holidays});state.message='File Excel riwayat berhasil dibuat.';}
-   else {state.year=Number(meta.year);state.month=Number(meta.month);state.holidays=runSettings.holidays;state.holidayNotes=runSettings.holidayNotes;state.employees=hydrated;state.files=[];state.savedRun=meta;state.dirty=false;state.step=4;state.view='process';location.hash='process';state.message='Riwayat dimuat. Untuk mengolah ulang, pilih Ubah Periode dan unggah berkas baru.';}
+   if(mode==='excel'){
+    await window.ResourceLoader.ensure('jszip');
+    await window.UangMakanExport.generate(year,month,hydrated,{holidays:runSettings.holidays});
+    state.message='File Excel riwayat berhasil dibuat.';
+   }else if(mode==='zip'){
+    await window.ResourceLoader.ensure('jszip');
+    const result=await window.UangMakanZip.generate(year,month,hydrated,{holidays:runSettings.holidays});
+    window.UangMakanZip.download(result);
+    state.message=`ZIP riwayat berhasil dibuat: ${result.attendanceCount} absensi dan ${result.evidenceCount} bukti dukung.${result.missingEvidenceCount?' '+result.missingEvidenceCount+' dokumen belum memiliki berkas digital (lihat catatan dalam ZIP).':''}`;
+   }else{
+    state.year=year;state.month=month;state.holidays=runSettings.holidays;state.holidayNotes=runSettings.holidayNotes;
+    state.employees=hydrated;state.files=[];state.savedRun=meta;state.archiveKey=meta.archiveKey||'';
+    state.dirty=false;state.step=4;state.view='process';location.hash='process';
+    state.message='Riwayat dimuat. Untuk mengolah ulang, pilih Ubah Periode dan unggah berkas baru.';
+   }
  }catch(e){fail(e);return;}
  state.busy=false;render();
 }
@@ -553,9 +619,11 @@ root.addEventListener('click',async event=>{
   case 'restart':if(state.employees.length&&!confirm('Proses saat ini akan dikosongkan. Periode baru membutuhkan unggah absensi. Lanjutkan?'))break;resetProcess();render();break;
   case 'preview':state.step=4;render();break;
   case 'export':await exportData();break;
+  case 'export-zip':await exportZip();break;
   case 'save':await saveRun();break;
   case 'history-open':await openHistory(button.dataset.id);break;
-  case 'history-download':await openHistory(button.dataset.id,true);break;
+  case 'history-download':await openHistory(button.dataset.id,'excel');break;
+  case 'history-download-zip':await openHistory(button.dataset.id,'zip');break;
   case 'history-delete':await deleteHistory(button.dataset.id);break;
  }
 });
