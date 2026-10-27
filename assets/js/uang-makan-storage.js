@@ -4,13 +4,24 @@
  const COLLECTION='uangMakanRuns';
  function db(){const value=window.FirebaseClient?.getDb?.();if(!value)throw new Error('Firestore tidak tersedia.');return value;}
  function actor(){const u=window.FirebaseClient?.getCurrentUser?.();if(!u?.uid)throw new Error('Masuk terlebih dahulu.');return {uid:u.uid,email:u.email||'',name:u.displayName||''};}
+ function sanitizeDocuments(raw){
+   return (Array.isArray(raw)?raw:[]).map(doc=>{
+     const d=doc&&typeof doc==='object'?doc:{},f=d.file&&typeof d.file==='object'?d.file:{};
+     return {id:String(d.id||''),name:String(d.name||''),type:String(d.type||''),
+       number:String(d.number||''),note:String(d.note||''),file:{name:String(f.name||''),remoteName:String(f.remoteName||''),
+         driveId:String(f.driveId||''),itemId:String(f.itemId||''),webUrl:String(f.webUrl||'')}};
+   });
+ }
  function sanitizeEmployee(e){
    return {id:e.id,name:e.name,nip:e.nip,anakSatker:e.anakSatker||'',jenisPegawai:e.jenisPegawai||'',order:e.order||9999,
      files:Array.isArray(e.files)?e.files:[],fileWarnings:e.fileWarnings||[],coverageAcknowledged:Boolean(e.coverageAcknowledged),coverageReason:e.coverageReason||'',missingAcknowledged:Boolean(e.missingAcknowledged),missingReason:e.missingReason||'',
      days:Object.fromEntries(Object.entries(e.days||{}).map(([key,d])=>[key,{
        key,inMinutes:d.inMinutes??null,outMinutes:d.outMinutes??null,status:d.status||'',workMode:d.workMode||'',flags:d.flags||[],duplicate:Boolean(d.duplicate),isHoliday:Boolean(d.isHoliday),
-       leaves:(d.leaves||[]).map(x=>({id:x.id,leaveType:x.leaveType,documentNumber:x.documentNumber,startDate:x.startDate,endDate:x.endDate})),
-       assignments:(d.assignments||[]).map(x=>({id:x.id,assignmentType:x.assignmentType,activity:x.activity,letterNumber:x.letterNumber,startDate:x.startDate,endDate:x.endDate,employeeIds:x.employeeIds})),
+       leaves:(d.leaves||[]).map(x=>({id:x.id,leaveType:x.leaveType,documentNumber:x.documentNumber||'',documentDate:x.documentDate||'',
+         startDate:x.startDate,endDate:x.endDate,note:x.note||'',documents:sanitizeDocuments(x.documents)})),
+       assignments:(d.assignments||[]).map(x=>({id:x.id,assignmentType:x.assignmentType,activity:x.activity,letterNumber:x.letterNumber||'',
+         letterDate:x.letterDate||'',location:x.location||'',note:x.note||'',startDate:x.startDate,endDate:x.endDate,
+         employeeIds:x.employeeIds,documents:sanitizeDocuments(x.documents)})),
        manualValue:d.manualValue??null,manualNote:d.manualNote||'',reviewed:Boolean(d.reviewed),reviewedAt:d.reviewedAt||'',reviewedBy:d.reviewedBy||''
      }]))};
  }
@@ -23,7 +34,7 @@
    const meta={year,month,period:`${year}-${String(month).padStart(2,'0')}`,createdAt:new Date().toISOString(),
      ownerUid:a.uid,ownerEmail:a.email,ownerName:a.name,status:'writing',summary,
      holidays:Array.isArray(settings.holidays)?settings.holidays.slice():[],
-     holidayNotes:settings.holidayNotes||{},schemaVersion:2};
+     holidayNotes:settings.holidayNotes||{},schemaVersion:3};
    await ref.set(meta);
    try{
      const stored=employees.map(sanitizeEmployee);

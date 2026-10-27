@@ -145,7 +145,7 @@
 @media(max-width:1100px){.um-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.um-grid{grid-template-columns:1fr}.um-holiday-layout{grid-template-columns:1fr}}
 @media(max-width:650px){.um-header{flex-direction:column;align-items:flex-start}.um-header h1{font-size:24px}.um-kpis{grid-template-columns:1fr 1fr}.um-modal-bg{padding:7px}.um-modal{width:100%;max-height:95vh}.um-modal-body{padding:12px}.um-modal-head,.um-modal-footer{padding:14px}.um-day-grid,.um-weekday-row{gap:4px}.um-day{min-height:66px;padding:5px 2px}.um-detail-grid{grid-template-columns:1fr}.um-steps{padding:12px}.um-actions{align-items:stretch;flex-direction:column}.um-actions>.um-row{justify-content:stretch}.um-btn{white-space:normal}.um-holiday-settings{padding:13px}.um-holiday-item{grid-template-columns:1fr auto}.um-holiday-item input{grid-column:1/-1;grid-row:2}.um-holiday-item .um-btn{grid-column:2;grid-row:1}}
 
-/* Berkas sumber untuk konflik Cuti/Surat Tugas pada verifikasi Uang Makan. */
+/* Integrasi semua data Cuti/Surat Tugas pada verifikasi Uang Makan. */
 .um-day.remote:not(.selected){background:#eef3f8;border-color:#d4dfeb}
 .um-day.remote small:last-child{font-weight:760;color:var(--navy)}
 .um-remote-policy{background:#edf3f9;border-color:#cadbe9;color:var(--navy)}
@@ -165,3 +165,36 @@
 .um-document-status p{max-width:700px;margin:0;overflow-wrap:anywhere}
 .um-supporting-missing{margin-top:10px}
 @media(max-width:650px){.um-document-frame{height:310px}.um-document-heading{align-items:flex-start}.um-document-heading .um-btn{min-height:32px}}
+
+/* Penanda data sumber tidak mengubah warna status perhitungan atau konflik. */
+.um-day.has-support{min-height:92px}
+.um-day-sources{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:3px;min-height:0;width:100%}
+.um-day-source{display:inline-block;padding:2px 5px;border-radius:5px;font-size:9px;line-height:1.2;font-weight:730;white-space:nowrap}
+.um-day-source.cuti,.um-source-type.cuti,.um-pill-source.cuti{color:#176a57;background:#dff3eb}
+.um-day-source.tugas,.um-source-type.tugas,.um-pill-source.tugas{color:#265e9b;background:#e4effb}
+.um-day .um-day-status{font-size:9px;color:var(--muted)}
+.um-day:is(.weekend,.holiday) .um-day-status{color:var(--danger)}
+.um-day.remote .um-day-status{font-weight:760;color:var(--navy)}
+.um-source-legend{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:-6px 0 16px;color:var(--ink-soft);font-size:10px}
+.um-source-legend>span{display:inline-flex;gap:5px;align-items:center;font-weight:680}
+.um-source-legend small{color:var(--muted);font-size:10px;line-height:1.5}
+.um-legend-source{display:inline-block;width:10px;height:10px;border-radius:3px}
+.um-legend-source.cuti{background:#9bd7c1}
+.um-legend-source.tugas{background:#9ec2ed}
+.um-source-records{margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
+.um-source-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.um-source-head h4{margin:0;font-size:13px;font-weight:740;color:var(--ink)}
+.um-source-head>span{font-size:10px;color:var(--muted)}
+.um-source-record-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.um-source-record{min-width:0;padding:13px 14px;border:1px solid var(--line);border-radius:11px;background:var(--paper)}
+.um-source-record-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.um-source-record-top strong{font-size:12px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.um-source-type{padding:4px 8px;border-radius:6px;font-size:10px;font-weight:730;white-space:nowrap}
+.um-source-record dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:0}
+.um-source-record dl>div{min-width:0}
+.um-source-record dt{color:var(--muted);font-size:9px;margin-bottom:3px}
+.um-source-record dd{color:var(--ink-soft);font-weight:650;font-size:11px;line-height:1.45;margin:0;overflow-wrap:anywhere}
+.um-source-record .um-source-wide{grid-column:1/-1}
+.um-source-record>small{display:block;margin-top:11px;color:var(--muted);font-size:10px}
+.um-source-empty{margin-top:18px;padding:11px 13px;border:1px dashed var(--line-strong);border-radius:10px;color:var(--muted);font-size:11px}
+@media(max-width:650px){.um-day.has-support{min-height:90px}.um-day-sources{gap:2px}.um-day-source{padding:2px 3px;font-size:8px}.um-source-legend{gap:8px}.um-source-record-list{grid-template-columns:1fr}.um-source-record dl{grid-template-columns:1fr 1fr}}

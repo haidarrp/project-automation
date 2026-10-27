@@ -138,21 +138,59 @@ function supportDocuments(raw){
   const item=doc&&typeof doc==='object'?doc:{};
   const f=item.file&&typeof item.file==='object'?item.file:{};
   return {id:String(item.id||`dokumen-${index+1}`),name:String(item.name||''),type:String(item.type||''),
+    number:String(item.number||''),note:String(item.note||''),
     file:{name:String(f.name||f.remoteName||''),remoteName:String(f.remoteName||''),
       driveId:String(f.driveId||''),itemId:String(f.itemId||''),webUrl:String(f.webUrl||'')}};
  });
 }
-function conflictSupporting(day){
+function assignmentTypeLabel(type){
+ return {official_travel:'Dinas Luar / Perjalanan Dinas',work_arrangement:'Pengaturan Kerja',other:'Penugasan Lainnya'}[type]||'Penugasan';
+}
+// Semua catatan sumber yang berlaku pada tanggal dipertahankan, bukan hanya
+// yang menyebabkan konflik presensi. Termasuk pengaturan kerja dan hari libur.
+function dailySupporting(day){
  const matches=[];
- if(day.issues?.includes('Presensi bertentangan dengan data cuti')){
-  (day.leaves||[]).forEach(item=>matches.push({kind:'cuti',id:item.id,title:`Cuti: ${item.leaveType||'Cuti'}`,
-    reference:item.documentNumber||'',documents:item.documents||[]}));
- }
- if(day.issues?.includes('Presensi bertentangan dengan dinas luar')){
-  (day.official||[]).forEach(item=>matches.push({kind:'dinas',id:item.id,title:`Dinas luar: ${item.activity||'Surat Tugas'}`,
-    reference:item.letterNumber||'',documents:item.documents||[]}));
- }
+ (day.leaves||[]).forEach((item,index)=>matches.push({kind:'cuti',id:String(item.id||`cuti-${index+1}`),
+   title:`Cuti: ${item.leaveType||'Cuti'}`,type:'Cuti',subject:item.leaveType||'Cuti',
+   reference:item.documentNumber||'',referenceLabel:'Nomor dokumen',referenceDate:item.documentDate||'',
+   startDate:item.startDate||'',endDate:item.endDate||'',note:item.note||'',
+   documents:Array.isArray(item.documents)?item.documents:[]}));
+ (day.assignments||[]).forEach((item,index)=>matches.push({kind:'tugas',id:String(item.id||`tugas-${index+1}`),
+   title:`Surat Tugas: ${assignmentTypeLabel(item.assignmentType)}`,type:'Surat Tugas',
+   subject:item.activity||assignmentTypeLabel(item.assignmentType),
+   assignmentType:assignmentTypeLabel(item.assignmentType),
+   reference:item.letterNumber||'',referenceLabel:'Nomor surat',referenceDate:item.letterDate||'',
+   startDate:item.startDate||'',endDate:item.endDate||'',location:item.location||'',note:item.note||'',
+   documents:Array.isArray(item.documents)?item.documents:[]}));
  return matches;
+}
+function supportDate(raw){
+ const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(raw||''));
+ if(!match)return '—';
+ const date=new Date(Number(match[1]),Number(match[2])-1,Number(match[3]));
+ if(Number.isNaN(date.getTime())||date.getFullYear()!==Number(match[1])||date.getMonth()!==Number(match[2])-1||date.getDate()!==Number(match[3]))return '—';
+ return new Intl.DateTimeFormat('id-ID',{day:'numeric',month:'short',year:'numeric'}).format(date);
+}
+function supportPeriod(group){
+ const start=supportDate(group.startDate),end=supportDate(group.endDate||group.startDate);
+ return start===end?start:`${start} – ${end}`;
+}
+function supportingRecordsSection(day){
+ const groups=dailySupporting(day);
+ if(!groups.length)return '<div class="um-source-empty">Tidak ada data cuti atau surat tugas yang tercatat pada tanggal ini.</div>';
+ return `<section class="um-source-records" aria-label="Data cuti dan surat tugas terintegrasi">
+  <div class="um-source-head"><h4>Data Cuti &amp; Surat Tugas Terintegrasi</h4><span>${groups.length} catatan dari data sumber</span></div>
+  <div class="um-source-record-list">${groups.map(group=>`<article class="um-source-record ${group.kind}">
+   <div class="um-source-record-top"><span class="um-source-type ${group.kind}">${esc(group.type)}</span><strong>${esc(group.subject)}</strong></div>
+   <dl><div><dt>${esc(group.referenceLabel)}</dt><dd>${esc(group.reference||'—')}</dd></div>
+   <div><dt>Periode</dt><dd>${esc(supportPeriod(group))}</dd></div>
+   ${group.referenceDate?`<div><dt>Tanggal dokumen</dt><dd>${esc(supportDate(group.referenceDate))}</dd></div>`:''}
+   ${group.assignmentType?`<div><dt>Jenis penugasan</dt><dd>${esc(group.assignmentType)}</dd></div>`:''}
+   ${group.location?`<div><dt>Lokasi / tujuan</dt><dd>${esc(group.location)}</dd></div>`:''}
+   ${group.note?`<div class="um-source-wide"><dt>Keterangan</dt><dd>${esc(group.note)}</dd></div>`:''}
+   </dl><small>${group.documents.length} dokumen pendukung tercatat</small>
+  </article>`).join('')}</div>
+ </section>`;
 }
 function documentKey(group,doc){
  return [group.kind,group.id,doc.id,doc.file?.driveId||'',doc.file?.itemId||''].join('::');
@@ -178,18 +216,18 @@ function supportFilePreview(group,doc,index){
   const target=`um-support-${index}`;
   body=`<iframe class="um-document-frame" name="${target}" title="Pratinjau ${esc(fileName)}" loading="lazy" referrerpolicy="no-referrer" allow="fullscreen"></iframe><form data-um-preview-post method="post" action="${esc(safeHttps(ctx.postUrl))}" target="${target}">${previewPostFields(ctx.postParameters)}</form>`;
  }else body='<div class="um-document-status">Microsoft 365 tidak memberikan tautan pratinjau yang valid.</div>';
- return `<article class="um-document-card"><div class="um-document-heading"><div><strong>${esc(fileName)}</strong><small>${esc(group.title)}${group.reference?' · '+esc(group.reference):''}${doc.type?' · '+esc(doc.type):''}</small></div>${actions}</div>${body}</article>`;
+ return `<article class="um-document-card"><div class="um-document-heading"><div><strong>${esc(fileName)}</strong><small>${esc(group.title)}${group.reference?' · '+esc(group.reference):''}${doc.type?' · '+esc(doc.type):''}${doc.number?' · '+esc(doc.number):''}</small></div>${actions}</div>${body}</article>`;
 }
 function supportingFilesSection(day){
- const groups=conflictSupporting(day);
+ const groups=dailySupporting(day);
  if(!groups.length)return '';
  let index=0;
  const cards=groups.flatMap(group=>group.documents.map(doc=>supportFilePreview(group,doc,++index)));
  const missing=groups.filter(group=>!group.documents.length);
- return `<section class="um-supporting-documents" id="um-supporting-documents" aria-label="Pratinjau berkas pendukung konflik">
-  <div class="um-supporting-head"><h4>Berkas Pendukung Cuti / Dinas</h4><p>Dokumen terkait konflik presensi pada ${esc(dateLabel(day.key))} ditampilkan di bawah hasil verifikasi.</p></div>
+ return `<section class="um-supporting-documents" id="um-supporting-documents" aria-label="Berkas pendukung cuti dan surat tugas">
+  <div class="um-supporting-head"><h4>Berkas Pendukung Cuti / Surat Tugas</h4><p>Dokumen dari modul Cuti dan Surat Tugas untuk ${esc(dateLabel(day.key))}. Tetap tersedia meskipun tidak ada konflik presensi.</p></div>
   ${cards.length?`<div class="um-document-list">${cards.join('')}</div>`:''}
-  ${missing.length?`<div class="um-note warn um-supporting-missing">Belum terdapat berkas pada ${missing.map(group=>esc(group.title)).join(' · ')}. Periksa dokumen di modul Cuti atau Surat Tugas.</div>`:''}
+  ${missing.length?`<div class="um-note um-supporting-missing">Belum terdapat berkas digital pada ${missing.map(group=>esc(group.title)).join(' · ')}. Periksa dokumen di modul Cuti atau Surat Tugas.</div>`:''}
  </section>`;
 }
 function submitPreviewPostForms(){
@@ -209,7 +247,7 @@ async function loadSupportingPreviews(){
  const employeeId=state.modalId,date=state.modalDate;
  const day=findEmployee(employeeId)?.days?.[date];
  if(!day)return;
- for(const group of conflictSupporting(day)){
+ for(const group of dailySupporting(day)){
   for(const doc of group.documents){
    if(state.modalId!==employeeId||state.modalDate!==date)return;
    if(!doc.file?.driveId||!doc.file?.itemId)continue;
@@ -228,7 +266,7 @@ async function loadSupportingPreviews(){
    // Pratinjau yang sama dapat dipakai pada beberapa tanggal. Ketika pengguna
    // berpindah tanggal saat request masih berjalan, segarkan panel yang aktif.
    const activeDay=findEmployee(state.modalId)?.days?.[state.modalDate];
-   if(activeDay&&conflictSupporting(activeDay).some(g=>g.documents.some(d=>documentKey(g,d)===key)))refreshSupportingFiles();
+   if(activeDay&&dailySupporting(activeDay).some(g=>g.documents.some(d=>documentKey(g,d)===key)))refreshSupportingFiles();
   }
  }
 }
@@ -238,19 +276,26 @@ function modal(){
  const day=e.days?.[state.modalDate]||e.days?.[keys[0]];
  if(!day)return '';
  const isProblem=day.issues.length>0;
+ const leaveDays=keys.filter(k=>e.days[k]?.leaves?.length).length;
+ const assignmentDays=keys.filter(k=>e.days[k]?.assignments?.length).length;
  return `<div class="um-modal-bg" data-um-action="close-modal"><section class="um-modal" role="dialog" aria-modal="true" aria-label="Detail Uang Makan">
  <div class="um-modal-head"><div><h2>${esc(e.name)}</h2><p>${esc(e.nip)} · ${esc(e.jenisPegawai||'Jenis belum dilengkapi')} · Anak Satker ${esc(e.anakSatker||'-')} · ${esc(R.periodLabel(state.year,state.month))}</p></div><button class="um-btn small" type="button" data-um-action="close-modal">Tutup ×</button></div>
- <div class="um-modal-body"><div class="um-row"><span class="um-pill good">${a.days} hari uang makan</span><span class="um-pill ${a.issues?'warn':'good'}">${a.issues} tanggal perlu cek</span><span class="um-pill">${e.files?.length||0} file absensi</span></div>
+ <div class="um-modal-body"><div class="um-row"><span class="um-pill good">${a.days} hari uang makan</span><span class="um-pill ${a.issues?'warn':'good'}">${a.issues} tanggal perlu cek</span><span class="um-pill">${e.files?.length||0} file absensi</span><span class="um-pill um-pill-source cuti">${leaveDays} tanggal cuti</span><span class="um-pill um-pill-source tugas">${assignmentDays} tanggal surat tugas</span></div>
  ${!e.jenisPegawai?'<div class="um-note warn" style="margin-top:14px">Jenis pegawai belum terisi pada master. Lengkapi melalui menu Administrasi → Master Data.</div>':''}
  ${e.fileWarnings?.length?`<div class="um-note warn" style="margin-top:13px">${e.fileWarnings.map(v=>esc(v)).join(' · ')}${e.coverageAcknowledged?`<div>Sudah ditinjau: ${esc(e.coverageReason||'-')}</div>`:`<div class="um-row" style="margin-top:9px"><input class="um-search" style="max-width:390px" id="um-coverage-reason" placeholder="Catatan verifikasi cakupan absensi"><button type="button" class="um-btn small" data-um-action="acknowledge" data-kind="coverage">Konfirmasi Cakupan</button></div>`}</div>`:''}
  <div class="um-weekday-row">${WEEKDAYS_MONDAY.map(day=>`<span>${day}</span>`).join('')}</div>
  <div class="um-day-grid">${Array.from({length:calendarOffset(keys[0])},()=>'<span class="um-day-placeholder" aria-hidden="true"></span>').join('')}${keys.map(k=>{const d=e.days[k],warn=d.issues.length&&!d.reviewed,cls=d.value===1?'earned':'';
    const status=d.isHoliday?'Tanggal merah':d.isWeekend?'Akhir pekan':warn?'Perlu verifikasi':d.remoteExcluded?'WFA/WFH: 0 hari':d.value===1?'1 hari':'Tidak dibayar';
-   return `<button class="um-day ${cls} ${warn?'warn':''} ${state.modalDate===k?'selected':''} ${d.isWeekend?'weekend':''} ${d.isHoliday?'holiday':''} ${d.remoteExcluded&&!d.nonWorking?'remote':''}" type="button" data-um-action="select-day" data-date="${k}" aria-pressed="${state.modalDate===k}" aria-label="${esc(dateLabel(k))}, ${esc(status)}" title="${esc(d.issues.join('; ')||status)}"><span class="um-day-week">${WEEKDAYS[R.weekday(k)]}</span><strong>${Number(k.slice(-2))}</strong><small>${d.nonWorking?'Libur':warn?'Periksa':d.remoteExcluded?d.workMode:d.value===1?'1 hari':'–'}</small></button>`;}).join('')}</div>
+   const leaves=d.leaves?.length||0,assignments=d.assignments?.length||0;
+   const sourceLabels=[leaves?`Cuti (${leaves})`:'',assignments?`Surat Tugas (${assignments})`:''].filter(Boolean);
+   const fullStatus=[status,...sourceLabels].join(' · ');
+   const title=[d.issues.join('; ')||status,...sourceLabels].join(' · ');
+   return `<button class="um-day ${cls} ${warn?'warn':''} ${state.modalDate===k?'selected':''} ${d.isWeekend?'weekend':''} ${d.isHoliday?'holiday':''} ${d.remoteExcluded&&!d.nonWorking?'remote':''} ${sourceLabels.length?'has-support':''}" type="button" data-um-action="select-day" data-date="${k}" aria-pressed="${state.modalDate===k}" aria-label="${esc(dateLabel(k))}, ${esc(fullStatus)}" title="${esc(title)}"><span class="um-day-week">${WEEKDAYS[R.weekday(k)]}</span><strong>${Number(k.slice(-2))}</strong><span class="um-day-sources">${leaves?`<span class="um-day-source cuti">Cuti${leaves>1?' '+leaves:''}</span>`:''}${assignments?`<span class="um-day-source tugas">Tugas${assignments>1?' '+assignments:''}</span>`:''}</span><small class="um-day-status">${d.nonWorking?'Libur':warn?'Periksa':d.remoteExcluded?d.workMode:d.value===1?'1 hari':'–'}</small></button>`;}).join('')}</div>
+ <div class="um-source-legend" aria-label="Legenda integrasi kalender"><span><i class="um-legend-source cuti"></i>Cuti</span><span><i class="um-legend-source tugas"></i>Surat Tugas</span><small>Penanda menunjukkan data yang terintegrasi, bukan otomatis berarti konflik. Klik tanggal untuk melihat rincian dan berkas.</small></div>
  <div class="um-detail"><h3>Verifikasi ${esc(dateLabel(day.key))}</h3><div class="um-detail-grid"><div><div class="um-fine"><b>Jam masuk:</b> ${esc(fmtTime(day.inMinutes))} · <b>Jam pulang:</b> ${esc(fmtTime(day.outMinutes))}<br><b>Status absensi:</b> ${esc(day.status||'—')}<br><b>Pola kerja:</b> ${esc(day.workMode||'—')}<br><b>Kode:</b> ${esc(day.flags.join(', ')||'—')}<br><b>Cuti:</b> ${day.leaves.length?esc(day.leaves.map(x=>x.leaveType||'Cuti').join(', ')):'—'}<br><b>Surat tugas:</b> ${day.assignments.length?esc(day.assignments.map(x=>x.activity||x.letterNumber||'Surat Tugas').join(', ')):'—'}<br><b>Hasil otomatis:</b> ${day.automatic===1?'1 hari':'Tidak dibayar'}</div>
   ${day.remoteExcluded&&!day.nonWorking?`<div class="um-note um-remote-policy" style="margin-top:11px">${esc(day.workMode)} di luar hari Jumat: uang makan otomatis <b>0 hari</b>, meskipun jam presensi terisi.</div>`:''}
-  ${day.nonWorking?'<div class="um-note" style="margin-top:11px">Tanggal tidak termasuk hari yang memperoleh uang makan.</div>':isProblem?`<div class="um-note warn" style="margin-top:11px">${day.issues.map(x=>esc(x)).join(' · ')}</div>`:'<div class="um-note good" style="margin-top:11px">Tidak ditemukan konflik otomatis.</div>'}</div>
- <div>${day.nonWorking?`<div class="um-note um-note-nonworking"><b>${day.isHoliday?'Tanggal merah':'Sabtu/Minggu'}</b><p>Hari ini otomatis bernilai 0. Presensi atau verifikasi manual tidak dapat mengubahnya menjadi hari uang makan.</p>${day.isHoliday&&state.holidayNotes[day.key]?`<p>Keterangan: ${esc(state.holidayNotes[day.key])}</p>`:''}</div>`:`<div class="um-field"><label for="um-manual">Hasil Setelah Verifikasi</label><select id="um-manual"><option value="" ${day.manualValue===null?'selected':''}>${day.remoteExcluded?'0 — Otomatis (WFA/WFH bukan Jumat)':`Ikuti otomatis (${day.automatic} hari)`}</option>${day.remoteExcluded?'':`<option value="1" ${day.manualValue===1?'selected':''}>1 — Memperoleh Uang Makan</option><option value="0" ${day.manualValue===0?'selected':''}>0 — Tidak Memperoleh Uang Makan</option>`}</select></div><div class="um-field" style="margin-top:11px"><label for="um-note">Catatan Verifikasi / Alasan Koreksi</label><textarea id="um-note" placeholder="Wajib diisi jika ada konflik atau koreksi manual">${esc(day.manualNote||'')}</textarea></div><div class="um-row" style="margin-top:12px"><button class="um-btn primary small" type="button" data-um-action="save-day">Simpan Verifikasi Tanggal</button>${day.reviewed?'<span class="um-pill good">Sudah diverifikasi</span>':''}</div>`}</div></div>${supportingFilesSection(day)}</div>
+  ${day.nonWorking?'<div class="um-note" style="margin-top:11px">Tanggal tidak termasuk hari yang memperoleh uang makan.</div>':isProblem?`<div class="um-note warn" style="margin-top:11px">${day.issues.map(x=>esc(x)).join(' · ')}</div>`:`<div class="um-note good" style="margin-top:11px">Tidak ditemukan konflik otomatis.${day.leaves.length||day.assignments.length?' Data cuti/surat tugas terkait tetap ditampilkan di bawah.':''}</div>`}</div>
+ <div>${day.nonWorking?`<div class="um-note um-note-nonworking"><b>${day.isHoliday?'Tanggal merah':'Sabtu/Minggu'}</b><p>Hari ini otomatis bernilai 0. Presensi atau verifikasi manual tidak dapat mengubahnya menjadi hari uang makan.</p>${day.isHoliday&&state.holidayNotes[day.key]?`<p>Keterangan: ${esc(state.holidayNotes[day.key])}</p>`:''}</div>`:`<div class="um-field"><label for="um-manual">Hasil Setelah Verifikasi</label><select id="um-manual"><option value="" ${day.manualValue===null?'selected':''}>${day.remoteExcluded?'0 — Otomatis (WFA/WFH bukan Jumat)':`Ikuti otomatis (${day.automatic} hari)`}</option>${day.remoteExcluded?'':`<option value="1" ${day.manualValue===1?'selected':''}>1 — Memperoleh Uang Makan</option><option value="0" ${day.manualValue===0?'selected':''}>0 — Tidak Memperoleh Uang Makan</option>`}</select></div><div class="um-field" style="margin-top:11px"><label for="um-note">Catatan Verifikasi / Alasan Koreksi</label><textarea id="um-note" placeholder="Wajib diisi jika ada konflik atau koreksi manual">${esc(day.manualNote||'')}</textarea></div><div class="um-row" style="margin-top:12px"><button class="um-btn primary small" type="button" data-um-action="save-day">Simpan Verifikasi Tanggal</button>${day.reviewed?'<span class="um-pill good">Sudah diverifikasi</span>':''}</div>`}</div></div>${supportingRecordsSection(day)}${supportingFilesSection(day)}</div>
  </div><div class="um-modal-footer"><span class="um-fine">Perubahan tercatat bersama catatan, operator, dan waktu verifikasi.</span><button class="um-btn" type="button" data-um-action="close-modal">Selesai</button></div>
  </section></div>`;
 }
@@ -283,14 +328,14 @@ async function getSupportingData(){
  const ls=new Map(),as=new Map();
  leaveSnaps.flatMap(s=>s.docs).forEach(doc=>{
    const x=doc.data()||{},startDate=String(x.startDate||''),endDate=String(x.endDate||x.startDate||'');
-   if(x.employeeId&&startDate<=to&&endDate>=from){ls.set(doc.id,{id:doc.id,employeeId:String(x.employeeId),startDate,endDate,leaveType:String(x.leaveType||'Cuti'),documentNumber:String(x.documentNumber||''),documents:supportDocuments(x.documents)});}
+   if(x.employeeId&&startDate<=to&&endDate>=from){ls.set(doc.id,{id:doc.id,employeeId:String(x.employeeId),startDate,endDate,leaveType:String(x.leaveType||'Cuti'),documentNumber:String(x.documentNumber||''),documentDate:String(x.documentDate||''),note:String(x.note||''),documents:supportDocuments(x.documents)});}
  });
  assignmentSnaps.flatMap(s=>s.docs).forEach(doc=>{
    const x=doc.data()||{},startDate=String(x.startDate||''),endDate=String(x.endDate||x.startDate||'');
    const type=['official_travel','work_arrangement','other'].includes(x.assignmentType)?x.assignmentType:'official_travel';
    const ids=(x.employees||[]).map(e=>String(e.employeeId||e.id||'')).filter(Boolean);
    if(ids.length&&startDate<=to&&endDate>=from)as.set(doc.id,{id:doc.id,employeeIds:ids,startDate,endDate,
-     assignmentType:type,activity:String(x.activity||''),letterNumber:String(x.letterNumber||''),documents:supportDocuments(x.documents)});
+     assignmentType:type,activity:String(x.activity||''),letterNumber:String(x.letterNumber||''),letterDate:String(x.letterDate||''),location:String(x.location||''),note:String(x.note||''),documents:supportDocuments(x.documents)});
  });
  return {leaves:Array.from(ls.values()),assignments:Array.from(as.values())};
 }
