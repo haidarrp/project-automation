@@ -211,3 +211,36 @@
 .um-source-empty{margin-top:18px;padding:11px 13px;border:1px dashed var(--line-strong);border-radius:10px;color:var(--muted);font-size:11px}
 @media(max-width:650px){.um-day.has-support{min-height:90px}.um-day-sources{gap:2px}.um-day-source{padding:2px 3px;font-size:8px}.um-source-legend{gap:8px}.um-source-record-list{grid-template-columns:1fr}.um-source-record dl{grid-template-columns:1fr 1fr}}
 @media(max-width:650px){.um-sp-panel .um-btn{width:100%}.um-sp-indicator{margin-left:auto}}
+
+/* Verifikasi satu kali per dokumen Cuti / Surat Tugas. */
+.um-period-review{margin-top:18px;padding:17px;border:1px solid #cfdde9;border-radius:13px;background:#f6f9fc}
+.um-period-review-title{margin-bottom:13px}
+.um-period-review-title h4,.um-date-exception h4{margin:0 0 6px;color:var(--ink);font-size:13px;font-weight:740}
+.um-period-review-title p,.um-date-exception p{margin:0;color:var(--ink-soft);font-size:11px;line-height:1.65}
+.um-period-review-items{display:grid;gap:11px}
+.um-period-review-item{min-width:0;padding:15px;border:1px solid var(--line-strong);border-radius:12px;background:#fff}
+.um-period-review-item.cuti{border-left:3px solid #78bda5}
+.um-period-review-item.tugas{border-left:3px solid #81b2e6}
+.um-period-review-top{display:flex;gap:9px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.um-period-review-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
+.um-period-review-head strong{font-size:12px;overflow-wrap:anywhere;color:var(--ink)}
+.um-period-review-meta{display:flex;gap:6px 17px;flex-wrap:wrap;margin:10px 0 12px;color:var(--ink-soft);font-size:10px;line-height:1.6}
+.um-period-review-meta b{font-weight:680;color:var(--muted)}
+.um-period-review-controls{display:flex;align-items:flex-end;gap:11px;flex-wrap:wrap}
+.um-period-review-controls .um-field{flex:1 1 280px;min-width:185px}
+.um-period-review-controls .um-btn{margin-bottom:0;min-height:39px;white-space:normal;text-align:center}
+.um-period-review-item>small{display:block;margin-top:10px;font-size:10px;line-height:1.6;color:var(--muted)}
+.um-review-hint{align-self:stretch}
+.um-review-hint p{margin:8px 0 0;line-height:1.6}
+.um-review-hint .um-pill{margin-top:10px}
+.um-date-exception{margin-top:12px;padding:15px;border:1px dashed var(--line-strong);border-radius:12px;background:var(--paper)}
+.um-date-exception .um-note{margin-top:10px}
+.um-date-exception-controls{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-top:12px}
+.um-date-exception-controls .um-field{flex:1 1 280px}
+.um-date-exception-controls .um-btn{min-height:39px}
+.um-date-exception>small{display:block;margin-top:9px;color:var(--muted);font-size:10px}
+@media(max-width:650px){
+ .um-period-review{padding:12px}
+ .um-period-review-item{padding:12px}
+ .um-period-review-controls .um-btn,.um-date-exception-controls .um-btn{width:100%}
+}

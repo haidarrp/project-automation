@@ -1,13 +1,12 @@
-/* Uang Makan: aturan per bulan kalender. Tidak mengikuti offset periode Tukin.
- * Sabtu/Minggu dan tanggal merah tambahan selalu bernilai 0, termasuk ketika
- * ada presensi atau hasil verifikasi lama bernilai 1.
+/* Uang Makan: perhitungan berdasarkan bulan kalender.
+ * Verifikasi satu dokumen Cuti/Surat Tugas berlaku untuk seluruh tanggal
+ * dalam rentang dokumen yang termasuk periode pengolahan. Hari libur dan
+ * WFA/WFH di luar Jumat tetap bernilai nol.
  */
 (function () {
   'use strict';
   const MONTHS=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
   const ABSENCE_FLAGS=new Set(['S','I','TK','D','C']);
-  // WFA/WFH merupakan lokasi kerja, bukan ketidakhadiran. Aturan uang makan:
-  // WFA/WFH hanya bisa dihitung pada hari Jumat, apabila ada jam presensi.
   const REMOTE_WORK=/(?:^|[^a-z0-9])(?:wfa|wfh|work[\s_-]*from[\s_-]*(?:anywhere|home)|bekerja[\s_-]*dari[\s_-]*(?:mana[\s_-]*saja|rumah))(?![a-z0-9])/i;
   function detectWorkMode(value){
     const match=String(value||'').match(REMOTE_WORK);
@@ -28,7 +27,27 @@
     if((flags||[]).some(flag=>ABSENCE_FLAGS.has(String(flag).toUpperCase())))return true;
     return /(?:^|\b)(cuti|sakit|izin|ijin|dinas luar|perjalanan dinas|tanpa keterangan|tidak hadir|alpa)(?:\b|$)/i.test(String(status||''));
   }
-  function classifyDay(record, leaves=[], assignments=[]) {
+  function supportKey(kind,record){
+    const id=String(record?.id||'').trim();
+    // Firestore selalu memberikan id, fallback ini menjaga data impor lama.
+    return `${kind}:${id||[record?.startDate||'',record?.endDate||'',record?.documentNumber||record?.letterNumber||''].join('|')}`;
+  }
+  function supportSignature(kind,record){
+    const x=record||{};
+    const documents=(Array.isArray(x.documents)?x.documents:[]).map(d=>JSON.stringify([
+      String(d.id||''),String(d.name||''),String(d.type||''),String(d.number||''),String(d.note||''),
+      String(d.file?.name||''),String(d.file?.driveId||''),String(d.file?.itemId||'')
+    ])).sort();
+    return kind==='cuti'?JSON.stringify([
+      String(x.id||''),String(x.employeeId||''),String(x.startDate||''),String(x.endDate||''),
+      String(x.leaveType||''),String(x.documentNumber||''),String(x.documentDate||''),String(x.note||''),documents
+    ]):JSON.stringify([
+      String(x.id||''),(x.employeeIds||[]).map(String).sort(),String(x.startDate||''),String(x.endDate||''),
+      String(x.assignmentType||''),String(x.activity||''),String(x.letterNumber||''),
+      String(x.letterDate||''),String(x.location||''),String(x.note||''),documents
+    ]);
+  }
+  function classifyDay(record,leaves=[],assignments=[]){
     const dateKey=String(record?.key||'');
     const hasIn=record?.inMinutes!==null && record?.inMinutes!==undefined;
     const hasOut=record?.outMinutes!==null && record?.outMinutes!==undefined;
@@ -43,8 +62,6 @@
     const nonWorking=isWeekend||isHoliday;
     const remoteExcluded=Boolean(workMode)&&weekday(dateKey)!==5;
     const issues=[];
-    // Hari nonkerja tidak berhak atas uang makan; presensi tidak perlu diverifikasi
-    // untuk tujuan uang makan karena hasilnya tetap 0.
     if(!nonWorking){
       if(present && !(hasIn&&hasOut))issues.push('Presensi hanya satu kali');
       if(present && leaves.length)issues.push('Presensi bertentangan dengan data cuti');
@@ -52,15 +69,12 @@
       if(present && absenceStatus)issues.push('Presensi bertentangan dengan status absensi');
       if(record?.duplicate)issues.push('Tanggal tercatat dalam lebih dari satu file');
       if(!present && /\bhadir\b/i.test(status) && !absenceStatus)issues.push('Status hadir tetapi jam presensi kosong');
-      // Surat tugas tersinkron tidak membuktikan pegawai benar melaksanakan tugas.
-      // Wajib konfirmasi walaupun presensi tidak berbenturan atau tidak tersedia,
-      // misalnya ketika penugasan ternyata batal / pegawai tidak jadi berangkat.
+      // Data sumber belum tentu mencerminkan realisasi: cuti/tugas dapat batal.
+      if(leaves.length)issues.push('Konfirmasi pelaksanaan cuti (termasuk jika dibatalkan/tidak diambil)');
       if(assignments.length)issues.push('Konfirmasi pelaksanaan surat tugas (termasuk jika batal/tidak berangkat)');
     }
     const automatic=(present&&!nonWorking&&!remoteExcluded)?1:0;
     const hasManual=record?.manualValue===0||record?.manualValue===1;
-    // Libur dan WFA/WFH di luar Jumat wajib bernilai 0, termasuk jika ada
-    // koreksi manual dari proses sebelumnya atau riwayat lama.
     const lockedZero=nonWorking||remoteExcluded;
     const manualValue=lockedZero?null:(hasManual?record.manualValue:null);
     const value=lockedZero?0:(manualValue===null?automatic:manualValue);
@@ -73,27 +87,70 @@
   }
   function applySupporting(employee,leaves,assignments,year,month,holidays=[]){
     const dates=monthDates(year,month),reds=new Set(holidays||[]);
-    const ownLeaves=leaves.filter(l=>l.employeeId===employee.id);
-    const ownAssignments=assignments.filter(a=>a.employeeIds.includes(employee.id));
+    const ownLeaves=(leaves||[]).filter(l=>l.employeeId===employee.id);
+    const ownAssignments=(assignments||[]).filter(a=>(a.employeeIds||[]).includes(employee.id));
+    // Tinjau per identitas dokumen, bukan per tanggal. Tanda tangan metadata
+    // mencegah persetujuan lama tetap berlaku bila isi/rentang berubah.
+    const supportReviews={};
+    for(const [kind,items] of [['cuti',ownLeaves],['tugas',ownAssignments]]){
+      for(const item of items){
+        const k=supportKey(kind,item),oldReview=employee.supportReviews?.[k];
+        if(oldReview&&['auto',0,1].includes(oldReview.choice)&&oldReview.signature===supportSignature(kind,item)){
+          supportReviews[k]={choice:oldReview.choice,signature:oldReview.signature,
+            reviewedAt:String(oldReview.reviewedAt||''),reviewedBy:String(oldReview.reviewedBy||'')};
+        }
+      }
+    }
     const old=employee.days||{},daily={};
     for(const date of dates){
       const base=old[date]||{key:date,inMinutes:null,outMinutes:null,status:'',flags:[]};
-      daily[date]=classifyDay({...base,key:date,isHoliday:reds.has(date)},
-        ownLeaves.filter(l=>l.startDate<=date&&l.endDate>=date),
-        ownAssignments.filter(a=>a.startDate<=date&&a.endDate>=date));
+      const dayLeaves=ownLeaves.filter(l=>l.startDate<=date&&l.endDate>=date);
+      const dayTasks=ownAssignments.filter(a=>a.startDate<=date&&a.endDate>=date);
+      const hasSources=Boolean(dayLeaves.length||dayTasks.length);
+      // Koreksi tanggal dan keputusan dokumen disimpan terpisah. Nilai hasil
+      // periode tidak boleh ikut tertinggal bila dokumennya dihapus saat sync.
+      const rawDateValue=base.dateManualValue!==undefined?base.dateManualValue:(!hasSources?base.manualValue:null);
+      const rawDateReviewed=base.dateReviewed!==undefined?base.dateReviewed:(!hasSources&&base.reviewed);
+      const d=classifyDay({...base,key:date,isHoliday:reds.has(date),manualValue:rawDateValue,
+        reviewed:rawDateReviewed},dayLeaves,dayTasks);
+      d.dateManualValue=d.manualValue;
+      d.dateReviewed=!d.nonWorking&&Boolean(rawDateReviewed);
+      d.dateReviewedAt=d.dateReviewed?String(base.dateReviewedAt||base.reviewedAt||''):'';
+      d.dateReviewedBy=d.dateReviewed?String(base.dateReviewedBy||base.reviewedBy||''):'';
+      const sources=[...dayLeaves.map(x=>supportKey('cuti',x)),...dayTasks.map(x=>supportKey('tugas',x))];
+      d.sourceKeys=sources;
+      d.pendingSourceKeys=sources.filter(k=>!supportReviews[k]);
+      d.reviewConflict=false;
+      if(hasSources&&!d.nonWorking){
+        const decisions=[...new Set(sources.map(k=>supportReviews[k]?.choice).filter(v=>v===0||v===1))];
+        d.reviewConflict=decisions.length>1&&!d.remoteExcluded;
+        const exceptional=d.dateReviewed&&d.dateManualValue!==null;
+        const periodValue=decisions.length===1?decisions[0]:null;
+        const result=exceptional?d.dateManualValue:periodValue;
+        d.manualValue=d.remoteExcluded?null:result;
+        d.value=d.remoteExcluded?0:(result===null?d.automatic:result);
+        d.reviewed=d.pendingSourceKeys.length===0&&(!d.reviewConflict||exceptional);
+        if(d.reviewConflict)d.issues.push('Hasil verifikasi dokumen yang tumpang tindih berbeda; tentukan hasil khusus tanggal ini');
+        if(d.reviewed){
+          const latest=sources.map(k=>supportReviews[k]).filter(Boolean).sort((a,b)=>b.reviewedAt.localeCompare(a.reviewedAt))[0];
+          d.reviewedAt=exceptional?d.dateReviewedAt:(latest?.reviewedAt||'');
+          d.reviewedBy=exceptional?d.dateReviewedBy:(latest?.reviewedBy||'');
+        }else{d.reviewedAt='';d.reviewedBy='';}
+      }
+      daily[date]=d;
     }
-    return {...employee,days:daily};
+    return {...employee,supportReviews,days:daily};
   }
   function overview(employee){
     const days=Object.values(employee.days||{});
     const issues=days.filter(d=>d.issues.length&&!d.reviewed).length;
     return {days:days.filter(d=>d.value===1&&!d.nonWorking).length,issues,
       present:days.filter(d=>d.present&&!d.nonWorking&&!d.remoteExcluded).length,
-      leave:days.filter(d=>d.leaves.length).length,travel:days.filter(d=>d.official.length).length,
+      leave:days.filter(d=>(d.leaves||[]).length).length,travel:days.filter(d=>(d.official||[]).length).length,
       absence:days.filter(d=>!d.present&&isAbsenceStatus(d.status,d.flags)).length,
       manual:days.filter(d=>d.manualValue!==null&&!d.nonWorking&&d.manualValue!==d.automatic).length,
-      missing:false,
-      missingType:!employee.jenisPegawai,coverage:!!employee.fileWarnings?.length&&!employee.coverageAcknowledged,
+      missing:false,missingType:!employee.jenisPegawai,
+      coverage:!!employee.fileWarnings?.length&&!employee.coverageAcknowledged,
       status:issues||!employee.jenisPegawai||(employee.fileWarnings?.length&&!employee.coverageAcknowledged)?'Perlu verifikasi':'Siap'};
   }
   function overall(employees){
@@ -101,5 +158,7 @@
     for(const e of employees){const a=overview(e);s.days+=a.days;s.issues+=a.issues;s.manual+=a.manual;s.missing+=Number(a.missing);s.ready+=Number(a.status==='Siap');}
     return s;
   }
-  window.UangMakanRules=Object.freeze({MONTHS,key,keyDate,weekday,periodLabel,periodDays,monthDates,weekend,normalizeNip,normalizeName,detectWorkMode,isAbsenceStatus,classifyDay,applySupporting,overview,overall});
+  window.UangMakanRules=Object.freeze({MONTHS,key,keyDate,weekday,periodLabel,periodDays,monthDates,weekend,
+    normalizeNip,normalizeName,detectWorkMode,isAbsenceStatus,supportKey,supportSignature,
+    classifyDay,applySupporting,overview,overall});
 })();

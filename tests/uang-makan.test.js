@@ -13,7 +13,7 @@ function sandbox(code,overrides={}){
 const ruleCode=fs.readFileSync(path.join(scripts,'uang-makan-rules.js'),'utf8');
 function appHarness(R){
  const code=fs.readFileSync(path.join(scripts,'uang-makan-app.js'),'utf8')
-  .replace(/\ninit\(\);\s*\}\)\(\);\s*$/,`\nwindow.__umTest={state,previewPanel,dailySupporting,supportingFilesSection,supportingRecordsSection,supportDocuments,documentKey,modal,loadSupportingPreviews,getSupportingData,archiveAbsences,historyTable,computeEmployees,saveDay,sharePointPanel,checkSharePoint,connectSharePoint};\n})();`);
+  .replace(/\ninit\(\);\s*\}\)\(\);\s*$/,`\nwindow.__umTest={state,previewPanel,dailySupporting,supportingFilesSection,supportingRecordsSection,supportDocuments,documentKey,modal,loadSupportingPreviews,getSupportingData,archiveAbsences,historyTable,computeEmployees,saveDay,saveSupport,storedSupporting,sourceReviewPanel,dateExceptionPanel,sharePointPanel,checkSharePoint,connectSharePoint};\n})();`);
  const root={addEventListener:()=>{},querySelector:()=>null};
  const ctx=sandbox(code,{
   window:{UangMakanRules:R,addEventListener:()=>{},UserAccess:{can:()=>true,assert:()=>true}},
@@ -120,7 +120,7 @@ test('Tabel pratinjau menampilkan semua pegawai dan iframe berkas pendukung',()=
 });
 
 
-test('Data cuti tanpa konflik tetap muncul pada kalender, detail, dan pratinjau dokumen',()=>{
+test('Cuti tanpa konflik wajib diverifikasi, tetap muncul pada kalender dan dokumen',()=>{
  const R=rules(),T=appHarness(R);
  const docs=T.supportDocuments([{id:'doc-cuti',type:'Surat Cuti',name:'Persetujuan Cuti',number:'ABC/2026',
   file:{name:'Persetujuan.pdf',driveId:'drive',itemId:'item',webUrl:'https://example.sharepoint.com/cuti.pdf'}}]);
@@ -129,7 +129,7 @@ test('Data cuti tanpa konflik tetap muncul pada kalender, detail, dan pratinjau 
  const e=R.applySupporting({id:'e1',name:'Pegawai Contoh',nip:'123',jenisPegawai:'PNS',days:{'2026-09-01':{key:'2026-09-01',inMinutes:null,outMinutes:null,status:'Cuti',flags:['C']}}},[leave],[],2026,9);
  T.state.year=2026;T.state.month=9;T.state.employees=[e];T.state.modalId='e1';T.state.modalDate='2026-09-01';
  const day=e.days['2026-09-01'];
- assert.equal(day.issues.length,0);
+ assert.ok(day.issues.some(x=>x.includes('Konfirmasi pelaksanaan cuti')));
  assert.equal(day.value,0);
  assert.equal(T.dailySupporting(day).length,1);
  const key=T.documentKey(T.dailySupporting(day)[0],docs[0]);
@@ -137,7 +137,9 @@ test('Data cuti tanpa konflik tetap muncul pada kalender, detail, dan pratinjau 
  const html=T.modal();
  assert.ok(html.includes('um-day-source cuti')); // Sel 1 Sep: tidak ada konflik
  assert.ok(html.includes('2 tanggal cuti'));
- assert.ok(html.includes('Tidak ditemukan konflik otomatis. Data cuti/surat tugas terkait tetap ditampilkan'));
+ assert.ok(html.includes('Verifikasi Cuti / Surat Tugas per Periode'));
+ assert.ok(html.includes('Perlu verifikasi'));
+ assert.ok(html.includes('2 tanggal kerja pada September 2026'));
  assert.ok(html.includes('Data Cuti &amp; Surat Tugas Terintegrasi'));
  assert.ok(html.includes('Cuti Tahunan'));
  assert.ok(html.includes('SK-CUTI/2026'));
@@ -170,7 +172,7 @@ test('Surat tugas tersinkron, termasuk pengaturan kerja, perlu verifikasi meskip
  assert.ok(T.modal().includes('um-day-source tugas'));
  assert.ok(T.modal().includes('2 tanggal surat tugas'));
  assert.ok(T.modal().includes('Periksa'));
- assert.ok(T.modal().includes('Rekomendasi sistem: Tidak memperoleh uang makan'));
+ assert.ok(T.modal().includes('Ikuti rekomendasi sistem per tanggal'));
 });
 
 test('Dokumen tetap terbaca saat tanggal libur, tanpa benturan, serta kosong jika tanpa catatan',()=>{
@@ -348,56 +350,61 @@ test('Koreksi tidak dihitung jika pilihan manual sama dengan rekomendasi otomati
  assert.equal(R.overview({jenisPegawai:'PNS',days:{[corrected.key]:corrected}}).manual,1);
 });
 
-test('Sinkronisasi ulang membatalkan verifikasi lama jika detail surat tugas berubah atau surat dibatalkan',()=>{
- const R=rules(),T=appHarness(R);
- T.state.year=2026;T.state.month=9;
- const original={id:'s1',employeeIds:['e1'],startDate:'2026-09-24',endDate:'2026-09-25',assignmentType:'other',activity:'Agenda Awal',letterNumber:'ST-12'};
+test('Sinkronisasi ulang mempertahankan verifikasi dokumen yang identik, membatalkan yang berubah atau dihapus',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=9;
+ const original={id:'s1',employeeIds:['e1'],startDate:'2026-09-24',endDate:'2026-09-25',
+  assignmentType:'other',activity:'Agenda Awal',letterNumber:'ST-12'};
  const e=R.applySupporting({id:'e1',jenisPegawai:'PNS',days:{'2026-09-24':attendance('2026-09-24')}},[],[original],2026,9);
- e.days['2026-09-24'].reviewed=true;
- e.days['2026-09-24'].reviewedAt='2026-09-25T01:00:00Z';
- e.days['2026-09-24'].reviewedBy='operator@example.com';
- e.days['2026-09-24'].manualValue=0;
- e.days['2026-09-24'].value=0;
- const same=T.computeEmployees([e],[],[original])[0].days['2026-09-24'];
- assert.equal(same.reviewed,true,'Data sumber tidak berubah: hasil verifikasi tetap berlaku');
- const changed=T.computeEmployees([e],[],[{...original,activity:'Agenda Batal Dilaksanakan'}])[0].days['2026-09-24'];
- assert.equal(changed.reviewed,false);
- assert.equal(changed.manualValue,null);
- assert.equal(changed.reviewedAt,'');
- assert.equal(changed.value,1,'Nilai dikembalikan ke rekomendasi dan menunggu verifikasi ulang');
- const cancelled=T.computeEmployees([e],[],[])[0].days['2026-09-24'];
- assert.equal(cancelled.reviewed,false);
- assert.equal(cancelled.manualValue,null);
- assert.equal(cancelled.issues.length,0,'Tidak ada lagi surat tugas tersinkron pada hari tersebut');
+ const k=R.supportKey('tugas',original);
+ e.supportReviews[k]={choice:0,signature:R.supportSignature('tugas',original),reviewedAt:'2026-09-25T01:00:00Z',reviewedBy:'operator@example.com'};
+ const verified=R.applySupporting(e,[],[original],2026,9);
+ for(const date of ['2026-09-24','2026-09-25'])assert.equal(verified.days[date].reviewed,true);
+ const same=T.computeEmployees([verified],[],[original])[0];
+ assert.equal(same.days['2026-09-24'].reviewed,true);
+ assert.equal(same.days['2026-09-24'].value,0);
+ const changed=T.computeEmployees([verified],[],[{...original,activity:'Agenda Batal Dilaksanakan'}])[0];
+ assert.equal(changed.days['2026-09-24'].reviewed,false);
+ assert.equal(changed.days['2026-09-25'].reviewed,false);
+ assert.equal(changed.days['2026-09-24'].manualValue,null);
+ assert.equal(changed.days['2026-09-24'].value,1,'Kembali ke perhitungan absensi sampai diverifikasi ulang');
+ assert.equal(Object.keys(changed.supportReviews).length,0);
+ const cancelled=T.computeEmployees([verified],[],[])[0];
+ assert.equal(cancelled.days['2026-09-24'].manualValue,null);
+ assert.equal(cancelled.days['2026-09-24'].value,1);
+ assert.equal(cancelled.days['2026-09-24'].issues.length,0);
+ assert.equal(Object.keys(cancelled.supportReviews).length,0);
 });
 
-test('Pilihan verifikasi hanya berupa rekomendasi/memperoleh/tidak memperoleh dan tanpa catatan',()=>{
- const R=rules(),T=appHarness(R);
- T.state.year=2026;T.state.month=9;
+test('Pilihan hasil per dokumen tidak menampilkan angka 1/0, tanpa alasan koreksi tertulis',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=9;
+ const task={id:'s1',employeeIds:['e1'],startDate:'2026-09-24',endDate:'2026-09-25',assignmentType:'official_travel'};
+ T.state.assignments=[task];
  T.state.employees=[R.applySupporting({id:'e1',name:'Tes',nip:'123',jenisPegawai:'PNS',days:{
-  '2026-09-24':attendance('2026-09-24')
- }},[],[{id:'s1',employeeIds:['e1'],startDate:'2026-09-24',endDate:'2026-09-24',assignmentType:'official_travel'}],2026,9)];
+  '2026-09-24':attendance('2026-09-24'),'2026-09-25':attendance('2026-09-25')
+ }},[],[task],2026,9)];
  T.state.modalId='e1';T.state.modalDate='2026-09-24';
  const html=T.modal();
- assert.ok(html.includes('Rekomendasi sistem: Memperoleh uang makan'));
+ assert.ok(html.includes('Ikuti rekomendasi sistem per tanggal'));
  assert.ok(html.includes('value="1"'));
  assert.ok(html.includes('value="0"'));
  assert.ok(html.includes('>Memperoleh uang makan</option>'));
  assert.ok(html.includes('>Tidak memperoleh uang makan</option>'));
+ assert.ok(html.includes('2 tanggal kerja pada September 2026'));
  assert.ok(!html.includes('>1 - Memperoleh'));
  assert.ok(!html.includes('id="um-note"'));
  assert.ok(!html.includes('Catatan Verifikasi / Alasan Koreksi'));
  T.client.FirebaseClient={getCurrentUser:()=>({email:'operator@example.com'})};
- // Pilihan eksplisit "tidak memperoleh" tetap bisa disimpan tanpa alasan tertulis.
- T.doc.getElementById=id=>id==='um-manual'?{value:'0'}:null;
- T.saveDay();
- const d=T.state.employees[0].days['2026-09-24'];
- assert.equal(d.reviewed,true);
- assert.equal(d.value,0);
- assert.equal(d.manualValue,0);
- assert.equal(d.manualNote,'');
- assert.equal(d.reviewedBy,'operator@example.com');
- assert.equal(R.overview(T.state.employees[0]).status,'Siap');
+ T.doc.getElementById=id=>id==='um-source-choice-0'?{value:'0'}:null;
+ T.saveSupport('tugas','s1','0');
+ const employee=T.state.employees[0];
+ for(const date of ['2026-09-24','2026-09-25']){
+  assert.equal(employee.days[date].reviewed,true);
+  assert.equal(employee.days[date].value,0);
+  assert.equal(employee.days[date].manualValue,0);
+  assert.equal(employee.days[date].reviewedBy,'operator@example.com');
+ }
+ assert.equal(employee.days['2026-09-24'].manualNote,'');
+ assert.equal(R.overview(employee).status,'Siap');
 });
 
 test('Panel SharePoint menunjukkan kondisi belum terhubung dan terhubung setelah autentikasi',async()=>{
@@ -435,4 +442,187 @@ test('Status SharePoint diperiksa ulang tanpa popup dan kegagalan akses tidak di
  assert.ok(T.sharePointPanel().includes('Koneksi SharePoint perlu diperiksa'));
  assert.ok(T.sharePointPanel().includes('Akses ditolak'));
  assert.ok(T.sharePointPanel().includes('Periksa Koneksi SharePoint'));
+});
+
+test('Satu verifikasi cuti berlaku untuk seluruh tanggal kerja dalam rentang, termasuk bila tidak ada konflik presensi',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=9;
+ // 1–7 September mencakup Sabtu 5 dan Minggu 6; 3 September tanggal merah tambahan.
+ const leave={id:'leave-7',employeeId:'e1',startDate:'2026-09-01',endDate:'2026-09-07',
+  leaveType:'Cuti Tahunan',documentNumber:'C-7'};
+ T.state.leaves=[leave];T.state.holidays=['2026-09-03'];
+ T.state.employees=[R.applySupporting({id:'e1',name:'Tes',nip:'123',jenisPegawai:'PNS',days:{
+  '2026-09-01':{key:'2026-09-01',status:'Cuti',flags:['C']},
+  '2026-09-02':attendance('2026-09-02') // cuti didaftarkan tetapi ada presensi
+ }},[leave],[],2026,9,T.state.holidays)];
+ let e=T.state.employees[0];
+ assert.equal(R.overview(e).issues,4,'Hanya empat hari kerja yang memerlukan verifikasi');
+ T.state.modalId='e1';T.state.modalDate='2026-09-02';
+ const html=T.modal();
+ assert.ok(html.includes('Cuti Tahunan'));
+ assert.ok(html.includes('4 tanggal kerja pada September 2026'));
+ assert.ok(html.includes('Simpan Verifikasi Periode'));
+ T.client.FirebaseClient={getCurrentUser:()=>({email:'reviewer@pkp.go.id'})};
+ T.doc.getElementById=id=>id==='um-source-choice-0'?{value:'0'}:null;
+ T.saveSupport('cuti','leave-7','0');
+ e=T.state.employees[0];
+ for(const date of ['2026-09-01','2026-09-02','2026-09-04','2026-09-07']){
+  assert.equal(e.days[date].value,0,date);assert.equal(e.days[date].reviewed,true,date);
+ }
+ for(const date of ['2026-09-03','2026-09-05','2026-09-06']){
+  assert.equal(e.days[date].value,0,date);assert.equal(e.days[date].nonWorking,true,date);
+ }
+ assert.equal(R.overview(e).issues,0);
+ assert.equal(R.overview(e).status,'Siap');
+ assert.equal(Object.keys(e.supportReviews).length,1,'Cukup satu keputusan untuk seluruh tanggal di rentang');
+});
+
+test('Satu verifikasi surat tugas lintas bulan hanya diterapkan ke tanggal bulan yang sedang dihitung',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=9;
+ const task={id:'cross-month',employeeIds:['e1'],startDate:'2026-08-30',endDate:'2026-09-04',
+  assignmentType:'official_travel',activity:'Dinas luar'};
+ T.state.assignments=[task];
+ T.state.employees=[R.applySupporting({id:'e1',name:'Pegawai',nip:'123',jenisPegawai:'PNS',days:{}},[],[task],2026,9)];
+ T.state.modalId='e1';T.state.modalDate='2026-09-01';
+ assert.equal(R.overview(T.state.employees[0]).issues,4);
+ assert.ok(T.modal().includes('4 tanggal kerja pada September 2026'));
+ T.client.FirebaseClient={getCurrentUser:()=>({email:'reviewer@pkp.go.id'})};
+ T.doc.getElementById=id=>id==='um-source-choice-0'?{value:'1'}:null;
+ T.saveSupport('tugas','cross-month','0');
+ const e=T.state.employees[0];
+ for(const date of ['2026-09-01','2026-09-02','2026-09-03','2026-09-04']){
+  assert.equal(e.days[date].reviewed,true,date);assert.equal(e.days[date].value,1,date);
+ }
+ assert.equal(R.overview(e).status,'Siap');
+ assert.equal(R.overview(e).days,4);
+});
+
+test('Pilihan rekomendasi sistem per periode tetap mengikuti hasil otomatis masing-masing tanggal',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=9;
+ const task={id:'auto',employeeIds:['e1'],startDate:'2026-09-14',endDate:'2026-09-15',assignmentType:'other'};
+ T.state.assignments=[task];
+ T.state.employees=[R.applySupporting({id:'e1',name:'Tes',nip:'123',jenisPegawai:'PNS',days:{
+  '2026-09-14':attendance('2026-09-14')
+ }},[],[task],2026,9)];
+ T.state.modalId='e1';T.state.modalDate='2026-09-14';
+ T.client.FirebaseClient={getCurrentUser:()=>({email:'reviewer@pkp.go.id'})};
+ T.doc.getElementById=id=>id==='um-source-choice-0'?{value:'auto'}:null;
+ T.saveSupport('tugas','auto','0');
+ const e=T.state.employees[0];
+ assert.equal(e.days['2026-09-14'].value,1);
+ assert.equal(e.days['2026-09-15'].value,0);
+ assert.equal(e.days['2026-09-14'].reviewed,true);
+ assert.equal(e.days['2026-09-15'].reviewed,true);
+ assert.equal(e.days['2026-09-14'].manualValue,null);
+});
+
+test('Penugasan tersinkron berbeda yang tumpang tindih harus dikonfirmasi masing-masing',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=9;
+ const task1={id:'a',employeeIds:['e1'],startDate:'2026-09-23',endDate:'2026-09-25',assignmentType:'other',activity:'Kegiatan A'};
+ const task2={id:'b',employeeIds:['e1'],startDate:'2026-09-24',endDate:'2026-09-25',assignmentType:'other',activity:'Kegiatan B'};
+ T.state.assignments=[task1,task2];
+ T.state.employees=[R.applySupporting({id:'e1',name:'Tes',nip:'123',jenisPegawai:'PNS',days:{}},[],T.state.assignments,2026,9)];
+ T.state.modalId='e1';T.state.modalDate='2026-09-24';
+ assert.equal((T.modal().match(/data-um-action="save-support"/g)||[]).length,2);
+ T.client.FirebaseClient={getCurrentUser:()=>({email:'reviewer@pkp.go.id'})};
+ T.doc.getElementById=id=>id==='um-source-choice-0'?{value:'0'}:null;
+ T.saveSupport('tugas','a','0');
+ assert.equal(T.state.employees[0].days['2026-09-23'].reviewed,true,'Tanggal yang hanya terkait surat A selesai');
+ assert.equal(T.state.employees[0].days['2026-09-24'].reviewed,false,'Surat B belum dikonfirmasi');
+ assert.equal(R.overview(T.state.employees[0]).issues,2);
+ T.doc.getElementById=id=>id==='um-source-choice-1'?{value:'1'}:null;
+ T.saveSupport('tugas','b','1');
+ const e=T.state.employees[0];
+ assert.equal(e.days['2026-09-24'].reviewConflict,true);
+ assert.equal(e.days['2026-09-24'].reviewed,false);
+ assert.equal(e.days['2026-09-25'].reviewed,false);
+ assert.equal(R.overview(e).status,'Perlu verifikasi');
+ assert.ok(T.modal().includes('Koreksi Khusus Tanggal'));
+ assert.ok(T.modal().includes('Keputusan dua dokumen yang tumpang tindih berbeda'));
+ T.doc.getElementById=id=>id==='um-manual'?{value:'0'}:null;
+ T.saveDay();
+ const corrected=T.state.employees[0];
+ assert.equal(corrected.days['2026-09-24'].reviewed,true);
+ assert.equal(corrected.days['2026-09-24'].value,0);
+ assert.equal(corrected.days['2026-09-25'].reviewed,false,'Konflik pada tanggal lain tidak boleh disembunyikan');
+ T.state.modalDate='2026-09-25';
+ T.saveDay();
+ assert.equal(R.overview(T.state.employees[0]).status,'Siap');
+});
+
+test('Keputusan periode tidak mengubah larangan WFA di luar Jumat',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=9;
+ const leave={id:'l',employeeId:'e1',startDate:'2026-09-17',endDate:'2026-09-18',leaveType:'Cuti'};
+ T.state.leaves=[leave];
+ T.state.employees=[R.applySupporting({id:'e1',name:'Tes',nip:'123',jenisPegawai:'PNS',days:{
+  '2026-09-17':attendance('2026-09-17',{status:'WFH'}),
+  '2026-09-18':attendance('2026-09-18',{status:'WFA'})
+ }},[leave],[],2026,9)];
+ T.state.modalId='e1';T.state.modalDate='2026-09-17';
+ T.client.FirebaseClient={getCurrentUser:()=>({email:'operator@pkp.go.id'})};
+ T.doc.getElementById=id=>id==='um-source-choice-0'?{value:'1'}:null;
+ T.saveSupport('cuti','l','0');
+ const e=T.state.employees[0];
+ assert.equal(e.days['2026-09-17'].value,0);
+ assert.equal(e.days['2026-09-18'].value,1);
+ assert.equal(e.days['2026-09-17'].reviewed,true);
+ assert.equal(e.days['2026-09-18'].reviewed,true);
+});
+
+test('Keputusan periode disimpan dalam skema riwayat; tidak tersimpan URL preview dan dapat direkonstruksi',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=9;
+ const leave={id:'l',employeeId:'e1',startDate:'2026-09-14',endDate:'2026-09-16',leaveType:'Cuti',
+  documents:T.supportDocuments([{id:'doc',name:'Cuti.pdf',file:{name:'Cuti.pdf',driveId:'d',itemId:'i'}}])};
+ const e=R.applySupporting({id:'e1',name:'Tes',nip:'123',jenisPegawai:'PNS',days:{}},[leave],[],2026,9);
+ e.supportReviews[R.supportKey('cuti',leave)]={choice:0,signature:R.supportSignature('cuti',leave),reviewedAt:'2026-09-16T00:00:00Z',reviewedBy:'actor'};
+ const final=R.applySupporting(e,[leave],[],2026,9);
+ const storageCode=fs.readFileSync(path.join(scripts,'uang-makan-storage.js'),'utf8').replace(
+   'window.UangMakanStorage=Object.freeze({list,save,get,remove});',
+   'window.__umStorageTest={sanitizeEmployee};window.UangMakanStorage=Object.freeze({list,save,get,remove});');
+ const stored=sandbox(storageCode).window.__umStorageTest.sanitizeEmployee(final);
+ assert.equal(Object.keys(stored.supportReviews).length,1);
+ assert.equal(stored.supportReviews['cuti:l'].choice,0);
+ assert.equal(stored.days['2026-09-14'].dateManualValue,null);
+ assert.equal(stored.days['2026-09-14'].manualValue,0);
+ const sources=T.storedSupporting([stored]);
+ const reopened=R.applySupporting(stored,sources.leaves,sources.assignments,2026,9);
+ assert.equal(reopened.days['2026-09-14'].reviewed,true);
+ assert.equal(reopened.days['2026-09-15'].reviewed,true);
+ assert.equal(reopened.days['2026-09-16'].reviewed,true);
+ assert.equal(R.overview(reopened).issues,0);
+});
+
+test('Dua keputusan berlawanan pada WFA yang terkunci nol tidak membuat verifikasi mustahil diselesaikan',()=>{
+ const R=rules();
+ const a={id:'a',employeeIds:['e1'],startDate:'2026-09-14',endDate:'2026-09-14',assignmentType:'other'};
+ const b={id:'b',employeeIds:['e1'],startDate:'2026-09-14',endDate:'2026-09-14',assignmentType:'other'};
+ const initial={id:'e1',jenisPegawai:'PNS',days:{'2026-09-14':attendance('2026-09-14',{status:'WFH'})}};
+ initial.supportReviews={
+  'tugas:a':{choice:0,signature:R.supportSignature('tugas',a),reviewedAt:'2026-09-15T00:00:00Z'},
+  'tugas:b':{choice:1,signature:R.supportSignature('tugas',b),reviewedAt:'2026-09-15T00:00:00Z'}
+ };
+ const result=R.applySupporting(initial,[],[a,b],2026,9);
+ assert.equal(result.days['2026-09-14'].value,0);
+ assert.equal(result.days['2026-09-14'].reviewConflict,false);
+ assert.equal(result.days['2026-09-14'].reviewed,true);
+ assert.equal(R.overview(result).status,'Siap');
+});
+
+test('Jika satu dokumen tumpang tindih diubah, persetujuan dokumen lain tidak ikut hilang',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=9;
+ const leave={id:'leave',employeeId:'e1',startDate:'2026-09-24',endDate:'2026-09-25',leaveType:'Cuti Tahunan'};
+ const task={id:'task',employeeIds:['e1'],startDate:'2026-09-24',endDate:'2026-09-25',
+  assignmentType:'official_travel',activity:'Pelatihan'};
+ const employee={id:'e1',name:'Tes',jenisPegawai:'PNS',days:{}};
+ employee.supportReviews={
+  'cuti:leave':{choice:0,signature:R.supportSignature('cuti',leave),reviewedAt:'2026-09-26T00:00:00Z'},
+  'tugas:task':{choice:0,signature:R.supportSignature('tugas',task),reviewedAt:'2026-09-26T00:00:00Z'}
+ };
+ const prior=R.applySupporting(employee,[leave],[task],2026,9);
+ assert.equal(R.overview(prior).issues,0);
+ const updated=T.computeEmployees([prior],[{...leave,leaveType:'Cuti Besar'}],[task])[0];
+ assert.equal(Object.keys(updated.supportReviews).length,1);
+ assert.ok(updated.supportReviews['tugas:task']);
+ assert.equal(updated.days['2026-09-24'].reviewed,false);
+ assert.equal(updated.days['2026-09-24'].value,0,'Dokumen tugas lain yang masih valid tetap dapat memberi hasil sementara');
+ assert.equal(R.overview(updated).issues,2);
 });

@@ -20,6 +20,10 @@
      itemId:String(source.itemId||''),webUrl:String(source.webUrl||''),remoteName:String(source.remoteName||'')
    }));
    return {id:e.id,name:e.name,nip:e.nip,anakSatker:e.anakSatker||'',jenisPegawai:e.jenisPegawai||'',order:e.order||9999,
+     supportReviews:Object.fromEntries(Object.entries(e.supportReviews||{}).filter(([key,review])=>
+      key&&review&&['auto',0,1].includes(review.choice)&&review.signature).map(([key,review])=>
+      [key,{choice:review.choice,signature:String(review.signature),reviewedAt:String(review.reviewedAt||''),
+        reviewedBy:String(review.reviewedBy||'')}])),
      files:Array.isArray(e.files)?e.files:[],sourceFiles,fileWarnings:e.fileWarnings||[],coverageAcknowledged:Boolean(e.coverageAcknowledged),coverageReason:e.coverageReason||'',missingAcknowledged:Boolean(e.missingAcknowledged),missingReason:e.missingReason||'',
      days:Object.fromEntries(Object.entries(e.days||{}).map(([key,d])=>[key,{
        key,inMinutes:d.inMinutes??null,outMinutes:d.outMinutes??null,status:d.status||'',workMode:d.workMode||'',flags:d.flags||[],duplicate:Boolean(d.duplicate),isHoliday:Boolean(d.isHoliday),
@@ -28,7 +32,9 @@
        assignments:(d.assignments||[]).map(x=>({id:x.id,assignmentType:x.assignmentType,activity:x.activity,letterNumber:x.letterNumber||'',
          letterDate:x.letterDate||'',location:x.location||'',note:x.note||'',startDate:x.startDate,endDate:x.endDate,
          employeeIds:x.employeeIds,documents:sanitizeDocuments(x.documents)})),
-       manualValue:d.manualValue??null,manualNote:d.manualNote||'',reviewed:Boolean(d.reviewed),reviewedAt:d.reviewedAt||'',reviewedBy:d.reviewedBy||''
+       manualValue:d.manualValue??null,manualNote:d.manualNote||'',reviewed:Boolean(d.reviewed),reviewedAt:d.reviewedAt||'',reviewedBy:d.reviewedBy||'',
+       dateManualValue:d.dateManualValue??null,dateReviewed:Boolean(d.dateReviewed),
+       dateReviewedAt:d.dateReviewedAt||'',dateReviewedBy:d.dateReviewedBy||''
      }]))};
  }
  async function list(){
@@ -40,7 +46,7 @@
    const meta={year,month,period:`${year}-${String(month).padStart(2,'0')}`,createdAt:new Date().toISOString(),
      ownerUid:a.uid,ownerEmail:a.email,ownerName:a.name,status:'writing',summary,
      holidays:Array.isArray(settings.holidays)?settings.holidays.slice():[],
-     holidayNotes:settings.holidayNotes||{},archiveKey:String(settings.archiveKey||''),schemaVersion:4};
+     holidayNotes:settings.holidayNotes||{},archiveKey:String(settings.archiveKey||''),schemaVersion:5};
    await ref.set(meta);
    try{
      const stored=employees.map(sanitizeEmployee);
