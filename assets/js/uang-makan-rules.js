@@ -52,6 +52,10 @@
       if(present && absenceStatus)issues.push('Presensi bertentangan dengan status absensi');
       if(record?.duplicate)issues.push('Tanggal tercatat dalam lebih dari satu file');
       if(!present && /\bhadir\b/i.test(status) && !absenceStatus)issues.push('Status hadir tetapi jam presensi kosong');
+      // Surat tugas tersinkron tidak membuktikan pegawai benar melaksanakan tugas.
+      // Wajib konfirmasi walaupun presensi tidak berbenturan atau tidak tersedia,
+      // misalnya ketika penugasan ternyata batal / pegawai tidak jadi berangkat.
+      if(assignments.length)issues.push('Konfirmasi pelaksanaan surat tugas (termasuk jika batal/tidak berangkat)');
     }
     const automatic=(present&&!nonWorking&&!remoteExcluded)?1:0;
     const hasManual=record?.manualValue===0||record?.manualValue===1;
@@ -87,7 +91,7 @@
       present:days.filter(d=>d.present&&!d.nonWorking&&!d.remoteExcluded).length,
       leave:days.filter(d=>d.leaves.length).length,travel:days.filter(d=>d.official.length).length,
       absence:days.filter(d=>!d.present&&isAbsenceStatus(d.status,d.flags)).length,
-      manual:days.filter(d=>d.manualValue!==null&&!d.nonWorking).length,
+      manual:days.filter(d=>d.manualValue!==null&&!d.nonWorking&&d.manualValue!==d.automatic).length,
       missing:false,
       missingType:!employee.jenisPegawai,coverage:!!employee.fileWarnings?.length&&!employee.coverageAcknowledged,
       status:issues||!employee.jenisPegawai||(employee.fileWarnings?.length&&!employee.coverageAcknowledged)?'Perlu verifikasi':'Siap'};

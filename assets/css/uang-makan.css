@@ -2,6 +2,16 @@
 .um-page{max-width:100%;color:var(--ink)}
 .um-page *{box-sizing:border-box}
 .um-page button,.um-page input,.um-page select,.um-page textarea{font-family:inherit}
+/* Status koneksi pada seluruh halaman Uang Makan, serupa dengan modul Tukin. */
+.um-sp-panel{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;padding:14px 18px;border:1px solid #cfe8de;border-radius:13px;background:#edf8f3;color:#155e4c}
+.um-sp-panel.warning{border-color:#f0dfb8;background:var(--warning-soft);color:var(--warning)}
+.um-sp-panel.checking{border-color:var(--line);background:var(--bg-soft);color:var(--ink-soft)}
+.um-sp-info{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 275px}
+.um-sp-info strong{font-size:12px;font-weight:760}
+.um-sp-info span{font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.um-sp-indicator{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid #b5dfce;border-radius:100px;background:#d9f0e6;color:#116149;font-size:11px;font-weight:750}
+.um-sp-indicator::before{content:'';width:8px;height:8px;border-radius:50%;background:#258761}
+.um-sp-panel .um-btn{background:var(--paper);flex-shrink:0}
 .um-header{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:22px}
 .um-header h1{margin:0;font-size:28px;line-height:1.12;font-weight:730;letter-spacing:-.035em;color:var(--ink)}
 .um-desc{font-size:12px;color:var(--muted);line-height:1.55;margin:7px 0 0;max-width:800px}
@@ -148,6 +158,8 @@
 /* Integrasi semua data Cuti/Surat Tugas pada verifikasi Uang Makan. */
 .um-day.remote:not(.selected){background:#eef3f8;border-color:#d4dfeb}
 .um-day.remote small:last-child{font-weight:760;color:var(--navy)}
+.um-day.remote.warn:not(.selected){background:var(--warning-soft);border-color:#edd9ac}
+.um-day.remote.warn .um-day-status{color:var(--warning)}
 .um-remote-policy{background:#edf3f9;border-color:#cadbe9;color:var(--navy)}
 .um-supporting-documents{margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
 .um-supporting-head{margin-bottom:12px}
@@ -198,3 +210,4 @@
 .um-source-record>small{display:block;margin-top:11px;color:var(--muted);font-size:10px}
 .um-source-empty{margin-top:18px;padding:11px 13px;border:1px dashed var(--line-strong);border-radius:10px;color:var(--muted);font-size:11px}
 @media(max-width:650px){.um-day.has-support{min-height:90px}.um-day-sources{gap:2px}.um-day-source{padding:2px 3px;font-size:8px}.um-source-legend{gap:8px}.um-source-record-list{grid-template-columns:1fr}.um-source-record dl{grid-template-columns:1fr 1fr}}
+@media(max-width:650px){.um-sp-panel .um-btn{width:100%}.um-sp-indicator{margin-left:auto}}

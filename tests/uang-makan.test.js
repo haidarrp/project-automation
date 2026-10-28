@@ -13,15 +13,15 @@ function sandbox(code,overrides={}){
 const ruleCode=fs.readFileSync(path.join(scripts,'uang-makan-rules.js'),'utf8');
 function appHarness(R){
  const code=fs.readFileSync(path.join(scripts,'uang-makan-app.js'),'utf8')
-  .replace(/\ninit\(\);\s*\}\)\(\);\s*$/,`\nwindow.__umTest={state,previewPanel,dailySupporting,supportingFilesSection,supportingRecordsSection,supportDocuments,documentKey,modal,loadSupportingPreviews,getSupportingData,archiveAbsences,historyTable};\n})();`);
+  .replace(/\ninit\(\);\s*\}\)\(\);\s*$/,`\nwindow.__umTest={state,previewPanel,dailySupporting,supportingFilesSection,supportingRecordsSection,supportDocuments,documentKey,modal,loadSupportingPreviews,getSupportingData,archiveAbsences,historyTable,computeEmployees,saveDay,sharePointPanel,checkSharePoint,connectSharePoint};\n})();`);
  const root={addEventListener:()=>{},querySelector:()=>null};
  const ctx=sandbox(code,{
-  window:{UangMakanRules:R,addEventListener:()=>{},UserAccess:{can:()=>true}},
+  window:{UangMakanRules:R,addEventListener:()=>{},UserAccess:{can:()=>true,assert:()=>true}},
   document:{getElementById:()=>root},
   localStorage:{getItem:()=>null},
   location:{hash:''}
  });
- return Object.assign(ctx.window.__umTest,{client:ctx.window});
+ return Object.assign(ctx.window.__umTest,{client:ctx.window,doc:ctx.document});
 } 
 function rules(){return sandbox(ruleCode).window.UangMakanRules;}
 function attendance(key,extras={}){
@@ -147,7 +147,7 @@ test('Data cuti tanpa konflik tetap muncul pada kalender, detail, dan pratinjau 
  assert.ok(html.includes('Buka SharePoint'));
 });
 
-test('Surat tugas tanpa konflik, termasuk pengaturan kerja, terlihat meskipun tidak ada presensi',()=>{
+test('Surat tugas tersinkron, termasuk pengaturan kerja, perlu verifikasi meskipun tidak ada presensi',()=>{
  const R=rules(),T=appHarness(R);
  const task={id:'st1',employeeIds:['e1'],startDate:'2026-09-03',endDate:'2026-09-04',
   assignmentType:'work_arrangement',activity:'Pengaturan kerja pelayanan',letterNumber:'ST/123/2026',
@@ -155,8 +155,10 @@ test('Surat tugas tanpa konflik, termasuk pengaturan kerja, terlihat meskipun ti
   documents:T.supportDocuments([{id:'st-doc',name:'Surat Tugas',file:{name:'ST-123.pdf',driveId:'d',itemId:'i'}}])};
  const e=R.applySupporting({id:'e1',name:'Pegawai Contoh',nip:'123',jenisPegawai:'PNS',days:{}},[],[task],2026,9);
  const day=e.days['2026-09-03'];
- assert.equal(day.issues.length,0);
+ assert.equal(day.issues.length,1);
+ assert.match(day.issues[0],/Konfirmasi pelaksanaan surat tugas/);
  assert.equal(day.value,0);
+ assert.equal(R.overview(e).status,'Perlu verifikasi');
  assert.equal(T.dailySupporting(day).length,1);
  const html=T.supportingRecordsSection(day);
  assert.ok(html.includes('Pengaturan Kerja'));
@@ -167,6 +169,8 @@ test('Surat tugas tanpa konflik, termasuk pengaturan kerja, terlihat meskipun ti
  T.state.year=2026;T.state.month=9;T.state.employees=[e];T.state.modalId='e1';T.state.modalDate='2026-09-03';
  assert.ok(T.modal().includes('um-day-source tugas'));
  assert.ok(T.modal().includes('2 tanggal surat tugas'));
+ assert.ok(T.modal().includes('Periksa'));
+ assert.ok(T.modal().includes('Rekomendasi sistem: Tidak memperoleh uang makan'));
 });
 
 test('Dokumen tetap terbaca saat tanggal libur, tanpa benturan, serta kosong jika tanpa catatan',()=>{
@@ -222,12 +226,12 @@ test('Metadata sumber di-escape sebelum dirender ke HTML',()=>{
 });
 
 
-test('Pratinjau Microsoft Graph diminta untuk surat tugas tanpa konflik',async()=>{
+test('Pratinjau Microsoft Graph tetap tersedia untuk surat tugas yang memerlukan konfirmasi',async()=>{
  const R=rules(),T=appHarness(R);
  const docs=T.supportDocuments([{id:'doc1',name:'Surat Tugas',file:{name:'Penugasan.pdf',driveId:'drive1',itemId:'item1'}}]);
  const task={id:'st1',employeeIds:['e1'],startDate:'2026-09-03',endDate:'2026-09-03',assignmentType:'official_travel',documents:docs};
  const e=R.applySupporting({id:'e1',name:'Tes',nip:'123',jenisPegawai:'PNS',days:{}},[],[task],2026,9);
- assert.equal(e.days['2026-09-03'].issues.length,0);
+ assert.equal(e.days['2026-09-03'].issues.length,1);
  T.state.year=2026;T.state.month=9;T.state.employees=[e];T.state.modalId='e1';T.state.modalDate='2026-09-03';
  let requests=0;
  T.client.SharePointStorage={getPreviewInfo:async(file,interactive)=>{
@@ -313,4 +317,122 @@ test('Riwayat menyimpan referensi absensi SharePoint tanpa menyimpan binary loka
  assert.equal(row.sourceFiles[0].file,undefined);
  assert.equal(row.sourceFiles[0].getUrl,undefined);
  assert.equal(row.sourceFiles[0].webUrl,'https://example.sharepoint.com/x');
+});
+
+test('Semua jenis surat tugas wajib diperiksa pada hari kerja, walaupun tidak ada benturan absensi',()=>{
+ const R=rules();
+ for(const assignmentType of ['official_travel','work_arrangement','other']){
+  const task={id:'st-01',assignmentType,activity:'Agenda',startDate:'2026-09-24',endDate:'2026-09-24'};
+  for(const record of [attendance('2026-09-24'),attendance('2026-09-24',{inMinutes:null,outMinutes:null,status:'WFO'})]){
+   const d=R.classifyDay(record,[],[task]);
+   assert.ok(d.issues.some(x=>x.includes('Konfirmasi pelaksanaan surat tugas')),assignmentType);
+   assert.equal(d.reviewed,false);
+   assert.equal(R.overview({jenisPegawai:'PNS',days:{[d.key]:d}}).status,'Perlu verifikasi');
+  }
+ }
+ const weekend=R.classifyDay(attendance('2026-09-26'),[],[{id:'s',assignmentType:'official_travel'}]);
+ const holiday=R.classifyDay(attendance('2026-09-24',{isHoliday:true}),[],[{id:'s',assignmentType:'official_travel'}]);
+ assert.equal(weekend.issues.length,0);
+ assert.equal(holiday.issues.length,0);
+ assert.equal(weekend.value,0);
+ assert.equal(holiday.value,0);
+});
+
+test('Koreksi tidak dihitung jika pilihan manual sama dengan rekomendasi otomatis',()=>{
+ const R=rules();
+ const d=R.classifyDay(attendance('2026-09-24',{manualValue:1,reviewed:true}),[],[{id:'s',assignmentType:'other'}]);
+ assert.equal(d.reviewed,true);
+ assert.equal(R.overview({jenisPegawai:'PNS',days:{[d.key]:d}}).issues,0);
+ assert.equal(R.overview({jenisPegawai:'PNS',days:{[d.key]:d}}).manual,0);
+ const corrected=R.classifyDay(attendance('2026-09-24',{manualValue:0,reviewed:true}),[],[{id:'s',assignmentType:'other'}]);
+ assert.equal(R.overview({jenisPegawai:'PNS',days:{[corrected.key]:corrected}}).manual,1);
+});
+
+test('Sinkronisasi ulang membatalkan verifikasi lama jika detail surat tugas berubah atau surat dibatalkan',()=>{
+ const R=rules(),T=appHarness(R);
+ T.state.year=2026;T.state.month=9;
+ const original={id:'s1',employeeIds:['e1'],startDate:'2026-09-24',endDate:'2026-09-25',assignmentType:'other',activity:'Agenda Awal',letterNumber:'ST-12'};
+ const e=R.applySupporting({id:'e1',jenisPegawai:'PNS',days:{'2026-09-24':attendance('2026-09-24')}},[],[original],2026,9);
+ e.days['2026-09-24'].reviewed=true;
+ e.days['2026-09-24'].reviewedAt='2026-09-25T01:00:00Z';
+ e.days['2026-09-24'].reviewedBy='operator@example.com';
+ e.days['2026-09-24'].manualValue=0;
+ e.days['2026-09-24'].value=0;
+ const same=T.computeEmployees([e],[],[original])[0].days['2026-09-24'];
+ assert.equal(same.reviewed,true,'Data sumber tidak berubah: hasil verifikasi tetap berlaku');
+ const changed=T.computeEmployees([e],[],[{...original,activity:'Agenda Batal Dilaksanakan'}])[0].days['2026-09-24'];
+ assert.equal(changed.reviewed,false);
+ assert.equal(changed.manualValue,null);
+ assert.equal(changed.reviewedAt,'');
+ assert.equal(changed.value,1,'Nilai dikembalikan ke rekomendasi dan menunggu verifikasi ulang');
+ const cancelled=T.computeEmployees([e],[],[])[0].days['2026-09-24'];
+ assert.equal(cancelled.reviewed,false);
+ assert.equal(cancelled.manualValue,null);
+ assert.equal(cancelled.issues.length,0,'Tidak ada lagi surat tugas tersinkron pada hari tersebut');
+});
+
+test('Pilihan verifikasi hanya berupa rekomendasi/memperoleh/tidak memperoleh dan tanpa catatan',()=>{
+ const R=rules(),T=appHarness(R);
+ T.state.year=2026;T.state.month=9;
+ T.state.employees=[R.applySupporting({id:'e1',name:'Tes',nip:'123',jenisPegawai:'PNS',days:{
+  '2026-09-24':attendance('2026-09-24')
+ }},[],[{id:'s1',employeeIds:['e1'],startDate:'2026-09-24',endDate:'2026-09-24',assignmentType:'official_travel'}],2026,9)];
+ T.state.modalId='e1';T.state.modalDate='2026-09-24';
+ const html=T.modal();
+ assert.ok(html.includes('Rekomendasi sistem: Memperoleh uang makan'));
+ assert.ok(html.includes('value="1"'));
+ assert.ok(html.includes('value="0"'));
+ assert.ok(html.includes('>Memperoleh uang makan</option>'));
+ assert.ok(html.includes('>Tidak memperoleh uang makan</option>'));
+ assert.ok(!html.includes('>1 - Memperoleh'));
+ assert.ok(!html.includes('id="um-note"'));
+ assert.ok(!html.includes('Catatan Verifikasi / Alasan Koreksi'));
+ T.client.FirebaseClient={getCurrentUser:()=>({email:'operator@example.com'})};
+ // Pilihan eksplisit "tidak memperoleh" tetap bisa disimpan tanpa alasan tertulis.
+ T.doc.getElementById=id=>id==='um-manual'?{value:'0'}:null;
+ T.saveDay();
+ const d=T.state.employees[0].days['2026-09-24'];
+ assert.equal(d.reviewed,true);
+ assert.equal(d.value,0);
+ assert.equal(d.manualValue,0);
+ assert.equal(d.manualNote,'');
+ assert.equal(d.reviewedBy,'operator@example.com');
+ assert.equal(R.overview(T.state.employees[0]).status,'Siap');
+});
+
+test('Panel SharePoint menunjukkan kondisi belum terhubung dan terhubung setelah autentikasi',async()=>{
+ const R=rules(),T=appHarness(R);
+ const status={configured:true,libraryLoaded:true,connected:false,email:'',name:''};
+ let authCalls=0,rootCalls=0;
+ T.client.MicrosoftAuth={
+  getStatus:()=>status,
+  isConfigured:()=>true,
+  initialize:async()=>true,
+  connect:async()=>{authCalls++;status.connected=true;status.email='pegawai@pkp.go.id';status.name='Pegawai PKP';}
+ };
+ T.client.SharePointStorage={ensureReady:async interactive=>{rootCalls++;assert.equal(interactive,true);}};
+ assert.ok(T.sharePointPanel().includes('data-um-action="connect-sharepoint"'));
+ assert.ok(T.sharePointPanel().includes('Hubungkan SharePoint'));
+ await T.connectSharePoint();
+ assert.equal(authCalls,1);
+ assert.equal(rootCalls,1);
+ assert.equal(T.state.sharePointReady,true);
+ assert.ok(T.sharePointPanel().includes('SharePoint terhubung'));
+ assert.ok(T.sharePointPanel().includes('pegawai@pkp.go.id'));
+ assert.ok(!T.sharePointPanel().includes('data-um-action="connect-sharepoint"'));
+});
+
+test('Status SharePoint diperiksa ulang tanpa popup dan kegagalan akses tidak dinyatakan terhubung',async()=>{
+ const R=rules(),T=appHarness(R);
+ const status={configured:true,libraryLoaded:true,connected:true,email:'a@pkp.go.id',name:'A'};
+ let promptCalls=0,checks=0;
+ T.client.MicrosoftAuth={getStatus:()=>status,isConfigured:()=>true,initialize:async()=>{promptCalls++;}};
+ T.client.SharePointStorage={ensureReady:async interactive=>{assert.equal(interactive,false);checks++;throw new Error('Akses ditolak');}};
+ await T.checkSharePoint();
+ assert.equal(promptCalls,1);
+ assert.equal(checks,1);
+ assert.equal(T.state.sharePointReady,false);
+ assert.ok(T.sharePointPanel().includes('Koneksi SharePoint perlu diperiksa'));
+ assert.ok(T.sharePointPanel().includes('Akses ditolak'));
+ assert.ok(T.sharePointPanel().includes('Periksa Koneksi SharePoint'));
 });
