@@ -215,8 +215,8 @@
 /* Verifikasi satu kali per dokumen Cuti / Surat Tugas. */
 .um-period-review{margin-top:18px;padding:17px;border:1px solid #cfdde9;border-radius:13px;background:#f6f9fc}
 .um-period-review-title{margin-bottom:13px}
-.um-period-review-title h4,.um-date-exception h4{margin:0 0 6px;color:var(--ink);font-size:13px;font-weight:740}
-.um-period-review-title p,.um-date-exception p{margin:0;color:var(--ink-soft);font-size:11px;line-height:1.65}
+.um-period-review-title h4{margin:0 0 6px;color:var(--ink);font-size:13px;font-weight:740}
+.um-period-review-title p{margin:0;color:var(--ink-soft);font-size:11px;line-height:1.65}
 .um-period-review-items{display:grid;gap:11px}
 .um-period-review-item{min-width:0;padding:15px;border:1px solid var(--line-strong);border-radius:12px;background:#fff}
 .um-period-review-item.cuti{border-left:3px solid #78bda5}
@@ -233,14 +233,8 @@
 .um-review-hint{align-self:stretch}
 .um-review-hint p{margin:8px 0 0;line-height:1.6}
 .um-review-hint .um-pill{margin-top:10px}
-.um-date-exception{margin-top:12px;padding:15px;border:1px dashed var(--line-strong);border-radius:12px;background:var(--paper)}
-.um-date-exception .um-note{margin-top:10px}
-.um-date-exception-controls{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-top:12px}
-.um-date-exception-controls .um-field{flex:1 1 280px}
-.um-date-exception-controls .um-btn{min-height:39px}
-.um-date-exception>small{display:block;margin-top:9px;color:var(--muted);font-size:10px}
 @media(max-width:650px){
  .um-period-review{padding:12px}
  .um-period-review-item{padding:12px}
- .um-period-review-controls .um-btn,.um-date-exception-controls .um-btn{width:100%}
+ .um-period-review-controls .um-btn{width:100%}
 }

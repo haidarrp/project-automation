@@ -33,8 +33,11 @@
          letterDate:x.letterDate||'',location:x.location||'',note:x.note||'',startDate:x.startDate,endDate:x.endDate,
          employeeIds:x.employeeIds,documents:sanitizeDocuments(x.documents)})),
        manualValue:d.manualValue??null,manualNote:d.manualNote||'',reviewed:Boolean(d.reviewed),reviewedAt:d.reviewedAt||'',reviewedBy:d.reviewedBy||'',
-       dateManualValue:d.dateManualValue??null,dateReviewed:Boolean(d.dateReviewed),
-       dateReviewedAt:d.dateReviewedAt||'',dateReviewedBy:d.dateReviewedBy||''
+       // Catatan manual per tanggal hanya sah jika tidak ada dokumen sumber.
+       dateManualValue:(d.leaves?.length||d.assignments?.length)?null:(d.dateManualValue??null),
+       dateReviewed:(d.leaves?.length||d.assignments?.length)?false:Boolean(d.dateReviewed),
+       dateReviewedAt:(d.leaves?.length||d.assignments?.length)?'':(d.dateReviewedAt||''),
+       dateReviewedBy:(d.leaves?.length||d.assignments?.length)?'':(d.dateReviewedBy||'')
      }]))};
  }
  async function list(){
@@ -46,7 +49,7 @@
    const meta={year,month,period:`${year}-${String(month).padStart(2,'0')}`,createdAt:new Date().toISOString(),
      ownerUid:a.uid,ownerEmail:a.email,ownerName:a.name,status:'writing',summary,
      holidays:Array.isArray(settings.holidays)?settings.holidays.slice():[],
-     holidayNotes:settings.holidayNotes||{},archiveKey:String(settings.archiveKey||''),schemaVersion:5};
+     holidayNotes:settings.holidayNotes||{},archiveKey:String(settings.archiveKey||''),schemaVersion:6};
    await ref.set(meta);
    try{
      const stored=employees.map(sanitizeEmployee);

@@ -1,7 +1,7 @@
 /* Uang Makan: perhitungan berdasarkan bulan kalender.
  * Verifikasi satu dokumen Cuti/Surat Tugas berlaku untuk seluruh tanggal
- * dalam rentang dokumen yang termasuk periode pengolahan. Hari libur dan
- * WFA/WFH di luar Jumat tetap bernilai nol.
+ * dalam rentang dokumen yang termasuk periode pengolahan. Hari libur
+ * tetap bernilai nol; WFA/WFH selain Jumat perlu verifikasi.
  */
 (function () {
   'use strict';
@@ -72,10 +72,13 @@
       // Data sumber belum tentu mencerminkan realisasi: cuti/tugas dapat batal.
       if(leaves.length)issues.push('Konfirmasi pelaksanaan cuti (termasuk jika dibatalkan/tidak diambil)');
       if(assignments.length)issues.push('Konfirmasi pelaksanaan surat tugas (termasuk jika batal/tidak berangkat)');
+      // WFH/WFA di luar Jumat adalah rekomendasi nol, bukan keputusan final.
+      // Pegawai mungkin memiliki surat sakit/cuti yang belum tersinkron.
+      if(remoteExcluded)issues.push('WFH/WFA selain Jumat: verifikasi hasil aktual dan periksa data sakit/cuti yang belum tersinkron');
     }
     const automatic=(present&&!nonWorking&&!remoteExcluded)?1:0;
     const hasManual=record?.manualValue===0||record?.manualValue===1;
-    const lockedZero=nonWorking||remoteExcluded;
+    const lockedZero=nonWorking;
     const manualValue=lockedZero?null:(hasManual?record.manualValue:null);
     const value=lockedZero?0:(manualValue===null?automatic:manualValue);
     return {key:dateKey,inMinutes:record?.inMinutes??null,outMinutes:record?.outMinutes??null,
@@ -107,10 +110,12 @@
       const dayLeaves=ownLeaves.filter(l=>l.startDate<=date&&l.endDate>=date);
       const dayTasks=ownAssignments.filter(a=>a.startDate<=date&&a.endDate>=date);
       const hasSources=Boolean(dayLeaves.length||dayTasks.length);
-      // Koreksi tanggal dan keputusan dokumen disimpan terpisah. Nilai hasil
-      // periode tidak boleh ikut tertinggal bila dokumennya dihapus saat sync.
-      const rawDateValue=base.dateManualValue!==undefined?base.dateManualValue:(!hasSources?base.manualValue:null);
-      const rawDateReviewed=base.dateReviewed!==undefined?base.dateReviewed:(!hasSources&&base.reviewed);
+      // Koreksi manual tanggal hanya berlaku untuk hari TANPA dokumen sumber
+      // (misalnya WFH di luar Jumat). Abaikan koreksi khusus tanggal lama
+      // apabila hari tersebut sudah terkait Cuti/Surat Tugas. Keputusan
+      // dokumen harus seragam pada seluruh rentang/per peserta.
+      const rawDateValue=hasSources?null:(base.dateManualValue!==undefined?base.dateManualValue:base.manualValue);
+      const rawDateReviewed=!hasSources&&(base.dateReviewed!==undefined?base.dateReviewed:base.reviewed);
       const d=classifyDay({...base,key:date,isHoliday:reds.has(date),manualValue:rawDateValue,
         reviewed:rawDateReviewed},dayLeaves,dayTasks);
       d.dateManualValue=d.manualValue;
@@ -123,18 +128,18 @@
       d.reviewConflict=false;
       if(hasSources&&!d.nonWorking){
         const decisions=[...new Set(sources.map(k=>supportReviews[k]?.choice).filter(v=>v===0||v===1))];
-        d.reviewConflict=decisions.length>1&&!d.remoteExcluded;
-        const exceptional=d.dateReviewed&&d.dateManualValue!==null;
+        d.reviewConflict=decisions.length>1;
         const periodValue=decisions.length===1?decisions[0]:null;
-        const result=exceptional?d.dateManualValue:periodValue;
-        d.manualValue=d.remoteExcluded?null:result;
-        d.value=d.remoteExcluded?0:(result===null?d.automatic:result);
-        d.reviewed=d.pendingSourceKeys.length===0&&(!d.reviewConflict||exceptional);
-        if(d.reviewConflict)d.issues.push('Hasil verifikasi dokumen yang tumpang tindih berbeda; tentukan hasil khusus tanggal ini');
+        d.manualValue=periodValue;
+        d.value=periodValue===null?d.automatic:periodValue;
+        // Hasil dua dokumen yang bertentangan tidak bisa diselesaikan
+        // memakai pengecualian tanggal; perbaiki sumber dan sinkronkan ulang.
+        d.reviewed=d.pendingSourceKeys.length===0&&!d.reviewConflict;
+        if(d.reviewConflict)d.issues.push('Hasil verifikasi dokumen yang tumpang tindih berbeda; perbaiki dokumen koreksi pada modul Cuti/Surat Tugas dan sinkronkan ulang');
         if(d.reviewed){
-          const latest=sources.map(k=>supportReviews[k]).filter(Boolean).sort((a,b)=>b.reviewedAt.localeCompare(a.reviewedAt))[0];
-          d.reviewedAt=exceptional?d.dateReviewedAt:(latest?.reviewedAt||'');
-          d.reviewedBy=exceptional?d.dateReviewedBy:(latest?.reviewedBy||'');
+          const latest=sources.map(k=>supportReviews[k]).filter(Boolean).sort((a,b)=>String(b.reviewedAt||'').localeCompare(String(a.reviewedAt||'')))[0];
+          d.reviewedAt=latest?.reviewedAt||'';
+          d.reviewedBy=latest?.reviewedBy||'';
         }else{d.reviewedAt='';d.reviewedBy='';}
       }
       daily[date]=d;
