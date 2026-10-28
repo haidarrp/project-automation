@@ -260,10 +260,12 @@ function supportFilePreview(group,doc,index){
  if(!hasFile)body='<div class="um-document-status">Berkas digital belum terunggah pada data sumber.</div>';
  else if(ctx.loading)body='<div class="um-document-status">Menyiapkan pratinjau dari Microsoft 365...</div>';
  else if(ctx.error)body=`<div class="um-document-status"><strong>Pratinjau belum tersedia</strong><p>${esc(ctx.error)}</p><button class="um-btn small" type="button" data-um-action="retry-support-preview" data-doc-key="${esc(key)}">Coba Lagi</button></div>`;
- else if(safeHttps(ctx.getUrl))body=`<iframe class="um-document-frame" src="${esc(safeHttps(ctx.getUrl))}" title="Pratinjau ${esc(fileName)}" loading="lazy" referrerpolicy="no-referrer" allow="fullscreen"></iframe>`;
+ // Jangan buat iframe sebelum pengguna benar-benar mencapai area preview.
+ // Iframe Microsoft 365 (khususnya form POST) dapat memindahkan posisi scroll modal saat dimuat.
+ else if(safeHttps(ctx.getUrl))body=`<div class="um-document-placeholder" data-um-preview-url="${esc(safeHttps(ctx.getUrl))}" data-um-preview-title="Pratinjau ${esc(fileName)}">Pratinjau dimuat saat bagian ini ditampilkan.</div>`;
  else if(safeHttps(ctx.postUrl)){
   const target=`um-support-${index}`;
-  body=`<iframe class="um-document-frame" name="${target}" title="Pratinjau ${esc(fileName)}" loading="lazy" referrerpolicy="no-referrer" allow="fullscreen"></iframe><form data-um-preview-post method="post" action="${esc(safeHttps(ctx.postUrl))}" target="${target}">${previewPostFields(ctx.postParameters)}</form>`;
+  body=`<div class="um-document-placeholder" data-um-preview-target="${target}" data-um-preview-title="Pratinjau ${esc(fileName)}">Pratinjau dimuat saat bagian ini ditampilkan.</div><form data-um-preview-post method="post" action="${esc(safeHttps(ctx.postUrl))}" target="${target}">${previewPostFields(ctx.postParameters)}</form>`;
  }else body='<div class="um-document-status">Microsoft 365 tidak memberikan tautan pratinjau yang valid.</div>';
  return `<article class="um-document-card"><div class="um-document-heading"><div><strong>${esc(fileName)}</strong><small>${esc(group.title)}${group.reference?' · '+esc(group.reference):''}${doc.type?' · '+esc(doc.type):''}${doc.number?' · '+esc(doc.number):''}</small></div>${actions}</div>${body}</article>`;
 }
@@ -279,17 +281,72 @@ function supportingFilesSection(day){
   ${missing.length?`<div class="um-note um-supporting-missing">Belum terdapat berkas digital pada ${missing.map(group=>esc(group.title)).join(' · ')}. Periksa dokumen di modul Cuti atau Surat Tugas.</div>`:''}
  </section>`;
 }
-function submitPreviewPostForms(){
- root.querySelectorAll('[data-um-preview-post]').forEach(form=>{
-  if(form.dataset.submitted==='1')return;
-  form.dataset.submitted='1';
-  try{form.submit();}catch(error){console.warn('[Uang Makan] Pratinjau POST gagal',error);}
- });
+let documentPreviewObserver=null;
+let documentPreviewFallback=null;
+function stopDocumentPreviewTracking(){
+ documentPreviewObserver?.disconnect();
+ documentPreviewObserver=null;
+ if(documentPreviewFallback){
+  documentPreviewFallback.modal.removeEventListener('scroll',documentPreviewFallback.onScroll);
+  documentPreviewFallback=null;
+ }
+}
+function activateDocumentPreview(placeholder){
+ if(!placeholder.isConnected)return;
+ const url=safeHttps(placeholder.dataset.umPreviewUrl);
+ const target=placeholder.dataset.umPreviewTarget||'';
+ if(!url&&!target)return;
+ const frame=document.createElement('iframe');
+ frame.className='um-document-frame';
+ frame.title=placeholder.dataset.umPreviewTitle||'Pratinjau dokumen';
+ frame.loading='lazy';
+ frame.referrerPolicy='no-referrer';
+ frame.setAttribute('allow','fullscreen');
+ if(target)frame.name=target;
+ placeholder.replaceWith(frame);
+ if(url)frame.src=url;
+ else{
+  const form=frame.closest('.um-document-card')?.querySelector('[data-um-preview-post]');
+  if(form&&form.dataset.submitted!=='1'){
+   form.dataset.submitted='1';
+   try{form.submit();}catch(error){console.warn('[Uang Makan] Pratinjau POST gagal',error);}
+  }
+ }
+}
+function observeDocumentPreviews(){
+ stopDocumentPreviewTracking();
+ const modal=root.querySelector('.um-modal');
+ if(!modal)return;
+ const placeholders=Array.from(modal.querySelectorAll('.um-document-placeholder[data-um-preview-url], .um-document-placeholder[data-um-preview-target]'));
+ if(!placeholders.length)return;
+ if(typeof window.IntersectionObserver==='function'){
+  documentPreviewObserver=new window.IntersectionObserver((entries,observer)=>{
+   for(const entry of entries){
+    if(!entry.isIntersecting)continue;
+    observer.unobserve(entry.target);
+    activateDocumentPreview(entry.target);
+   }
+  },{root:modal,rootMargin:'0px',threshold:0.01});
+  placeholders.forEach(node=>documentPreviewObserver.observe(node));
+ }else{
+  // Fallback tanpa IntersectionObserver: aktifkan hanya preview yang terlihat.
+  const onScroll=()=>{
+   const bounds=modal.getBoundingClientRect();
+   placeholders.forEach(node=>{
+    if(!node.isConnected)return;
+    const rect=node.getBoundingClientRect();
+    if(rect.top<bounds.bottom&&rect.bottom>bounds.top)activateDocumentPreview(node);
+   });
+  };
+  documentPreviewFallback={modal,onScroll};
+  modal.addEventListener('scroll',onScroll,{passive:true});
+  onScroll();
+ }
 }
 function refreshSupportingFiles(){
  const day=findEmployee(state.modalId)?.days?.[state.modalDate];
  const node=root.querySelector('#um-supporting-documents');
- if(day&&node){node.outerHTML=supportingFilesSection(day);window.requestAnimationFrame(submitPreviewPostForms);}
+ if(day&&node){node.outerHTML=supportingFilesSection(day);observeDocumentPreviews();}
 }
 async function loadSupportingPreviews(){
  if(!window.UserAccess?.can?.('uangMakan','process.verify'))return;
@@ -404,10 +461,11 @@ function render(){
  if(!window.AppShell||!window.FirebaseClient?.getCurrentUser?.())return;
  const content=`<div class="um-page ${state.busy?'um-busy':''}">${sharePointPanel()}${state.view==='dashboard'?dashboard():state.view==='history'?history():process()}</div>`;
  const previousModal=root.querySelector('.um-modal'),previousScroll=previousModal?.scrollTop||0;
+ stopDocumentPreviewTracking();
  root.innerHTML=window.AppShell.render({module:'uangMakan',view:state.view,viewLabel:pageTitle(state.view),content,overlays:modal()});
  const currentModal=root.querySelector('.um-modal');if(currentModal)currentModal.scrollTop=previousScroll;
  window.UserAccess?.scheduleDecoration?.();
- window.requestAnimationFrame(submitPreviewPostForms);
+ observeDocumentPreviews();
 }
 async function loadMaster(){
  const bundle=await window.MasterDataService.getBundle(true);

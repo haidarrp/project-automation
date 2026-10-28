@@ -172,11 +172,12 @@
 .um-document-heading small{display:block;margin-top:5px;line-height:1.45;font-size:10px;color:var(--muted)}
 .um-document-heading .um-btn{text-decoration:none}
 .um-document-frame{display:block;width:100%;height:430px;border:0;background:#fafafa}
+.um-document-placeholder{display:flex;align-items:center;justify-content:center;width:100%;height:430px;padding:16px;background:#fafafa;color:var(--muted);font-size:11px;text-align:center}
 .um-document-status{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;min-height:130px;padding:24px 18px;text-align:center;color:var(--muted);font-size:11px;line-height:1.55}
 .um-document-status strong{font-size:12px;color:var(--ink-soft)}
 .um-document-status p{max-width:700px;margin:0;overflow-wrap:anywhere}
 .um-supporting-missing{margin-top:10px}
-@media(max-width:650px){.um-document-frame{height:310px}.um-document-heading{align-items:flex-start}.um-document-heading .um-btn{min-height:32px}}
+@media(max-width:650px){.um-document-frame,.um-document-placeholder{height:310px}.um-document-heading{align-items:flex-start}.um-document-heading .um-btn{min-height:32px}}
 
 /* Penanda data sumber tidak mengubah warna status perhitungan atau konflik. */
 .um-day.has-support{min-height:92px}

@@ -102,7 +102,7 @@ test('Pembaca Excel mendeteksi kolom WFH dengan tanda 1 dan isi status WFA',asyn
  }
 });
 
-test('Tabel pratinjau menampilkan semua pegawai dan iframe berkas pendukung',()=>{
+test('Tabel pratinjau menampilkan semua pegawai dan menunda iframe berkas pendukung sampai terlihat',()=>{
  const R=rules();
  const T=appHarness(R);
  assert.ok(T);
@@ -120,11 +120,32 @@ test('Tabel pratinjau menampilkan semua pegawai dan iframe berkas pendukung',()=
  const filesHtml=T.supportingFilesSection(conflict);
  assert.ok(filesHtml.includes('Berkas Pendukung Cuti / Surat Tugas'));
  assert.ok(filesHtml.includes('Surat.pdf'));
- assert.ok(filesHtml.includes('um-document-frame'));
+ assert.ok(filesHtml.includes('um-document-placeholder'));
+ assert.ok(filesHtml.includes('data-um-preview-url='));
+ assert.ok(!filesHtml.includes('<iframe'));
  assert.ok(filesHtml.includes('Buka SharePoint'));
  assert.ok(filesHtml.includes('preview.pdf'));
 });
 
+
+test('Berkas SharePoint GET/POST hanya menghasilkan placeholder sebelum terlihat, bukan iframe langsung',()=>{
+ const R=rules(),T=appHarness(R);
+ const docs=T.supportDocuments([{id:'pdf-1',name:'Bukti Dinas',file:{name:'Lampiran.pdf',driveId:'drive',itemId:'file'}}]);
+ const day=R.classifyDay(attendance('2026-09-24'),[],[{id:'t1',assignmentType:'official_travel',documents:docs}]);
+ const group=T.dailySupporting(day)[0],key=T.documentKey(group,docs[0]);
+ T.state.documentPreviews[key]={loading:false,getUrl:'https://example.sharepoint.com/preview'};
+ const getHtml=T.supportingFilesSection(day);
+ assert.ok(getHtml.includes('data-um-preview-url="https://example.sharepoint.com/preview"'));
+ assert.ok(getHtml.includes('Pratinjau dimuat saat bagian ini ditampilkan'));
+ assert.ok(!getHtml.includes('<iframe'));
+ assert.ok(!getHtml.includes('data-um-preview-post'));
+ T.state.documentPreviews[key]={loading:false,postUrl:'https://example.sharepoint.com/embed',postParameters:'token=abc'};
+ const postHtml=T.supportingFilesSection(day);
+ assert.ok(postHtml.includes('data-um-preview-target="um-support-1"'));
+ assert.ok(postHtml.includes('data-um-preview-post'));
+ assert.ok(postHtml.includes('token'));
+ assert.ok(!postHtml.includes('<iframe'));
+});
 
 test('Cuti tanpa konflik wajib diverifikasi, tetap muncul pada kalender dan dokumen',()=>{
  const R=rules(),T=appHarness(R);
