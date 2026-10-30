@@ -17,6 +17,12 @@
       { id:'documents',label:'Berkas Surat Tugas',parent:'data',actions:[['upload','Unggah/Ganti Berkas'],['download','Unduh Berkas']] },
       { id:'kalender',label:'Kalender Surat Tugas',actions:[] }
     ]},
+    { id:'register',label:'Register Kehadiran',sections:[
+      { id:'dashboard',label:'Dashboard Register',actions:[] },
+      { id:'cases',label:'Konflik dan Realisasi',actions:[['create','Catat Realisasi/Kasus'],['edit','Ubah Tindak Lanjut'],['verify','Verifikasi TU']] },
+      { id:'reconcile',label:'Rekonsiliasi',actions:[['save','Simpan Hasil Rekonsiliasi']] },
+      { id:'history',label:'Riwayat Klarifikasi',parent:'cases',actions:[] }
+    ]},
     { id:'pelatihan',label:'Pelatihan Pegawai',sections:[
       { id:'dashboard',label:'Dashboard Pelatihan',actions:[] },
       { id:'pegawai',label:'Data Pegawai',actions:[] },
@@ -42,7 +48,7 @@
     ]}
   ];
   const MOD = Object.fromEntries(MODULES.map(m => [m.id,m]));
-  const PAGE_MODULE = {leave:'cuti',assignment:'surat',training:'pelatihan',tukin:'tukin',lembur:'lembur',uangMakan:'uangMakan'};
+  const PAGE_MODULE = {register:'register',leave:'cuti',assignment:'surat',training:'pelatihan',tukin:'tukin',lembur:'lembur',uangMakan:'uangMakan'};
   const legacy = Object.fromEntries(['tukin','lembur','uangMakan'].map(id => [id,Object.fromEntries(
     MOD[id].sections.flatMap(s => [`${s.id}.view`,...s.actions.map(a => `${s.id}.${a[0]}`)]).map(key=>[key,true]))]));
   let grants = null;
@@ -114,7 +120,7 @@
     return `<div class="card permission-denied"><div class="permission-denied-icon">&#128274;</div><h2>Akses tidak tersedia</h2><p>Akun ini belum memperoleh izin untuk membuka ${escape(MOD[module]?.label || 'halaman')} atau fitur yang dipilih. Hubungi administrator aplikasi.</p>${action}</div>`;
   }
   function homeHref() {
-    const links = {tukin:'tukin.html',lembur:'lembur.html',uangMakan:'uang-makan.html',pelatihan:'pelatihan.html',cuti:'cuti.html',surat:'surat-tugas.html'};
+    const links = {register:'register.html',tukin:'tukin.html',lembur:'lembur.html',uangMakan:'uang-makan.html',pelatihan:'pelatihan.html',cuti:'cuti.html',surat:'surat-tugas.html'};
     for (const mod of MODULES) if (firstView(mod.id)) return `${links[mod.id]}#${firstView(mod.id)}`;
     return 'index.html';
   }
@@ -273,9 +279,9 @@
       const anchor=event.target.closest?.('a[href]');
       if(!anchor) return;
       const path=anchor.getAttribute('href')||'';
-      const match=path.match(/^(cuti|surat-tugas|pelatihan|tukin|lembur|uang-makan)\.html(?:#([a-z]+))?$/i);
+      const match=path.match(/^(register|cuti|surat-tugas|pelatihan|tukin|lembur|uang-makan)\.html(?:#([a-z]+))?$/i);
       if (!match) return;
-      const module={cuti:'cuti','surat-tugas':'surat',pelatihan:'pelatihan',tukin:'tukin',lembur:'lembur','uang-makan':'uangMakan'}[match[1].toLowerCase()];
+      const module={register:'register',cuti:'cuti','surat-tugas':'surat',pelatihan:'pelatihan',tukin:'tukin',lembur:'lembur','uang-makan':'uangMakan'}[match[1].toLowerCase()];
       if(!canView(module,match[2]||firstView(module))) {event.preventDefault();event.stopImmediatePropagation();deny();}
     },true);
   }

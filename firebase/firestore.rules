@@ -50,6 +50,10 @@ service cloud.firestore {
     function anyAssignmentView() {
       return canView('surat','dashboard') || canView('surat','data') || canView('surat','kalender');
     }
+    function anyRegisterView() {
+      return canView('register','dashboard') || canView('register','cases')
+        || canView('register','reconcile') || canView('register','history');
+    }
     function anyTrainingView() {
       return canView('pelatihan','dashboard') || canView('pelatihan','pegawai') || canView('pelatihan','data');
     }
@@ -62,10 +66,10 @@ service cloud.firestore {
     function anyLemburView() {
       return canView('lembur','dashboard') || canView('lembur','process') || canView('lembur','history');
     }
-    function canReadLeave() { return anyLeaveView() || canView('tukin','process') || canView('uangMakan','process'); }
-    function canReadAssignments() { return anyAssignmentView() || canView('tukin','process') || canView('uangMakan','process'); }
+    function canReadLeave() { return anyRegisterView() || anyLeaveView() || canView('tukin','process') || canView('uangMakan','process'); }
+    function canReadAssignments() { return anyRegisterView() || anyAssignmentView() || canView('tukin','process') || canView('uangMakan','process'); }
     function canReadDirectory() {
-      return isAdmin() || anyLeaveView() || anyAssignmentView() || anyTrainingView() || anyUangMakanView();
+      return isAdmin() || anyRegisterView() || anyLeaveView() || anyAssignmentView() || anyTrainingView() || anyUangMakanView();
     }
     function canManageRun(data, module) {
       return isAllowedUser() && (data.ownerUid == request.auth.uid || isAdmin());
@@ -288,6 +292,76 @@ service cloud.firestore {
           && resource.data.documents[0].get('file',null) == request.resource.data.documents[0].get('file',null))
       );
       allow delete: if canDo('surat','data','delete');
+    }
+    // Register status administrasi kehadiran, tanpa hak mutasi terhadap dokumen sumber.
+    function validAttendanceCase() {
+      return request.resource.data.get('key','') is string
+        && request.resource.data.get('type','') in ['conflict','realization']
+        && request.resource.data.get('year',0) is int
+        && request.resource.data.get('employeeId','') is string
+        && request.resource.data.get('startDate','') is string
+        && request.resource.data.get('endDate','') is string
+        && request.resource.data.get('fingerprint','') is string
+        && request.resource.data.get('workflow','') in ['pending','awaiting','verified']
+        && request.resource.data.get('note','') is string
+        && request.resource.data.get('sourceRefs',[]) is list
+        && request.resource.data.get('actualDates',[]) is list
+        && request.resource.data.get('updatedByUid','') == request.auth.uid
+        && request.resource.data.get('updatedByEmail','') == request.auth.token.email;
+    }
+    match /attendanceCases/{caseId} {
+      allow read: if anyRegisterView();
+      allow create: if canDo('register','cases','create') && validAttendanceCase()
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdByEmail == request.auth.token.email
+        && (request.resource.data.workflow != 'verified' || (canDo('register','cases','verify')
+          && request.resource.data.verifiedByUid == request.auth.uid
+          && request.resource.data.verifiedByEmail == request.auth.token.email));
+      allow update: if validAttendanceCase()
+        && request.resource.data.key == resource.data.key
+        && request.resource.data.type == resource.data.type
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.createdByEmail == resource.data.createdByEmail
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'kind','year','employeeId','startDate','endDate','sourceKey','sourceRefs',
+          'fingerprint','workflow','realization','actualStart','actualEnd',
+          'actualStartTime','actualEndTime','actualDates','clarifiedBy','evidence','note',
+          'updatedAt','updatedByUid','updatedByEmail','verifiedAt','verifiedByUid','verifiedByEmail'
+        ])
+        && (request.resource.data.workflow == 'verified'
+          ? (canDo('register','cases','verify')
+            && request.resource.data.verifiedByUid == request.auth.uid
+            && request.resource.data.verifiedByEmail == request.auth.token.email)
+          : canDo('register','cases','edit'));
+      allow delete: if false;
+    }
+    match /attendanceCaseLogs/{logId} {
+      allow read: if canView('register','history');
+      allow create: if (canDo('register','cases','create') || canDo('register','cases','edit') || canDo('register','cases','verify'))
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.actorEmail == request.auth.token.email
+        && request.resource.data.get('caseKey','') is string
+        && request.resource.data.get('detail','') is string
+        && request.resource.data.get('year',0) is int
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+    match /attendanceReconciliations/{periodId} {
+      allow read: if anyRegisterView();
+      allow create, update: if canDo('register','reconcile','save')
+        && request.resource.data.get('year',0) is int
+        && request.resource.data.get('month',0) is int
+        && request.resource.data.month >= 1 && request.resource.data.month <= 12
+        && request.resource.data.get('status','') in ['pending','complete']
+        && request.resource.data.get('fingerprint','') is string
+        && request.resource.data.get('openCases',0) is int
+        && request.resource.data.get('sourceConfirmation','') is string
+        && (request.resource.data.status != 'complete'
+          || (request.resource.data.openCases == 0 && request.resource.data.sourceConfirmation.size() > 0))
+        && request.resource.data.get('reviewedByUid','') == request.auth.uid
+        && request.resource.data.get('reviewedByEmail','') == request.auth.token.email;
+      allow delete: if false;
     }
     match /adminAudit/{auditId} {
       allow read: if isAdmin();

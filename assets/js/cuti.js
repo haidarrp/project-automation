@@ -953,6 +953,10 @@
       await Promise.all(yearsToReload.map((year) => ensureYearData(year, { force: true })));
       render();
       showToast(existingId ? 'Data cuti berhasil diperbarui.' : 'Data cuti berhasil ditambahkan.');
+      window.AttendanceQuickCheck?.checkSource('cuti', ref.id, leaveYear).then(count => {
+        if(count>0) showToast(`${count} potensi irisan dokumen terdeteksi. Periksa Register Kehadiran.`);
+        else if(count<0) console.info('Pemeriksaan register dapat diulang dari menu Register Kehadiran.');
+      });
     } catch (error) {
       button.disabled = false;
       button.textContent = 'Simpan';

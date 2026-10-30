@@ -638,6 +638,10 @@
       state.modal = null;
       await loadData();
       showToast(existing.id ? 'Surat Tugas berhasil diperbarui.' : 'Surat Tugas berhasil disimpan dan file telah diunggah ke SharePoint.');
+      window.AttendanceQuickCheck?.checkSource('surat', id, assignmentYear).then(count => {
+        if(count>0) showToast(`${count} potensi irisan dokumen terdeteksi. Periksa Register Kehadiran.`);
+        else if(count<0) console.info('Pemeriksaan register dapat diulang dari menu Register Kehadiran.');
+      });
     } catch (error) {
       if (uploadedFile?.driveId && uploadedFile?.itemId && !firestoreSaved) {
         try { await sharePoint.deleteAttachment(uploadedFile, true); } catch (cleanupError) { console.warn(cleanupError); }
