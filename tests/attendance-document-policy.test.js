@@ -84,3 +84,24 @@ test('Tukin konflik yang keduanya dipilih tetap memuat kedua bukti namun tanpa a
  assert.equal(h.entry.adjustedPercent,null);
  assert.equal(h.entry.evidence.length,2);
 });
+
+test('Tukin mendeteksi presensi WFO dengan Cuti atau Surat Tugas dipertanggungjawabkan untuk verifikasi klaim lembur',async()=>{
+ for(const inputs of [
+  {leaves:[leave],assignments:[]},
+  {leaves:[],assignments:[{...st,accountable:true}]}
+ ]){
+  const h=attendanceTukinHarness(inputs.leaves,inputs.assignments);
+  h.entry.status='WFO';h.entry.inMinutes=480;h.entry.outMinutes=1020;
+  await h.module.apply([h.employee],{year:2026,month:9});
+  assert.equal(h.entry.overtimeDocumentRestriction,true);
+  assert.match(h.entry.overtimeDocumentReviewNote,/tidak boleh diklaim sebagai lembur/);
+ }
+});
+
+test('Surat Tugas tidak dipertanggungjawabkan tidak memicu pembatas klaim lembur di Tukin',async()=>{
+ const h=attendanceTukinHarness([],[{...st,accountable:false}]);
+ h.entry.status='WFO';h.entry.inMinutes=480;h.entry.outMinutes=1020;
+ await h.module.apply([h.employee],{year:2026,month:9});
+ assert.equal(h.entry.overtimeDocumentRestriction,false);
+ assert.equal(h.entry.overtimeDocumentReviewNote,'');
+});

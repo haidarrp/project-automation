@@ -372,11 +372,11 @@ test('Semua jenis surat tugas wajib diperiksa pada hari kerja, walaupun tidak ad
 
 test('Koreksi tidak dihitung jika pilihan manual sama dengan rekomendasi otomatis',()=>{
  const R=rules();
- const d=R.classifyDay(attendance('2026-09-24',{manualValue:1,reviewed:true}),[],[{id:'s',assignmentType:'other'}]);
+ const d=R.classifyDay(attendance('2026-09-24',{manualValue:0,reviewed:true}),[],[{id:'s',assignmentType:'other'}]);
  assert.equal(d.reviewed,true);
  assert.equal(R.overview({jenisPegawai:'PNS',days:{[d.key]:d}}).issues,0);
  assert.equal(R.overview({jenisPegawai:'PNS',days:{[d.key]:d}}).manual,0);
- const corrected=R.classifyDay(attendance('2026-09-24',{manualValue:0,reviewed:true}),[],[{id:'s',assignmentType:'other'}]);
+ const corrected=R.classifyDay(attendance('2026-09-24',{manualValue:1,reviewed:true}),[],[{id:'s',assignmentType:'other'}]);
  assert.equal(R.overview({jenisPegawai:'PNS',days:{[corrected.key]:corrected}}).manual,1);
 });
 
@@ -396,7 +396,7 @@ test('Sinkronisasi ulang mempertahankan verifikasi dokumen yang identik, membata
  assert.equal(changed.days['2026-09-24'].reviewed,false);
  assert.equal(changed.days['2026-09-25'].reviewed,false);
  assert.equal(changed.days['2026-09-24'].manualValue,null);
- assert.equal(changed.days['2026-09-24'].value,1,'Kembali ke perhitungan absensi sampai diverifikasi ulang');
+ assert.equal(changed.days['2026-09-24'].value,0,'Surat Tugas aktif tetap merekomendasikan nol sampai diverifikasi ulang');
  assert.equal(Object.keys(changed.supportReviews).length,0);
  const cancelled=T.computeEmployees([verified],[],[])[0];
  assert.equal(cancelled.days['2026-09-24'].manualValue,null);
@@ -405,7 +405,7 @@ test('Sinkronisasi ulang mempertahankan verifikasi dokumen yang identik, membata
  assert.equal(Object.keys(cancelled.supportReviews).length,0);
 });
 
-test('Pilihan hasil per dokumen tidak menampilkan angka 1/0, tanpa alasan koreksi tertulis',()=>{
+test('Pilihan hasil per dokumen tidak menampilkan angka 1/0, tanpa alasan koreksi tertulis',async()=>{
  const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=9;
  const task={id:'s1',employeeIds:['e1'],startDate:'2026-09-24',endDate:'2026-09-25',assignmentType:'official_travel'};
  T.state.assignments=[task];
@@ -426,7 +426,11 @@ test('Pilihan hasil per dokumen tidak menampilkan angka 1/0, tanpa alasan koreks
  assert.ok(!html.includes('Catatan Verifikasi / Alasan Koreksi'));
  T.client.FirebaseClient={getCurrentUser:()=>({email:'operator@example.com'})};
  T.doc.getElementById=id=>id==='um-source-choice-0'?{value:'0'}:null;
- T.saveSupport('tugas','s1','0');
+ assert.ok(html.includes('Surat Tugas ini berstatus <b>dipertanggungjawabkan</b>'));
+ assert.ok(html.includes('<option value="0" selected>Tidak memperoleh uang makan</option>'));
+ await T.saveSupport('tugas','s1','0');
+ assert.notEqual(T.state.assignments[0].accountable,false,'Keputusan uang makan tidak otomatis membatalkan pertanggungjawaban');
+
  const employee=T.state.employees[0];
  for(const date of ['2026-09-24','2026-09-25']){
   assert.equal(employee.days[date].reviewed,true);
@@ -537,7 +541,7 @@ test('Pilihan periode hanya dua hasil dengan rekomendasi konservatif sebagai pil
  T.state.modalId='e1';T.state.modalDate='2026-09-14';
  const html=T.modal();
  assert.ok(html.includes('<option value="0" selected>Tidak memperoleh uang makan</option>'));
- assert.ok(html.includes('Hasil otomatis antar tanggal atau pegawai tidak seragam'));
+ assert.ok(!html.includes('Hasil otomatis antar tanggal atau pegawai tidak seragam')); // Semua hari pada Surat Tugas aktif direkomendasikan 0
  assert.ok(!html.includes('<option value="auto"'));
  T.client.FirebaseClient={getCurrentUser:()=>({email:'reviewer@pkp.go.id'})};
  T.doc.getElementById=id=>id==='um-source-choice-0'?{value:'0'}:null;
@@ -900,9 +904,70 @@ test('Verifikasi lama bernilai auto tetap dapat dibaca, tetapi UI baru tidak men
  T.state.employees=[R.applySupporting(e,[],[task],2026,9)];
  T.state.modalId='e1';T.state.modalDate='2026-09-14';
  const restored=T.state.employees[0];
- assert.equal(restored.days['2026-09-14'].value,1);
+ assert.equal(restored.days['2026-09-14'].value,0);
  assert.equal(restored.days['2026-09-15'].value,0);
  assert.equal(restored.days['2026-09-14'].reviewed,true);
  assert.equal(restored.days['2026-09-15'].reviewed,true);
  assert.ok(!T.modal().includes('<option value="auto"'));
+});
+
+test('29 Oktober 2026: ST dipertanggungjawabkan merekomendasikan uang makan reguler 0 walau WFO 07.30-18.00',async()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=10;
+ const task={id:'oct29',employeeIds:['e1'],accountable:true,startDate:'2026-10-29',endDate:'2026-10-29',assignmentType:'official_travel',activity:'Penanganan gangguan internet',letterNumber:'ST/29/2026'};
+ T.state.assignments=[task];
+ const row=attendance('2026-10-29',{inMinutes:450,outMinutes:1080});
+ T.state.employees=T.computeEmployees([{id:'e1',name:'Pegawai Oktober',nip:'123',jenisPegawai:'PNS',days:{'2026-10-29':row}}],[],[task]);
+ T.state.modalId='e1';T.state.modalDate='2026-10-29';
+ let e=T.state.employees[0],d=e.days['2026-10-29'];
+ assert.equal(d.present,true);assert.equal(d.automatic,0);assert.equal(d.value,0);
+ assert.equal(d.assignments.length,1);assert.equal(d.previewAssignments.length,1);
+ assert.equal(d.reviewed,false);assert.ok(d.issues.some(issue=>issue.includes('dinas luar')));
+ const html=T.modal();
+ assert.ok(html.includes('Verifikasi Cuti / Surat Tugas per Periode'));
+ assert.ok(html.includes('<option value="0" selected>Tidak memperoleh uang makan</option>'));
+ T.client.FirebaseClient={getCurrentUser:()=>({email:'reviewer@pkp.go.id'})};
+ T.doc.getElementById=id=>id==='um-source-choice-0'?{value:'0'}:null;
+ await T.saveSupport('tugas','oct29','0');
+ e=T.state.employees[0];d=e.days['2026-10-29'];
+ assert.equal(d.value,0);assert.equal(d.reviewed,true);
+ assert.equal(T.state.assignments[0].accountable,true,'Verifikasi nol tidak boleh mengubah ST menjadi non-pertanggungjawaban');
+});
+
+test('29 Oktober 2026: ST tidak dipertanggungjawabkan tidak muncul, tidak diverifikasi, hasil mengikuti WFO',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=10;
+ const task={id:'oct29',employeeIds:['e1'],accountable:false,startDate:'2026-10-29',endDate:'2026-10-29',assignmentType:'official_travel',activity:'Penanganan gangguan internet',letterNumber:'ST/29/2026',documents:[{id:'d',name:'Bukti ST'}]};
+ T.state.assignments=[task];
+ T.state.employees=T.computeEmployees([{id:'e1',name:'Pegawai Oktober',nip:'123',jenisPegawai:'PNS',days:{'2026-10-29':attendance('2026-10-29',{inMinutes:450,outMinutes:1080})}}],[],[task]);
+ T.state.modalId='e1';T.state.modalDate='2026-10-29';
+ const e=T.state.employees[0],d=e.days['2026-10-29'];
+ assert.equal(d.automatic,1);assert.equal(d.value,1);
+ assert.equal(d.assignments.length,0);assert.equal(d.previewAssignments.length,0);
+ assert.equal(d.sourceKeys.length,0);assert.equal(d.pendingSourceKeys.length,0);
+ assert.equal(d.issues.length,0);
+ assert.equal(e.supportReviews['tugas:oct29'],undefined);
+ assert.equal(T.dailySupporting(d).length,0);
+ assert.equal(T.sourceReviewPanel(e,d),'');
+ assert.ok(!T.modal().includes('Penanganan gangguan internet'));
+ assert.ok(T.supportingRecordsSection(d).includes('Tidak ada data cuti atau surat tugas'));
+ assert.equal(T.supportingFilesSection(d),'');
+});
+
+test('Perubahan ST dipertanggungjawabkan menjadi tidak dipertanggungjawabkan membatalkan keputusan dokumen dan memulihkan uang makan WFO',()=>{
+ const R=rules(),T=appHarness(R);T.state.year=2026;T.state.month=10;
+ const task={id:'oct29',employeeIds:['e1'],accountable:true,startDate:'2026-10-29',endDate:'2026-10-29',assignmentType:'official_travel'};
+ const e=R.applySupporting({id:'e1',jenisPegawai:'PNS',days:{'2026-10-29':attendance('2026-10-29',{inMinutes:450,outMinutes:1080})}},[],[task],2026,10);
+ e.supportReviews[R.supportKey('tugas',task)]={choice:0,signature:R.supportSignature('tugas',task),reviewedAt:'2026-10-30T00:00:00Z'};
+ const verified=T.computeEmployees([e],[],[task])[0];
+ assert.equal(verified.days['2026-10-29'].value,0);
+ assert.equal(verified.days['2026-10-29'].reviewed,true);
+ const excluded=T.computeEmployees([verified],[],[{...task,accountable:false}])[0];
+ assert.equal(excluded.days['2026-10-29'].value,1);
+ assert.equal(excluded.days['2026-10-29'].reviewed,false);
+ assert.equal(excluded.days['2026-10-29'].issues.length,0);
+ assert.equal(excluded.days['2026-10-29'].sourceKeys.length,0);
+ assert.equal(Object.keys(excluded.supportReviews).length,0);
+ const reinstated=T.computeEmployees([excluded],[],[task])[0];
+ assert.equal(reinstated.days['2026-10-29'].value,0);
+ assert.equal(reinstated.days['2026-10-29'].reviewed,false);
+ assert.equal(reinstated.days['2026-10-29'].pendingSourceKeys.length,1);
 });

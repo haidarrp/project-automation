@@ -66,8 +66,8 @@ service cloud.firestore {
     function anyLemburView() {
       return canView('lembur','dashboard') || canView('lembur','process') || canView('lembur','history');
     }
-    function canReadLeave() { return anyRegisterView() || anyLeaveView() || anyTukinView() || anyUangMakanView(); }
-    function canReadAssignments() { return anyRegisterView() || anyAssignmentView() || anyTukinView() || anyUangMakanView(); }
+    function canReadLeave() { return anyRegisterView() || anyLeaveView() || anyTukinView() || anyUangMakanView() || anyLemburView(); }
+    function canReadAssignments() { return anyRegisterView() || anyAssignmentView() || anyTukinView() || anyUangMakanView() || anyLemburView(); }
     function canReadDirectory() {
       return isAdmin() || anyRegisterView() || anyLeaveView() || anyAssignmentView() || anyTrainingView() || anyUangMakanView();
     }
@@ -284,13 +284,13 @@ service cloud.firestore {
     match /assignmentRecords/{assignmentId} {
       allow read: if canReadAssignments();
       allow create: if canDo('surat','data','create') && (canDo('surat','documents','upload') || (request.resource.data.get('documents',[]).size() == 1 && request.resource.data.documents[0].get('file',null) == null));
-      allow update: if canDo('surat','data','edit') && (
+      allow update: if (canDo('surat','data','edit') && (
         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['documents'])
         || canDo('surat','documents','upload')
         || (resource.data.get('documents',[]).size()>0
           && request.resource.data.get('documents',[]).size()>0
           && resource.data.documents[0].get('file',null) == request.resource.data.documents[0].get('file',null))
-      );
+      ));
       allow delete: if canDo('surat','data','delete');
     }
     // Register status administrasi kehadiran, tanpa hak mutasi terhadap dokumen sumber.
@@ -311,7 +311,7 @@ service cloud.firestore {
         && request.resource.data.get('updatedByEmail','') == request.auth.token.email;
     }
     match /attendanceCases/{caseId} {
-      allow read: if anyRegisterView() || anyTukinView() || anyUangMakanView();
+      allow read: if anyRegisterView() || anyTukinView() || anyUangMakanView() || anyLemburView();
       allow create: if canDo('register','cases','create') && validAttendanceCase()
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.createdByEmail == request.auth.token.email

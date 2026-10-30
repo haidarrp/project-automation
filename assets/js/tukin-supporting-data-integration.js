@@ -589,6 +589,15 @@
         record.nonExportDocuments=omitted; // Preview untuk pertimbangan; bukan bukti ekspor.
         const matchingLeave = employeeLeaves.find((leave) => sourceMatchesDate(leave, key)) || null;
         const matchingAssignments = employeeAssignments.filter((assignment) => sourceMatchesDate(assignment, key));
+        const presenceRecorded = String(record.status || '').trim().toUpperCase() === 'WFO' ||
+          (record.inMinutes !== null && record.inMinutes !== undefined &&
+           record.outMinutes !== null && record.outMinutes !== undefined);
+        const accountableDocument = Boolean(matchingLeave || matchingAssignments.some(item=>item.accountable!==false));
+        // Data presensi WFO bukan bukti hak klaim lembur bila hari tersebut
+        // juga tercakup Cuti atau Surat Tugas yang dipertanggungjawabkan.
+        record.overtimeDocumentRestriction = presenceRecorded && accountableDocument;
+        record.overtimeDocumentReviewNote = record.overtimeDocumentRestriction
+          ? 'Presensi tercatat, tetapi ditemukan Cuti/Surat Tugas yang berlaku untuk pertanggungjawaban. Periksa dan verifikasi dokumen; tanggal ini tidak boleh diklaim sebagai lembur.' : '';
 
         if (matchingLeave || matchingAssignments.length) {
           linkedRecords += 1;

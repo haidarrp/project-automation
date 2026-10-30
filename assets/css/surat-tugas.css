@@ -50,3 +50,18 @@
 .assignment-people-cell, .assignment-units-cell { display: flex; flex-direction: column; gap: 6px; line-height: 1.5; }
 .assignment-people-cell .assignment-person { font-weight: 700; }
 .assignment-people-cell .assignment-person + .assignment-person { border-top: 1px dashed var(--line); padding-top: 6px; }
+
+/* Checkbox pertanggungjawaban: lepas dari ukuran input teks global (.field input). */
+.assignment-modal .field .assignment-accountable{
+  display:inline-flex;align-items:center;gap:9px;margin:0;
+  font-size:10px;line-height:1.5;letter-spacing:.025em;cursor:pointer;
+}
+.assignment-modal .field .assignment-accountable input[type="checkbox"]{
+  appearance:auto;-webkit-appearance:checkbox;accent-color:#2362b0;
+  display:inline-block;width:17px;height:17px;min-width:17px;min-height:17px;
+  max-width:17px;max-height:17px;padding:0;margin:0;
+  border:0;border-radius:3px;box-shadow:none;flex:0 0 17px;cursor:pointer;
+}
+.assignment-modal .field .assignment-accountable input[type="checkbox"]:focus-visible{
+  outline:2px solid #b4a471;outline-offset:3px;box-shadow:none;
+}

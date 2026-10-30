@@ -1,4 +1,4 @@
-const STATIC_CACHE = 'pusdatin-static-v30';
+const STATIC_CACHE = 'pusdatin-static-v32';
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(caches.keys().then((keys) => Promise.all(

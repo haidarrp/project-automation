@@ -43,7 +43,7 @@
       String(x.leaveType||''),String(x.documentNumber||''),String(x.documentDate||''),String(x.note||''),documents
     ]):JSON.stringify([
       String(x.id||''),(x.employeeIds||[]).map(String).sort(),String(x.startDate||''),String(x.endDate||''),
-      String(x.assignmentType||''),String(x.activity||''),String(x.letterNumber||''),
+      String(x.assignmentType||''),String(x.accountable!==false),String(x.activity||''),String(x.letterNumber||''),
       String(x.letterDate||''),String(x.location||''),String(x.note||''),documents
     ]);
   }
@@ -52,8 +52,10 @@
     const hasIn=record?.inMinutes!==null && record?.inMinutes!==undefined;
     const hasOut=record?.outMinutes!==null && record?.outMinutes!==undefined;
     const present=hasIn||hasOut;
-    const official=assignments.filter(a=>a.assignmentType==='official_travel');
-    const workArrangements=assignments.filter(a=>a.assignmentType!=='official_travel');
+    // Surat Tugas non-pertanggungjawaban tidak ikut proses Uang Makan.
+    const activeAssignments=assignments.filter(a=>a.accountable!==false);
+    const official=activeAssignments.filter(a=>a.assignmentType==='official_travel');
+    const workArrangements=activeAssignments.filter(a=>a.assignmentType!=='official_travel');
     const status=String(record?.status||'').trim();
     const workMode=detectWorkMode(record?.workMode)||detectWorkMode(status);
     const absenceStatus=isAbsenceStatus(status,record?.flags);
@@ -71,19 +73,21 @@
       if(!present && /\bhadir\b/i.test(status) && !absenceStatus)issues.push('Status hadir tetapi jam presensi kosong');
       // Data sumber belum tentu mencerminkan realisasi: cuti/tugas dapat batal.
       if(leaves.length)issues.push('Konfirmasi pelaksanaan cuti (termasuk jika dibatalkan/tidak diambil)');
-      if(assignments.length)issues.push('Konfirmasi pelaksanaan surat tugas (termasuk jika batal/tidak berangkat)');
+      if(activeAssignments.length)issues.push('Konfirmasi pelaksanaan surat tugas (termasuk jika batal/tidak berangkat)');
       // WFH/WFA di luar Jumat adalah rekomendasi nol, bukan keputusan final.
       // Pegawai mungkin memiliki surat sakit/cuti yang belum tersinkron.
       if(remoteExcluded)issues.push('WFH/WFA selain Jumat: verifikasi hasil aktual dan periksa data sakit/cuti yang belum tersinkron');
     }
-    const automatic=(present&&!nonWorking&&!remoteExcluded)?1:0;
+    // Surat Tugas yang dipertanggungjawabkan memberi rekomendasi awal 0
+    // meskipun presensi WFO tercatat. Hasil akhir masih bisa diverifikasi.
+    const automatic=(present&&!nonWorking&&!remoteExcluded&&!activeAssignments.length)?1:0;
     const hasManual=record?.manualValue===0||record?.manualValue===1;
     const lockedZero=nonWorking;
     const manualValue=lockedZero?null:(hasManual?record.manualValue:null);
     const value=lockedZero?0:(manualValue===null?automatic:manualValue);
     return {key:dateKey,inMinutes:record?.inMinutes??null,outMinutes:record?.outMinutes??null,
       status,workMode,remoteExcluded,flags:Array.isArray(record?.flags)?record.flags:[],duplicate:Boolean(record?.duplicate),
-      leaves,assignments,workArrangements,official,issues,hasIn,hasOut,present,isWeekend,isHoliday,nonWorking,
+      leaves,assignments:activeAssignments,workArrangements,official,issues,hasIn,hasOut,present,isWeekend,isHoliday,nonWorking,
       automatic,value,manualValue,manualNote:nonWorking?'':String(record?.manualNote||''),
       reviewed:nonWorking?false:Boolean(record?.reviewed),reviewedAt:nonWorking?'':String(record?.reviewedAt||''),
       reviewedBy:nonWorking?'':String(record?.reviewedBy||'')};
@@ -91,7 +95,7 @@
   function applySupporting(employee,leaves,assignments,year,month,holidays=[]){
     const dates=monthDates(year,month),reds=new Set(holidays||[]);
     const ownLeaves=(leaves||[]).filter(l=>l.employeeId===employee.id);
-    const ownAssignments=(assignments||[]).filter(a=>(a.employeeIds||[]).includes(employee.id));
+    const ownAssignments=(assignments||[]).filter(a=>a.accountable!==false&&(a.employeeIds||[]).includes(employee.id));
     // Tinjau per identitas dokumen, bukan per tanggal. Tanda tangan metadata
     // mencegah persetujuan lama tetap berlaku bila isi/rentang berubah.
     const supportReviews={};

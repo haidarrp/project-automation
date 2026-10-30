@@ -54,7 +54,7 @@
    const meta={year,month,period:`${year}-${String(month).padStart(2,'0')}`,createdAt:new Date().toISOString(),
      ownerUid:a.uid,ownerEmail:a.email,ownerName:a.name,status:'writing',summary,
      holidays:Array.isArray(settings.holidays)?settings.holidays.slice():[],
-     holidayNotes:settings.holidayNotes||{},archiveKey:String(settings.archiveKey||''),schemaVersion:7};
+     holidayNotes:settings.holidayNotes||{},archiveKey:String(settings.archiveKey||''),schemaVersion:8};
    await ref.set(meta);
    try{
      const stored=employees.map(sanitizeEmployee);

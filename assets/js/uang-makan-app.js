@@ -144,8 +144,8 @@ function verifyPanel(){
  const s=summary();
  return `${kpis(s)}<section class="um-panel"><div class="um-panel-title"><div><h2>Validasi & Verifikasi Uang Makan</h2><p>Rekap uang makan pegawai untuk sheet PUSDATIN. Satu verifikasi berlaku untuk seluruh rentang tanggal dan semua pegawai pada Surat Tugas yang sama.</p></div><div class="um-row"><button class="um-btn small" data-um-action="sync" type="button" ${state.busy?'disabled':''}>⟳ Sinkronkan Cuti & Surat Tugas</button></div></div>
  ${pendingCount()?`<div class="um-note warn">Terdapat ${pendingCount()} pegawai dari berkas yang diunggah yang perlu pemeriksaan, konfirmasi cakupan tanggal, atau kelengkapan jenis pegawai. Ekspor final tersedia setelah pegawai yang diproses siap.</div>`:''}
- <div class="um-note" style="margin-bottom:12px">Periode ${esc(R.periodLabel(state.year,state.month))}: Sabtu–Minggu dan ${holidayCount()} tanggal merah tambahan otomatis tidak memperoleh uang makan. Setiap cuti dan surat tugas tersinkron wajib dikonfirmasi pada hari kerja, termasuk jika cuti tidak diambil atau tugas dibatalkan. Satu keputusan per dokumen diterapkan ke seluruh tanggal terkait pada bulan ini.</div>
- <div class="um-toolbar"><input class="um-search" id="um-search" placeholder="Cari nama pegawai atau NIP..." value="${esc(state.search)}"><div class="um-row"><select id="um-filter"><option value="all" ${state.filter==='all'?'selected':''}>Semua pegawai</option><option value="pending" ${state.filter==='pending'?'selected':''}>Perlu Verifikasi</option><option value="ready" ${state.filter==='ready'?'selected':''}>Siap</option></select><span class="um-pill good">Rekomendasi awal berdasarkan presensi</span></div></div>
+ <div class="um-note" style="margin-bottom:12px">Periode ${esc(R.periodLabel(state.year,state.month))}: Sabtu–Minggu dan ${holidayCount()} tanggal merah tambahan otomatis tidak memperoleh uang makan. Setiap cuti dan Surat Tugas yang dipertanggungjawabkan wajib dikonfirmasi pada hari kerja. Surat Tugas yang tidak dipertanggungjawabkan tidak disertakan pada perhitungan, verifikasi, maupun ZIP bukti dukung Uang Makan. Satu keputusan per dokumen diterapkan ke seluruh tanggal terkait pada bulan ini.</div>
+ <div class="um-toolbar"><input class="um-search" id="um-search" placeholder="Cari nama pegawai atau NIP..." value="${esc(state.search)}"><div class="um-row"><select id="um-filter"><option value="all" ${state.filter==='all'?'selected':''}>Semua pegawai</option><option value="pending" ${state.filter==='pending'?'selected':''}>Perlu Verifikasi</option><option value="ready" ${state.filter==='ready'?'selected':''}>Siap</option></select><span class="um-pill good">Rekomendasi berdasarkan presensi dan dokumen</span></div></div>
  <div class="um-table-outer"><table class="um-table"><thead><tr><th>No.</th><th>Nama / NIP</th><th>Anak Satker</th><th>Jenis</th><th>Hari Hadir</th><th>Cuti</th><th>Dinas Luar</th><th>Hari Uang Makan</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
  ${visibleEmployees().length?visibleEmployees().map((e,i)=>{const a=R.overview(e);return `<tr><td>${i+1}</td><td><div class="name">${esc(e.name)}</div><div class="sub">${esc(e.nip)}</div></td><td>${esc(e.anakSatker||'-')}</td><td>${esc(e.jenisPegawai||'-')}</td><td class="number">${a.present}</td><td class="number">${a.leave}</td><td class="number">${a.travel}</td><td class="number">${a.days}</td><td><span class="um-pill ${a.status==='Siap'?'good':'warn'}">${esc(a.status)}</span>${a.issues?`<div class="sub">${a.issues} tanggal perlu cek</div>`:''}</td><td><button type="button" class="um-btn small" data-um-action="verify" data-id="${esc(e.id)}">Detail →</button></td></tr>`;}).join(''):`<tr><td colspan="10" class="um-empty">Tidak ada pegawai dari file unggahan yang sesuai filter.</td></tr>`}
  </tbody></table></div><div class="um-summary"><span>${visibleEmployees().length} dari ${state.employees.length} pegawai hasil unggah</span><span><b>${s.days} hari</b> uang makan · ${s.issues} tanggal belum diperiksa</span></div>
@@ -195,8 +195,8 @@ function supportDocuments(raw){
 function assignmentTypeLabel(type){
  return {official_travel:'Dinas Luar / Perjalanan Dinas',work_arrangement:'Pengaturan Kerja',other:'Penugasan Lainnya'}[type]||'Penugasan';
 }
-// Semua catatan sumber yang berlaku pada tanggal dipertahankan, bukan hanya
-// yang menyebabkan konflik presensi. Termasuk pengaturan kerja dan hari libur.
+// Hanya dokumen yang diikutkan pada proses Uang Makan ditampilkan.
+// Surat Tugas yang tidak dipertanggungjawabkan dikeluarkan sepenuhnya.
 function dailySupporting(day){
  const matches=[];
  (day.previewLeaves||day.leaves||[]).forEach((item,index)=>matches.push({kind:'cuti',id:String(item.id||`cuti-${index+1}`),
@@ -205,9 +205,9 @@ function dailySupporting(day){
    reference:item.documentNumber||'',referenceLabel:'Nomor dokumen',referenceDate:item.documentDate||'',
    startDate:item.startDate||'',endDate:item.endDate||'',note:item.note||'',
    documents:Array.isArray(item.documents)?item.documents:[]}));
- (day.previewAssignments||day.assignments||[]).forEach((item,index)=>matches.push({kind:'tugas',id:String(item.id||`tugas-${index+1}`),
+ (day.previewAssignments||day.assignments||[]).filter(item=>item.accountable!==false).forEach((item,index)=>matches.push({kind:'tugas',id:String(item.id||`tugas-${index+1}`),
    title:`Surat Tugas: ${assignmentTypeLabel(item.assignmentType)}`,type:'Surat Tugas',
-   excluded:!(day.assignments||[]).some(d=>String(d.id)===String(item.id)),excludeReason:item.accountable===false?'Tidak dipertanggungjawabkan':'Dieliminasi pada Register',
+   excluded:!(day.assignments||[]).some(d=>String(d.id)===String(item.id)),excludeReason:'Dieliminasi pada Register',
    subject:item.activity||assignmentTypeLabel(item.assignmentType),
    assignmentType:assignmentTypeLabel(item.assignmentType),
    reference:item.letterNumber||'',referenceLabel:'Nomor surat',referenceDate:item.letterDate||'',
@@ -417,6 +417,7 @@ function sourceReviewPanel(employee,day){
     <div class="um-period-review-controls"><div class="um-field"><label for="um-source-choice-${index}">Hasil Setelah Verifikasi</label>
       <select id="um-source-choice-${index}"><option value="1" ${selected===1?'selected':''}>Memperoleh uang makan</option><option value="0" ${selected===0?'selected':''}>Tidak memperoleh uang makan</option></select></div>
       <button type="button" class="um-btn primary small" data-um-action="save-support" data-kind="${group.kind}" data-source-id="${esc(group.id)}" data-index="${index}" ${!allDays.length?'disabled':''}>${!allDays.length?'Tidak ada hari kerja':review?'Perbarui Verifikasi Periode':'Simpan Verifikasi Periode'}</button></div>
+    ${group.kind==='tugas'?'<div class="um-note">Surat Tugas ini berstatus <b>dipertanggungjawabkan</b>, sehingga rekomendasi awal uang makan reguler adalah <b>Tidak memperoleh uang makan</b> meskipun terdapat presensi WFO. Pilihan verifikasi tidak mengubah status pertanggungjawaban; status tersebut dikelola melalui Data Surat Tugas.</div>':''}
     <small>Rekomendasi awal sistem: <b>${recommended===1?'Memperoleh uang makan':'Tidak memperoleh uang makan'}</b>. ${mixed?'Hasil otomatis antar tanggal atau pegawai tidak seragam; periksa realisasi sebelum menyimpan. ':''}${crossEmployee?'Keputusan berlaku bagi semua peserta Surat Tugas dalam proses ini. Perbedaan tanggal harus didukung dokumen koreksi pada modul sumber. ':''}Sabtu/Minggu dan tanggal merah tetap 0. WFH/WFA selain Jumat dapat dikoreksi setelah verifikasi. ${review?`Diverifikasi oleh ${esc(review.reviewedBy||'operator')} pada ${esc(new Date(review.reviewedAt).toLocaleString('id-ID'))}.`:'Keputusan belum disimpan.'}</small>
    </article>`;
   }).join('')}</div></section>`;
@@ -516,7 +517,11 @@ function computeEmployees(list,leaves,assignments){
    const policy=state.documentPolicy;
    if(!policy)throw new Error('Keputusan Register belum dimuat.');
    const goodLeaves=leaves.filter(item=>String(item.employeeId)===String(employee.id)&&policy.exportable('cuti',item,employee.id));
-   const goodAssignments=assignments.filter(item=>item.employeeIds.includes(String(employee.id))&&policy.exportable('surat',item,employee.id));
+   // Surat Tugas yang tidak dipertanggungjawabkan dikecualikan dari proses
+   // uang makan, termasuk perhitungan, verifikasi, pratinjau dan ZIP.
+   const goodAssignments=assignments.filter(item=>item.employeeIds.includes(String(employee.id))&&
+     item.accountable!==false&&
+     (policy.allows?policy.allows('surat',item.id,employee.id):policy.exportable('surat',item,employee.id)));
    let updated=R.applySupporting(employee,goodLeaves,goodAssignments,state.year,state.month,state.holidays);
    const revised={...updated.days};
    let changed=false;
@@ -536,7 +541,7 @@ function computeEmployees(list,leaves,assignments){
      state.year,state.month,state.holidays);
    for (const [date,day] of Object.entries(updated.days||{})) {
      day.previewLeaves=leaves.filter(x=>String(x.employeeId)===String(employee.id)&&x.startDate<=date&&x.endDate>=date);
-     day.previewAssignments=assignments.filter(x=>x.employeeIds.includes(String(employee.id))&&x.startDate<=date&&x.endDate>=date);
+     day.previewAssignments=assignments.filter(x=>x.accountable!==false&&x.employeeIds.includes(String(employee.id))&&x.startDate<=date&&x.endDate>=date);
    }
    return updated;
  });
@@ -632,7 +637,7 @@ async function sync(){
    const supports=await getSupportingData();
    state.leaves=supports.leaves;state.assignments=supports.assignments;state.documentPolicy=supports.policy;state.documentPreviews={};
    state.employees=computeEmployees(state.employees,supports.leaves,supports.assignments);state.dirty=true;
-   state.message=`Sinkronisasi selesai: ${supports.leaves.length} data cuti, ${supports.assignments.length} surat tugas.`;
+   state.message=`Sinkronisasi selesai: ${supports.leaves.length} data cuti, ${supports.assignments.filter(item=>item.accountable!==false).length} Surat Tugas yang dipertanggungjawabkan. ${supports.assignments.filter(item=>item.accountable===false).length} Surat Tugas tidak dipertanggungjawabkan dikecualikan dari proses Uang Makan.`;
  }catch(e){fail(e);return;}
  state.busy=false;render();
 }
@@ -642,8 +647,8 @@ function recalculateEmployee(employee){
  state.dirty=true;state.savedRun=null;
  return revised;
 }
-function saveSupport(kind,sourceId,index){
- if(!permission('process.verify'))return;
+async function saveSupport(kind,sourceId,index){
+ if(!permission('process.verify')||state.busy)return;
  if(!['cuti','tugas'].includes(kind))return;
  const e=findEmployee(state.modalId),day=e?.days?.[state.modalDate];
  if(!day)return;
@@ -658,16 +663,18 @@ function saveSupport(kind,sourceId,index){
  if(!participants.length){alert('Tidak ada pegawai atau tanggal terkait dalam proses ini. Sinkronkan ulang data sumber.');return;}
  const employeeIds=new Set(participants.map(p=>p.employee.id));
  const reviewedAt=new Date().toISOString(),reviewedBy=window.FirebaseClient?.getCurrentUser?.()?.email||'';
- const decision={choice,signature,reviewedAt,reviewedBy};
- // Dokumen cuti bersifat individual. Surat tugas dibagikan hanya kepada
- // pemilik dokumen ID yang sama, tidak cukup mencocokkan nomor suratnya.
- state.employees=state.employees.map(employee=>{
-  if(!employeeIds.has(employee.id))return employee;
-  return computeEmployees([{...employee,supportReviews:{...(employee.supportReviews||{}),[id]:{...decision}}}],state.leaves,state.assignments)[0];
- });
- state.dirty=true;state.savedRun=null;
- const count=participants.reduce((n,p)=>n+p.dates.length,0);
- notify(`Verifikasi ${kind==='cuti'?'cuti':'surat tugas'} diterapkan ke ${count} tanggal-pegawai (${participants.length} pegawai) pada ${R.periodLabel(state.year,state.month)}. ${kind==='tugas'?'Peserta Surat Tugas yang sama tidak perlu mengulang verifikasi dokumen.':''}`);
+ state.busy=true;
+ try{
+  const decision={choice,signature,reviewedAt,reviewedBy};
+  state.employees=state.employees.map(employee=>{
+   if(!employeeIds.has(employee.id))return employee;
+   return computeEmployees([{...employee,supportReviews:{...(employee.supportReviews||{}),[id]:{...decision}}}],state.leaves,state.assignments)[0];
+  });
+  state.dirty=true;state.savedRun=null;
+  const count=participants.reduce((n,p)=>n+p.dates.length,0);
+  notify(`Verifikasi ${kind==='cuti'?'cuti':'surat tugas'} diterapkan ke ${count} tanggal-pegawai (${participants.length} pegawai) pada ${R.periodLabel(state.year,state.month)}.${state.documentPolicy?.stale?.length?' Keputusan konflik Register perlu diperiksa ulang sebelum ekspor.':''}`);
+ }catch(error){fail(error);}
+ finally{state.busy=false;render();}
 }
 function saveDay(){
  if(!permission('process.verify'))return;
@@ -794,14 +801,23 @@ function hydrateArchivedEmployee(employee,supportData,year,month,holidays,schema
    day.previewLeaves=source.previewLeaves||source.leaves||[];
    day.previewAssignments=source.previewAssignments||source.assignments||[];
  }
- if(schemaVersion>=6)return calculated;
+ if(schemaVersion>=8)return calculated;
+ // Rekap historis versi <=7 menggunakan rekomendasi berbasis presensi.
+ // Jangan menghitung ulang arsip tersebut memakai aturan ST baru.
  const days={...calculated.days};
  for(const [date,original] of Object.entries(employee.days||{})){
-  if(!days[date]||!original.dateReviewed||![0,1].includes(original.dateManualValue)||
-    !(original.leaves?.length||original.assignments?.length))continue;
-  days[date]={...days[date],manualValue:original.dateManualValue,value:original.dateManualValue,
-   reviewed:Boolean(original.reviewed),reviewedAt:String(original.reviewedAt||original.dateReviewedAt||''),
-   reviewedBy:String(original.reviewedBy||original.dateReviewedBy||'')};
+  const d=days[date];if(!d)continue;
+  const oldAutomatic=d.present&&!d.nonWorking&&!d.remoteExcluded?1:0;
+  const sourceChoices=(d.sourceKeys||[]).map(k=>employee.supportReviews?.[k]?.choice)
+   .filter(x=>x===0||x===1);
+  let oldValue=sourceChoices.length&&sourceChoices.every(x=>x===sourceChoices[0])
+   ?sourceChoices[0]:(original.manualValue===0||original.manualValue===1?original.manualValue:oldAutomatic);
+  if(schemaVersion<6&&original.dateReviewed&&[0,1].includes(original.dateManualValue)&&
+    (original.leaves?.length||original.assignments?.length))oldValue=original.dateManualValue;
+  days[date]={...d,automatic:oldAutomatic,value:d.nonWorking?0:oldValue,
+   manualValue:sourceChoices.length?sourceChoices[0]:(original.manualValue??null),
+   reviewed:Boolean(original.reviewed),reviewedAt:String(original.reviewedAt||''),
+   reviewedBy:String(original.reviewedBy||'')};
  }
  return {...calculated,days};
 }
@@ -891,7 +907,7 @@ root.addEventListener('click',async event=>{
    refreshSupportingFiles();void loadSupportingPreviews();break;
   }
   case 'save-day':saveDay();break;
-  case 'save-support':saveSupport(button.dataset.kind,button.dataset.sourceId,button.dataset.index);break;
+  case 'save-support':await saveSupport(button.dataset.kind,button.dataset.sourceId,button.dataset.index);break;
   case 'acknowledge':acknowledge(button.dataset.kind);break;
   case 'close-modal':state.modalId='';state.modalDate='';render();break;
   case 'back':state.step=Math.max(1,state.step-1);render();break;
