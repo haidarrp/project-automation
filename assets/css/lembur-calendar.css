@@ -193,3 +193,20 @@
 .lm-review-head .lm-review-counter{vertical-align:middle;margin-left:6px}
 @media(max-width:575px){.lm-inline-document-review{padding:9px}.lm-inline-document-review .lm-period-document{padding:10px}.lm-person-top{gap:4px}}
 .lm-person.selected{border-color:#2b6da7;box-shadow:0 0 0 2px rgba(43,109,167,.18),inset 3px 0 0 #2b6da7}
+
+/* Revisi: dokumen hanya penanda informatif; penyesuaian opsional dan preview di bawahnya. */
+.lm-inline-document-review { overflow-anchor: none; }
+.lm-review-counter.pending { background:#fff0ce; color:#80500b; }
+.lm-document-status.pending { background:#eff5fd; color:#36658d; }
+.lm-support-files {margin-top:16px;padding-top:13px;border-top:1px solid #cfdfec;overflow-anchor:none}
+.lm-support-files-head h4{font-size:12px;color:#263f55;margin:0 0 5px}
+.lm-support-files-head p{font-size:10px;color:#657b8e;line-height:1.55;margin:0 0 12px}
+.lm-support-file-list{display:grid;gap:12px}
+.lm-support-file{background:#fff;border:1px solid #d5e3ef;border-radius:11px;overflow:hidden;min-width:0;overflow-anchor:none}
+.lm-support-file-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:13px}
+.lm-support-file-head strong{display:block;font-size:11px;overflow-wrap:anywhere}
+.lm-support-file-head small{display:block;color:#6e8390;font-size:10px;margin-top:5px;overflow-wrap:anywhere}
+.lm-support-file-body{padding:12px;border-top:1px solid #e8edf3;color:#637584;font-size:10px;min-height:62px;overflow-anchor:none}
+.lm-support-file-body p{margin:0 0 8px}
+.lm-support-file-frame{display:block;width:100%;height:480px;border:1px solid #e1e7ed;border-radius:8px;background:#f8fafc;scroll-margin:0;overflow-anchor:none}
+@media(max-width:575px){.lm-support-file-head{align-items:stretch}.lm-support-file-frame{height:360px}}

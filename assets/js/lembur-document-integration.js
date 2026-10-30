@@ -30,7 +30,11 @@
   function toSource(doc){
     return {id:String(doc.id),key:sourceKey(doc),kind:doc.kind,label:describe(doc),
       signature:signature(doc),startDate:doc.startDate,endDate:doc.endDate,
-      accountable:doc.accountable!==false,blockByDefault:doc.kind==='cuti'||doc.accountable!==false};
+      accountable:doc.accountable!==false,blockByDefault:doc.kind==='cuti'||doc.accountable!==false,
+      documents:(doc.documents||[]).map((item,index)=>({id:String(item.id||`dokumen-${index}`),
+        name:String(item.name||''),type:String(item.type||''),
+        file:item.file?{name:String(item.file.name||''),remoteName:String(item.file.remoteName||''),
+          driveId:String(item.file.driveId||''),itemId:String(item.file.itemId||''),webUrl:String(item.file.webUrl||'')}:null}))};
   }
   function validReview(record,source){
     const review=record.documentReviews?.[source.key];
@@ -50,7 +54,7 @@
       if(Number(record.overtimeHours||0)!==0||!previousBlock){record.overtimeHours=0;record.manualOverride=false;}
       record.documentBlockNote=sources.some(s=>s.blockByDefault)
         ?'Klaim lembur tidak diperkenankan karena ada Cuti yang berlaku atau Surat Tugas yang dipertanggungjawabkan, meskipun presensi tercatat WFO.'
-        :'Klaim lembur tidak diberikan berdasarkan keputusan verifikasi dokumen per periode.';
+        :'Klaim lembur tidak diberikan berdasarkan penyesuaian dokumen per periode.';
     }else{
       if(previousBlock){record.overtimeHours=Number(record.originalOvertimeHours||0);record.manualOverride=false;}
       record.documentBlockNote='';
@@ -129,10 +133,10 @@
     if(policy.stale.length)throw new Error('Keputusan Register mengenai Cuti/Surat Tugas berubah. Verifikasi ulang Register sebelum memproses lembur.');
     const leaves=new Map(),assignments=new Map();
     cuti.flatMap(s=>s.docs).forEach(d=>{const x=d.data()||{};
-      leaves.set(d.id,{id:d.id,employeeId:String(x.employeeId||''),startDate:String(x.startDate||''),endDate:String(x.endDate||x.startDate||''),leaveType:String(x.leaveType||'Cuti'),documentNumber:String(x.documentNumber||'')});
+      leaves.set(d.id,{id:d.id,employeeId:String(x.employeeId||''),startDate:String(x.startDate||''),endDate:String(x.endDate||x.startDate||''),leaveType:String(x.leaveType||'Cuti'),documentNumber:String(x.documentNumber||''),documents:Array.isArray(x.documents)?x.documents:[]});
     });
     st.flatMap(s=>s.docs).forEach(d=>{const x=d.data()||{};
-      assignments.set(d.id,{id:d.id,employeeIds:(x.employees||[]).map(e=>String(e.employeeId||e.id||'')).filter(Boolean),startDate:String(x.startDate||''),endDate:String(x.endDate||x.startDate||''),accountable:x.accountable!==false,letterNumber:String(x.letterNumber||'')});
+      assignments.set(d.id,{id:d.id,employeeIds:(x.employees||[]).map(e=>String(e.employeeId||e.id||'')).filter(Boolean),startDate:String(x.startDate||''),endDate:String(x.endDate||x.startDate||''),accountable:x.accountable!==false,letterNumber:String(x.letterNumber||''),documents:Array.isArray(x.documents)?x.documents:[]});
     });
     return {leaves:[...leaves.values()],assignments:[...assignments.values()],policy};
   }
