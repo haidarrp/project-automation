@@ -45,11 +45,13 @@
   }
   throw new Error(`Berkas ${label} tidak tersedia: ${attachmentLabel(item)}. Periksa unggahan atau akses SharePoint.`);
  }
- function supportingDocuments(employee){
+ function supportingDocuments(employee,policy){
   const documents=[],missing=[],seen=new Set(),seenMissing=new Set();
   for(const day of Object.values(employee.days||{})){
-   for(const [kind,records] of [['Cuti',day.leaves||[]],['Surat_Tugas',day.assignments||[]]]){
+   for(const [kind,records] of [['Cuti',day.previewLeaves||day.leaves||[]],['Surat_Tugas',day.previewAssignments||day.assignments||[]]]){
     for(const record of records){
+     const kindKey=kind==='Cuti'?'cuti':'surat';
+     if(!policy.exportable(kindKey,record,employee.id))continue;
      for(const doc of record.documents||[]){
       const file=doc?.file||{};
       // Metadata dokumen tanpa berkas digital dicatat sebagai kekurangan,
@@ -78,6 +80,8 @@
   if(!window.JSZip)throw new Error('Pustaka ZIP belum tersedia.');
   if(!window.UangMakanExport?.generate)throw new Error('Generator Excel Uang Makan belum tersedia.');
   if(!Array.isArray(employees)||!employees.length)throw new Error('Belum ada data pegawai untuk diunduh.');
+  const policy=await window.AttendanceDocumentPolicy.fetch([year-1,year]);
+  if(policy.stale.length)throw new Error('Ada verifikasi Register yang perlu diperbarui sebelum mengekspor ZIP Uang Makan.');
   const recap=await window.UangMakanExport.generate(year,month,employees,{holidays:options.holidays||[],download:false});
   const zip=new window.JSZip();
   zip.file(safeFileName(recap.filename,'Rekap_Uang_Makan.xlsx'),await zipBinary(recap.blob));
@@ -100,7 +104,7 @@
     attendanceCount++;
     options.onProgress?.({employee:employee.name,attendanceCount,evidenceCount});
    }
-   const supporting=supportingDocuments(employee);
+   const supporting=supportingDocuments(employee,policy);
    for(const doc of supporting.documents){
     const binary=await resolveBinary(doc.file,cache,`bukti dukung ${employee.name}`);
     folder.file(uniqueName(usedNames,attachmentLabel(doc.file,'Bukti Dukung'),'Bukti Dukung'),await zipBinary(binary));

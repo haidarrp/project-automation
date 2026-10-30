@@ -66,8 +66,8 @@ service cloud.firestore {
     function anyLemburView() {
       return canView('lembur','dashboard') || canView('lembur','process') || canView('lembur','history');
     }
-    function canReadLeave() { return anyRegisterView() || anyLeaveView() || canView('tukin','process') || canView('uangMakan','process'); }
-    function canReadAssignments() { return anyRegisterView() || anyAssignmentView() || canView('tukin','process') || canView('uangMakan','process'); }
+    function canReadLeave() { return anyRegisterView() || anyLeaveView() || anyTukinView() || anyUangMakanView(); }
+    function canReadAssignments() { return anyRegisterView() || anyAssignmentView() || anyTukinView() || anyUangMakanView(); }
     function canReadDirectory() {
       return isAdmin() || anyRegisterView() || anyLeaveView() || anyAssignmentView() || anyTrainingView() || anyUangMakanView();
     }
@@ -303,6 +303,7 @@ service cloud.firestore {
         && request.resource.data.get('endDate','') is string
         && request.resource.data.get('fingerprint','') is string
         && request.resource.data.get('workflow','') in ['pending','awaiting','verified']
+        && request.resource.data.get('selectedSourceKeys',[]) is list
         && request.resource.data.get('note','') is string
         && request.resource.data.get('sourceRefs',[]) is list
         && request.resource.data.get('actualDates',[]) is list
@@ -310,7 +311,7 @@ service cloud.firestore {
         && request.resource.data.get('updatedByEmail','') == request.auth.token.email;
     }
     match /attendanceCases/{caseId} {
-      allow read: if anyRegisterView();
+      allow read: if anyRegisterView() || anyTukinView() || anyUangMakanView();
       allow create: if canDo('register','cases','create') && validAttendanceCase()
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.createdByEmail == request.auth.token.email
@@ -326,7 +327,7 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'kind','year','employeeId','startDate','endDate','sourceKey','sourceRefs',
           'fingerprint','workflow','realization','actualStart','actualEnd',
-          'actualStartTime','actualEndTime','actualDates','clarifiedBy','evidence','note',
+          'actualStartTime','actualEndTime','actualDates','clarifiedBy','evidence','note','selectedSourceKeys',
           'updatedAt','updatedByUid','updatedByEmail','verifiedAt','verifiedByUid','verifiedByEmail'
         ])
         && (request.resource.data.workflow == 'verified'

@@ -285,6 +285,10 @@
   }
 
   async function generateZip(employees, period) {
+    const range=rules.attendancePeriod(period);
+    const years=[...new Set([range.start.getFullYear(),range.end.getFullYear()])];
+    const policy=await window.AttendanceDocumentPolicy.fetch(years);
+    if(policy.stale.length)throw new Error('Ada verifikasi Register yang kedaluwarsa. Lakukan verifikasi ulang sebelum ekspor.');
     if (!window.JSZip) throw new Error('Library JSZip belum termuat.');
     const recap = await generateRecap(employees, period);
     const zip = new JSZip();
@@ -301,6 +305,11 @@
       const seenAutomaticEvidence = new Set();
       for (const record of Object.values(employee.records || {})) {
         for (const evidence of record.evidence || []) {
+          const empId=String(employee.masterEmployeeId||employee.id||'');
+          const leaveId=evidence?.cutiEvidence?.leaveId;
+          const assignmentId=evidence?.assignmentEvidence?.assignmentId;
+          if(leaveId&&!policy.allows('cuti',leaveId,empId))continue;
+          if(assignmentId&&!policy.exportable('surat',{id:assignmentId},empId))continue;
           const evidenceKey = automaticEvidenceKey(evidence);
           if (evidenceKey && seenAutomaticEvidence.has(evidenceKey)) continue;
           if (evidenceKey) seenAutomaticEvidence.add(evidenceKey);

@@ -5,7 +5,7 @@
  const now=new Date();
  const state={year:now.getFullYear(),month:now.getMonth()+1,view:'dashboard',loading:true,busy:false,error:'',notice:'',employees:new Map(),sources:[],records:[],recons:[],logs:[],modal:null,search:'',filter:'all'};
  const VIEWS={dashboard:'Dashboard',cases:'Konflik & Realisasi',reconcile:'Rekonsiliasi',history:'Riwayat Klarifikasi'};
- const STATUS={pending:'Belum ditindaklanjuti',awaiting:'Menunggu klarifikasi',verified:'Telah diverifikasi',closed:'Ditutup'};
+ const STATUS={pending:'Belum Verifikasi',awaiting:'Belum Verifikasi',verified:'Sudah Verifikasi',closed:'Sudah Verifikasi'};
  const REAL={unknown:'Belum dikonfirmasi',done:'Terlaksana',cancelled:'Tidak terlaksana/dilaporkan batal',partial:'Terlaksana sebagian',rescheduled:'Jadwal berubah',leave_not_taken:'Cuti tidak diambil'};
  const KIND={cuti_surat:'Cuti dan Surat Tugas beririsan',surat_ganda:'Beberapa Surat Tugas beririsan',cuti_ganda:'Beberapa Cuti beririsan',realization:'Pelaporan realisasi'};
  const $=s=>document.querySelector(s);
@@ -21,7 +21,7 @@
  const empName=id=>state.employees.get(String(id))?.name || state.employees.get(String(id))?.fullName || String(id);
  const recordMap=()=>new Map(state.records.map(r=>[r.key,r]));
  const sourceMap=()=>new Map(state.sources.map(s=>[s.key,s]));
- const proof=(r)=>String(r.clarifiedBy||'').trim() && String(r.note||'').trim();
+ 
  function dateYear(s){return Number(String(s||'').slice(0,4))||state.year;}
  function sourceLabel(s){return `${s.type==='cuti'?'Cuti':'Surat Tugas'} · ${s.number || s.id} · ${empName(s.employeeId)} · ${formatDate(s.startDate)}–${formatDate(s.endDate)}`;}
  function allRows(){
@@ -45,7 +45,7 @@
  function reconcileState(){
    const rec=state.recons.find(r=>r.id===period());
    const rows=allRows();
-   const fp=E.reconciliationFingerprint(state.sources,rows.map(r=>({key:r.key,startDate:r.startDate,endDate:r.endDate,fingerprint:r.fingerprint,workflow:r.workflow,realization:r.record?.realization||'',note:r.record?.note||'',at:r.record?.updatedAt?.seconds||''})),state.year,state.month);
+   const fp=E.reconciliationFingerprint(state.sources,rows.map(r=>({key:r.key,startDate:r.startDate,endDate:r.endDate,fingerprint:r.fingerprint,workflow:r.workflow,realization:r.record?.realization||'',selection:(r.record?.selectedSourceKeys||[]).join('|'),note:r.record?.note||'',at:r.record?.updatedAt?.seconds||''})),state.year,state.month);
    const changed=!!rec&&rec.fingerprint!==fp;
    return {rec,fp,changed,rows,open:rows.filter(r=>!['verified','closed'].includes(r.workflow)).length,
      sources:state.sources.filter(inPeriod).length};
@@ -59,7 +59,7 @@
    <section class="card rg-card"><h2>Rekonsiliasi ${esc(period())}</h2><div class="rg-status ${recon.changed?'rg-warn':recon.rec?.status==='complete'?'rg-ok':'rg-warn'}">${recon.changed?'Perlu ditinjau ulang — data berubah':recon.rec?.status==='complete'?'Selesai direkonsiliasi':'Belum selesai direkonsiliasi'}</div><dl class="rg-dl"><dt>Entri dokumen per pegawai</dt><dd>${recon.sources}</dd><dt>Kasus belum selesai</dt><dd>${recon.open}</dd><dt>Rekonsiliasi terakhir</dt><dd>${esc(recon.rec?.reviewedAt?fmt(recon.rec.reviewedAt):'-')}</dd></dl><p class="rg-muted">Status rekonsiliasi mencatat hasil pemeriksaan TU, bukan jaminan bahwa seluruh surat resmi sudah masuk ke aplikasi.</p><a class="btn btn-primary" href="#reconcile">Buka Rekonsiliasi</a></section></div>`;
  }
  function rowCompact(row){return `<button class="rg-compact" data-open="${esc(row.key)}" type="button"><span><b>${esc(empName(row.employeeId))}</b><small>${esc(KIND[row.kind]||row.kind)} · ${formatDate(row.startDate)}</small></span>${statusPill(row)}</button>`;}
- function statusPill(row){return `<span class="rg-pill ${row.workflow==='stale'?'rg-pill-warn':['verified','closed'].includes(row.workflow)?'rg-pill-ok':row.workflow==='awaiting'?'rg-pill-warn':'rg-pill-gray'}">${esc(row.workflow==='stale'?'Perlu verifikasi ulang':STATUS[row.workflow]||STATUS.pending)}</span>`;}
+ function statusPill(row){return `<span class="rg-pill ${row.workflow==='stale'?'rg-pill-warn':['verified','closed'].includes(row.workflow)?'rg-pill-ok':row.workflow==='awaiting'?'rg-pill-warn':'rg-pill-gray'}">${esc(row.workflow==='stale'?'Belum Verifikasi':STATUS[row.workflow]||STATUS.pending)}</span>`;}
  function cases(){const rows=allRows().filter(row=>{
    if(state.filter==='open'&&['verified','closed'].includes(row.workflow))return false;
    if(state.filter==='conflict'&&row.type!=='conflict')return false;
@@ -86,9 +86,9 @@
  ${m.stale?'<div class="rg-alert rg-alert-warn">Dokumen sumber telah berubah atau tidak ditemukan. Verifikasi sebelumnya tidak lagi dianggap berlaku. Cocokkan kembali dengan sumber resmi.</div>':''}
  <form id="rg-case-form"><input type="hidden" name="caseKey" value="${esc(m.key||'')}"><div class="rg-fields">
  ${!isConflict?`<label class="rg-full"><span>Dokumen dan pegawai *</span><select name="sourceKey" required ${r.key?'disabled':''}><option value="">Pilih dokumen</option>${sourceOptions.map(s=>`<option value="${esc(s.key)}" ${s.key===(m.sourceKey||r.sourceKey)?'selected':''}>${esc(sourceLabel(s))}</option>`).join('')}</select></label><label><span>Realisasi *</span><select name="realization">${Object.entries(REAL).map(([key,label])=>`<option value="${key}" ${r.realization===key?'selected':''}>${esc(label)}</option>`).join('')}</select></label><label><span>Status tindak lanjut</span><input value="${esc(STATUS[r.workflow]||STATUS.pending)}" disabled></label><label><span>Tanggal realisasi mulai</span><input type="date" name="actualStart" value="${esc(r.actualStart||'')}"></label><label><span>Tanggal realisasi akhir</span><input type="date" name="actualEnd" value="${esc(r.actualEnd||'')}"></label><label class="rg-full"><span>Tanggal pelaksanaan tertentu (opsional, untuk realisasi tidak berurutan)</span><input name="actualDates" placeholder="2026-10-12, 2026-10-14" value="${esc((r.actualDates||[]).join(', '))}"></label><label><span>Jam mulai (opsional)</span><input type="time" name="actualStartTime" value="${esc(r.actualStartTime||'')}"></label><label><span>Jam selesai (opsional)</span><input type="time" name="actualEndTime" value="${esc(r.actualEndTime||'')}"></label>`:
- `<label class="rg-full"><span>Status tindak lanjut</span><select name="workflow"><option value="pending" ${r.workflow!=='awaiting'?'selected':''}>Belum ditindaklanjuti</option><option value="awaiting" ${r.workflow==='awaiting'?'selected':''}>Menunggu klarifikasi</option></select></label>`}
- <label class="rg-full"><span>Sumber klarifikasi / pihak yang dikonfirmasi *</span><input name="clarifiedBy" maxlength="240" placeholder="Contoh: atasan langsung, bidang, pegawai, pejabat terkait" value="${esc(r.clarifiedBy||'')}"></label><label class="rg-full"><span>Rujukan atau bukti administrasi</span><input name="evidence" maxlength="300" placeholder="Nomor surat/email/berita acara/konfirmasi (jika ada)" value="${esc(r.evidence||'')}"></label><label class="rg-full"><span>Hasil klarifikasi dan catatan TU *</span><textarea name="note" rows="4" maxlength="2200" placeholder="Jelaskan peristiwa, realisasi, dan dasar tindak lanjut">${esc(r.note||'')}</textarea></label></div>
- <div class="rg-actions"><button type="button" class="btn btn-secondary" data-close-modal>Tutup</button>${mayWrite?'<button type="submit" class="btn btn-secondary" name="intent" value="save">Simpan tindak lanjut</button>':''}${mayVerify?'<button type="submit" class="btn btn-primary" name="intent" value="verify">Simpan & verifikasi TU</button>':''}</div></form><p class="rg-muted">Verifikasi TU merupakan pencatatan administratif, bukan pembatalan formal keputusan pejabat atau penetapan otomatis hak keuangan.</p></div></section></div>`;
+ `<div class="rg-full"><strong>Dokumen yang ditetapkan</strong><p class="rg-muted">Centang satu atau beberapa dokumen yang berlaku. Dokumen tidak dicentang tetap tersimpan dan dapat dipilih kembali, tetapi tidak ikut perhitungan/ekspor setelah verifikasi.</p><label class="rg-select-all"><input type="checkbox" data-select-all ${(!Array.isArray(r.selectedSourceKeys)||m.sources.every(s=>r.selectedSourceKeys.includes(s.key)))?'checked':''}> Pilih semua</label>${m.sources.map(s=>`<label class="rg-select-doc"><input type="checkbox" name="selectedSourceKeys" value="${esc(s.key)}" ${!Array.isArray(r.selectedSourceKeys)||r.selectedSourceKeys.includes(s.key)?'checked':''}>${esc(sourceLabel(s))}</label>`).join('')}</div>`}
+ <label class="rg-full"><span>Catatan (opsional)</span><textarea name="note" rows="3" maxlength="2200" placeholder="Catatan tambahan apabila diperlukan">${esc(r.note||'')}</textarea></label></div>
+ <div class="rg-actions"><button type="button" class="btn btn-secondary" data-close-modal>Tutup</button>${mayWrite?'<button type="submit" class="btn btn-secondary" name="intent" value="save">Simpan — Belum Verifikasi</button>':''}${mayVerify?'<button type="submit" class="btn btn-primary" name="intent" value="verify">Simpan — Sudah Verifikasi</button>':''}</div></form><p class="rg-muted">Verifikasi TU merupakan pencatatan administratif, bukan pembatalan formal keputusan pejabat atau penetapan otomatis hak keuangan.</p></div></section></div>`;
  }
  function render(){
    if(!app)return;const content=state.loading?'<div class="card rg-card">Memuat data dokumen dan pemeriksaan register...</div>':
@@ -130,8 +130,9 @@
    const needsUpdate=Boolean(old.key);
    if(verify&&!can('cases.verify'))throw new Error('Tidak memiliki izin verifikasi TU.');
    if(!verify&&!can(needsUpdate?'cases.edit':'cases.create'))throw new Error('Tidak memiliki izin menyimpan tindak lanjut.');
-   const note=String(values.note||'').trim(),clarifiedBy=String(values.clarifiedBy||'').trim();
-   if(verify&&(!note||!clarifiedBy))throw new Error('Verifikasi memerlukan catatan hasil klarifikasi dan sumber klarifikasi.');
+   const note=String(values.note||'').trim();
+   const selectedSourceKeys=isConflict?[...new FormData(form).getAll('selectedSourceKeys')]:[];
+   if(isConflict&&verify&&!selectedSourceKeys.length)throw new Error('Pilih sekurang-kurangnya satu dokumen untuk diverifikasi.');
    const actualDates=String(values.actualDates||'').split(',').map(v=>v.trim()).filter(Boolean);
    if(actualDates.some(v=>!E.iso(v)))throw new Error('Daftar tanggal realisasi harus berformat YYYY-MM-DD dan dipisahkan koma.');
    const uniqueDates=[...new Set(actualDates)].sort();
@@ -147,11 +148,11 @@
      startDate:m.startDate||src.startDate,endDate:m.endDate||src.endDate,
      sourceKey:isConflict?'':src.key, sourceRefs:sourceList.map(s=>({type:s.type,id:s.id,employeeId:s.employeeId,number:s.number,startDate:s.startDate,endDate:s.endDate})),
      fingerprint:isConflict?m.fingerprint:src.fingerprint,
-     workflow:verify?'verified':isConflict?(values.workflow==='awaiting'?'awaiting':'pending'):'pending',
+     workflow:verify?'verified':'pending',selectedSourceKeys:isConflict?selectedSourceKeys:[],
      realization:isConflict?'':String(values.realization||'unknown'),
      actualStart:isConflict?'':String(values.actualStart||''),actualEnd:isConflict?'':String(values.actualEnd||''),
      actualStartTime:isConflict?'':String(values.actualStartTime||''),actualEndTime:isConflict?'':String(values.actualEndTime||''),actualDates:isConflict?[]:uniqueDates,
-     clarifiedBy,evidence:String(values.evidence||'').trim(),note,
+     clarifiedBy:'',evidence:'',note,
      updatedAt:ts(),updatedByUid:actor().uid,updatedByEmail:actor().email||'',
      verifiedAt:verify?nowIso:'',verifiedByUid:verify?actor().uid:'',verifiedByEmail:verify?(actor().email||''):''};
    const ref=db().collection('attendanceCases').doc(await caseId(key)),batch=db().batch();
@@ -159,7 +160,7 @@
    batch.set(ref,payload,{merge:needsUpdate});
    batch.set(db().collection('attendanceCaseLogs').doc(),{
      year:payload.year,caseKey:key,kind:payload.kind,employeeId:payload.employeeId,action:verify?'Verifikasi TU':needsUpdate?'Perbarui tindak lanjut':'Catat kasus/realisasi',
-     detail:`${note.slice(0,750)}${payload.evidence?' | Bukti: '+payload.evidence.slice(0,200):''}`,
+     detail:`${note.slice(0,650)}${isConflict?' | Dokumen dipilih: '+selectedSourceKeys.join(', ').slice(0,300):''}`, 
      actorUid:actor().uid,actorEmail:actor().email||'',at:nowIso,createdAt:ts()});
    await batch.commit();state.modal=null;await load();state.notice='Tindak lanjut dan riwayat berhasil disimpan.';render();
  }
@@ -182,6 +183,7 @@
  function nav(){const v=String(location.hash||'').replace('#','').split('?')[0];state.view=VIEWS[v]&&can(`${v}.view`)?v:(Object.keys(VIEWS).find(k=>can(`${k}.view`))||'dashboard');state.modal=null;render();}
  app.addEventListener('click',e=>{
   const close=e.target.closest('[data-close-modal]');if(close&&(e.target===close||close.tagName==='BUTTON')){state.modal=null;render();return;}
+  const all=e.target.closest('[data-select-all]');if(all){app.querySelectorAll('[name=selectedSourceKeys]').forEach(x=>{x.checked=all.checked;});return;}
   const open=e.target.closest('[data-open]');if(open){openCase(open.dataset.open);return;}
   if(e.target.closest('[data-new-realization]')){newRealization();return;}
   if(e.target.closest('[data-export]')){exportCsv();return;}
@@ -190,6 +192,7 @@
   if(e.target.id==='rg-year'){state.year=Number(e.target.value);state.modal=null;load();}
   if(e.target.id==='rg-month'){const [y,m]=e.target.value.split('-').map(Number);if(y!==state.year){state.year=y;state.month=m;load();}else{state.month=m;render();}}
   if(e.target.id==='rg-filter'){state.filter=e.target.value;render();}
+  if(e.target.name==='selectedSourceKeys'){const boxes=[...app.querySelectorAll('[name=selectedSourceKeys]')];const all=app.querySelector('[data-select-all]');if(all)all.checked=boxes.every(x=>x.checked);}
  });
  app.addEventListener('input',e=>{
   if(e.target.id==='rg-search'){state.search=e.target.value;const pos=e.target.selectionStart;render();const field=$('#rg-search');if(field){field.focus();field.setSelectionRange(pos,pos);}}

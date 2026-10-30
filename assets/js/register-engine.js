@@ -10,7 +10,7 @@
   function overlaps(a, b) { return iso(a.startDate) && iso(a.endDate) && iso(b.startDate) && iso(b.endDate) && a.startDate <= b.endDate && b.startDate <= a.endDate; }
   function hash(text) { let n = 2166136261; for (const ch of String(text)) { n ^= ch.charCodeAt(0); n = Math.imul(n, 16777619); } return (n >>> 0).toString(16).padStart(8, '0'); }
   function fingerprint(row) {
-    return hash(JSON.stringify([row.type, row.id, row.employeeId, row.startDate, row.endDate, row.number, row.activity, row.updatedAt || '', row.documentDate || '']));
+    return hash(JSON.stringify([row.type, row.id, row.employeeId, row.startDate, row.endDate, row.number, row.activity, row.updatedAt || '', row.documentDate || '', row.type==='surat'?row.accountable!==false:'']));
   }
   function makeSources(leaves, assignments) {
     const list = [];
@@ -31,7 +31,7 @@
         seen.add(employeeId);
         const item = { type:'surat', id:String(row.id || ''), employeeId, startDate:row.startDate, endDate:row.endDate,
           number:String(row.letterNumber || ''), activity:String(row.activity || 'Surat tugas'), documentDate:String(row.letterDate || ''),
-          updatedAt:timestamp(row.updatedAt), label:`ST ${row.letterNumber || row.id || ''}` };
+          updatedAt:timestamp(row.updatedAt), accountable:row.accountable!==false, label:`ST ${row.letterNumber || row.id || ''}` };
         item.key = keyFor(item); item.fingerprint = fingerprint(item); list.push(item);
       }
     }
@@ -69,7 +69,7 @@
   }
   function reconciliationFingerprint(sources, records, year, month) {
     const part=(sources || []).filter(s=>inPeriod(s,year,month)).map(s=>`${s.key}/${s.fingerprint}`).sort();
-    const active=(records || []).filter(r=>r.startDate && inPeriod(r,year,month)).map(r=>`${r.key}/${r.fingerprint}/${r.workflow || ''}/${r.realization || ''}`).sort();
+    const active=(records || []).filter(r=>r.startDate && inPeriod(r,year,month)).map(r=>`${r.key}/${r.fingerprint}/${r.workflow || ''}/${r.realization || ''}/${r.selection || ''}`).sort();
     return hash(JSON.stringify([year,month,part,active]));
   }
   return Object.freeze({iso, overlaps, hash, fingerprint, makeSources, conflicts, inPeriod, reconciliationFingerprint});

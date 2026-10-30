@@ -198,6 +198,7 @@
       location: String(row.location || ''),
       note: String(row.note || ''),
       assignmentType: normalizeAssignmentType(row.assignmentType, row.adjustmentType),
+      accountable: row.accountable !== false,
       adjustmentType: String(row.adjustmentType || 'official_duty'),
       adjustmentPercent: Number.isFinite(Number(row.adjustmentPercent)) ? Number(row.adjustmentPercent) : 0,
       documents: (Array.isArray(row.documents) ? row.documents : []).map(normalizeDocument)
@@ -364,7 +365,7 @@
         <div class="field span-2"><label for="assignment-activity">Kegiatan / Keperluan</label><input id="assignment-activity" type="text" value="${esc(item.activity || '')}" placeholder="Contoh: Rapat Koordinasi ..."></div>
         <div class="field"><label for="assignment-location">Lokasi / Tujuan</label><input id="assignment-location" type="text" value="${esc(item.location || '')}" placeholder="Opsional"></div>
         <div class="field"><label for="assignment-type">Jenis Penugasan</label><select id="assignment-type"><option value="official_travel" ${normalizeAssignmentType(item.assignmentType, item.adjustmentType) === 'official_travel' ? 'selected' : ''}>Dinas Luar / Perjalanan Dinas</option><option value="work_arrangement" ${normalizeAssignmentType(item.assignmentType, item.adjustmentType) === 'work_arrangement' ? 'selected' : ''}>Pengaturan Kerja</option><option value="other" ${normalizeAssignmentType(item.assignmentType, item.adjustmentType) === 'other' ? 'selected' : ''}>Lainnya</option></select><div class="assignment-field-note">Dinas Luar / Perjalanan Dinas dapat menyesuaikan potongan menjadi 0% secara otomatis. Pengaturan Kerja dan Lainnya hanya menjadi data pendukung dan tidak mengubah persentase otomatis.</div></div>
-        <div class="field span-2"><label for="assignment-note">Keterangan</label><textarea id="assignment-note" rows="3" placeholder="Opsional">${esc(item.note || '')}</textarea></div>
+        <div class="field span-2"><label class="assignment-accountable"><input type="checkbox" id="assignment-accountable" ${item.accountable!==false?'checked':''}> Surat Tugas dipertanggungjawabkan untuk administrasi kehadiran/Tukin</label><div class="assignment-field-note">Jika tidak dicentang, Surat Tugas tetap terlihat pada pratinjau, tetapi tidak dihitung sebagai dasar penyesuaian Tukin dan tidak dimasukkan dalam ZIP bukti dukung. Pegawai tetap wajib presensi sesuai ketentuan.</div></div><div class="field span-2"><label for="assignment-note">Keterangan</label><textarea id="assignment-note" rows="3" placeholder="Opsional">${esc(item.note || '')}</textarea></div>
         <div class="field span-2"><label for="assignment-file">Berkas Surat Tugas${currentFile?.itemId ? ' <span class="assignment-sub">(pilih file baru untuk mengganti)</span>' : ''}</label><input class="assignment-file-input" id="assignment-file" type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png">${currentFileMarkup}<div class="assignment-field-note">File disimpan pada folder SURAT_TUGAS di SharePoint. PDF dan gambar dapat dipreview langsung sebelum disimpan.</div><div id="assignment-local-preview"></div></div>
       </div>
       <div class="assignment-modal-actions"><button class="btn btn-secondary" type="button" data-action="close-assignment-modal">Batal</button><button class="btn btn-primary" type="button" data-action="save-assignment">Simpan</button></div>
@@ -412,7 +413,7 @@
     const status = statusOf(item);
     return `<div class="assignment-detail-backdrop" data-action="close-assignment-detail"></div><section class="assignment-detail-modal" role="dialog" aria-modal="true" aria-label="Detail Surat Tugas">
       <div class="assignment-modal-head assignment-detail-head"><div><h3>${esc(item.letterNumber || 'Surat Tugas')}</h3><p>${esc(item.activity || 'Detail penugasan/dinas pegawai.')}</p></div><button class="icon-btn" type="button" data-action="close-assignment-detail">×</button></div>
-      <div class="assignment-section"><div class="assignment-section-title">Informasi Surat Tugas</div><div class="assignment-detail-grid"><div><span>Nomor Surat</span><strong>${esc(item.letterNumber || '—')}</strong></div><div><span>Tanggal Surat</span><strong>${esc(formatDate(item.letterDate))}</strong></div><div><span>Status</span><strong>${esc(status.label)}</strong></div><div><span>Jenis Penugasan</span><strong>${esc(assignmentTypeLabel(item.assignmentType))}</strong></div><div><span>Tanggal Mulai</span><strong>${esc(formatDate(item.startDate))}</strong></div><div><span>Tanggal Selesai</span><strong>${esc(formatDate(item.endDate))}</strong></div><div class="span-2"><span>Lokasi / Tujuan</span><strong>${esc(item.location || '—')}</strong></div><div class="span-all"><span>Kegiatan / Keperluan</span><strong>${esc(item.activity || '—')}</strong></div><div class="span-all"><span>Keterangan</span><strong>${esc(item.note || '—')}</strong></div></div></div>
+      <div class="assignment-section"><div class="assignment-section-title">Informasi Surat Tugas</div><div class="assignment-detail-grid"><div><span>Nomor Surat</span><strong>${esc(item.letterNumber || '—')}</strong></div><div><span>Tanggal Surat</span><strong>${esc(formatDate(item.letterDate))}</strong></div><div><span>Status</span><strong>${esc(status.label)}</strong></div><div><span>Jenis Penugasan</span><strong>${esc(assignmentTypeLabel(item.assignmentType))}</strong></div><div><span>Dipertanggungjawabkan</span><strong>${item.accountable===false?'Tidak — hanya pratinjau':'Ya'}</strong></div><div><span>Tanggal Mulai</span><strong>${esc(formatDate(item.startDate))}</strong></div><div><span>Tanggal Selesai</span><strong>${esc(formatDate(item.endDate))}</strong></div><div class="span-2"><span>Lokasi / Tujuan</span><strong>${esc(item.location || '—')}</strong></div><div class="span-all"><span>Kegiatan / Keperluan</span><strong>${esc(item.activity || '—')}</strong></div><div class="span-all"><span>Keterangan</span><strong>${esc(item.note || '—')}</strong></div></div></div>
       <div class="assignment-section"><div class="assignment-section-title">Pegawai yang Ditugaskan (${people.length})</div><div class="assignment-people-list">${people.length ? people.map((person) => `<div class="assignment-people-item"><strong>${esc(person.name || 'Pegawai')}</strong><span>${person.nip ? `NIP ${esc(person.nip)} · ` : ''}${esc(person.unit || 'Unit/Bidang belum diisi')}</span></div>`).join('') : '<div class="assignment-empty"><strong>Belum ada pegawai</strong>Record ini belum memiliki pegawai.</div>'}</div></div>
       <div class="assignment-section"><div class="assignment-section-title">Berkas Surat Tugas</div>${doc ? `<article class="assignment-document-card"><div class="assignment-document-row"><div><strong>${esc(file?.name || doc.name || 'Surat Tugas')}</strong><span>${esc(doc.type || 'Surat Tugas')}${file?.size ? ` · ${esc(formatFileSize(file.size))}` : ''}</span></div><div class="assignment-row-actions">${file?.itemId ? `<button class="btn btn-secondary btn-sm" type="button" data-download-assignment-document="${esc(doc.id)}" data-assignment-id="${esc(item.id)}">Unduh</button><button class="btn btn-secondary btn-sm" type="button" data-preview-assignment-document="${esc(doc.id)}" data-assignment-id="${esc(item.id)}">Preview Besar</button>${file.webUrl ? `<a class="btn btn-secondary btn-sm" href="${esc(file.webUrl)}" target="_blank" rel="noopener noreferrer">SharePoint ↗</a>` : ''}` : ''}</div></div>${inlinePreviewMarkup(item, doc)}</article>` : '<div class="assignment-empty"><strong>Berkas belum tersedia</strong>Edit Surat Tugas untuk mengunggah file.</div>'}</div>
       <div class="assignment-modal-actions" style="justify-content:space-between"><button class="btn btn-danger" type="button" data-assignment-delete="${esc(item.id)}">Hapus</button><div class="assignment-row-actions"><button class="btn btn-secondary" type="button" data-action="close-assignment-detail">Tutup</button><button class="btn btn-primary" type="button" data-assignment-edit="${esc(item.id)}">Edit Data</button></div></div>
@@ -559,6 +560,7 @@
     const assignmentType = normalizeAssignmentType(document.getElementById('assignment-type')?.value || 'official_travel');
     const locationText = String(document.getElementById('assignment-location')?.value || '').trim();
     const note = String(document.getElementById('assignment-note')?.value || '').trim();
+    const accountable = Boolean(document.getElementById('assignment-accountable')?.checked);
     const selectedFile = document.getElementById('assignment-file')?.files?.[0] || null;
     const existing = state.modal.record || {};
     const existingDoc = primaryDocument(existing);
@@ -580,7 +582,7 @@
       const identity = employeeIdentity(employeeId);
       return { employeeId, name: identity.name, nip: identity.nip, unit: identity.unit };
     });
-    const draft = { id, letterNumber, letterDate, startDate, endDate, assignmentYear, employees, assignmentType, activity, location: locationText, note };
+    const draft = { id, letterNumber, letterDate, startDate, endDate, assignmentYear, employees, assignmentType, accountable, activity, location: locationText, note };
     let storedFile = existingFile ? { ...existingFile } : null;
     let uploadedFile = null;
     let firestoreSaved = false;
@@ -611,7 +613,7 @@
 
       const payload = {
         letterNumber, letterDate, startDate, endDate, assignmentYear,
-        employees, assignmentType, activity, location: locationText, note,
+        employees, assignmentType, accountable, activity, location: locationText, note,
         // Disimpan untuk kompatibilitas data lama. Mesin Tukin memakai assignmentType
         // sebagai business rule utama mulai schemaVersion 2.
         adjustmentType: assignmentType === 'official_travel' ? 'official_duty' : 'manual_review',

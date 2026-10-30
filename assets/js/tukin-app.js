@@ -325,6 +325,7 @@
         ? 'Akun yang digunakan tidak memiliki hak baca terhadap data Cuti/Surat Tugas.'
         : (error?.message || String(error));
       state.supportIntegration = { status: 'error', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, message: permissionMessage };
+      if(opts.strict)throw error;
       return null;
     } finally {
       if (opts.render !== false) render();
@@ -532,7 +533,7 @@
         <td>${esc(record.pswCategory)}<div class="card-subtitle">${pct(record.pswPercent)}</div></td>
         <td class="tukin-pct">${pct(record.autoTotalPercent)}</td>
         <td class="tukin-pct ${type === 'adjusted' ? 'tukin-ok' : ''}">${pct(rules.recordFinalPercent(record))}${adjustmentLabel(record) ? `<div class="card-subtitle">${esc(adjustmentLabel(record))}</div>` : ''}</td>
-        <td><span class="tukin-calendar-status ${type}">${esc(calendarTypeText(type))}</span><div class="tukin-reason">${esc(note)}</div>${record.cutiAdjustment?.automatic ? `<div class="tukin-cuti-ref"><span class="tukin-badge edit">Data Cuti</span><span>${esc(record.cutiAdjustment.leaveType || 'Cuti')}</span></div>` : ''}${assignmentReferenceMarkup(record)}${(record.evidence || []).length ? `<div class="tukin-files">${record.evidence.map((evidence) => `${esc(evidence.name)} ${attachmentOpenLink(evidence, 'Buka')}`).join('<br>')}</div>` : ''}</td>
+        <td><span class="tukin-calendar-status ${type}">${esc(calendarTypeText(type))}</span><div class="tukin-reason">${esc(note)}</div>${record.cutiAdjustment?.automatic ? `<div class="tukin-cuti-ref"><span class="tukin-badge edit">Data Cuti</span><span>${esc(record.cutiAdjustment.leaveType || 'Cuti')}</span></div>` : ''}${assignmentReferenceMarkup(record)}${(record.evidence || []).length ? `<div class="tukin-files">${record.evidence.map((evidence) => `${esc(evidence.name)} ${attachmentOpenLink(evidence, 'Buka')}`).join('<br>')}</div>` : ''}${(record.nonExportDocuments||[]).length?`<div class="tukin-files" style="color:#a45b14">Hanya pratinjau (tidak diekspor): ${record.nonExportDocuments.map(x=>`${esc(x.kind)} ${esc(x.number)} — ${esc(x.reason)}${/^https:\/\//i.test(x.fileUrl||'')?` <a href="${esc(x.fileUrl)}" target="_blank" rel="noopener noreferrer">Lihat dokumen</a>`:''}`).join('; ')}</div>`:''}</td>
         <td><button class="btn btn-secondary btn-sm" type="button" data-calendar-day="${esc(key)}">Lihat</button><button class="btn btn-secondary btn-sm" type="button" data-edit-record="${esc(key)}" data-employee="${esc(rules.employeeKey(employee))}">Edit</button></td>
       </tr>`;
     }).join('');
@@ -753,7 +754,7 @@
       state.validationResults = result.results;
       state.employees = result.employees;
       state.employees.forEach((employee) => sharePoint?.normalizeEmployeeAttachments?.(employee));
-      await syncSupportingAdjustments({ render: false });
+      await syncSupportingAdjustments({ render: false, strict: true });
       if (!state.currentRunId) state.currentRunId = newRunId();
       state.step = 'validation';
       resources?.warm?.(['exceljs', 'jszip', 'filesaver']);
@@ -823,7 +824,7 @@
 
       // Simpan = sinkronkan data Cuti & Surat Tugas terbaru, salin file ke SharePoint, buat rekap,
       // lalu simpan state perhitungan ke Firestore. Tidak ada download ke perangkat.
-      await syncSupportingAdjustments({ render: false });
+      await syncSupportingAdjustments({ render: false, strict: true });
       await sharePoint?.ensureReady?.(true);
 
       const draftRun = {
@@ -896,7 +897,7 @@
       // Download = gunakan kondisi data yang sedang tampil dan ambil paket ZIP ke
       // perangkat. Aksi ini tidak menyimpan ulang Firestore maupun menyalin file ke
       // folder run SharePoint.
-      await syncSupportingAdjustments({ render: false });
+      await syncSupportingAdjustments({ render: false, strict: true });
       await resources?.ensure?.(['exceljs', 'jszip', 'filesaver']);
       state.generated = await generator.generateZip(state.employees, state.period);
       generator.download(state.generated);
@@ -998,7 +999,7 @@
       state.validationResults = parsed.results;
       state.files = downloadedFiles;
       state.generated = null;
-      await syncSupportingAdjustments({ render: false });
+      await syncSupportingAdjustments({ render: false, strict: true });
       alert('File absensi terbaru dari SharePoint telah dimuat ulang. Perhitungan otomatis dan integrasi Cuti/Surat Tugas diperbarui; koreksi manual/bukti dukung yang sudah ada dipertahankan berdasarkan tanggal.');
     } catch (error) {
       console.error(error);

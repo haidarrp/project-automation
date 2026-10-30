@@ -29,6 +29,11 @@
        key,inMinutes:d.inMinutes??null,outMinutes:d.outMinutes??null,status:d.status||'',workMode:d.workMode||'',flags:d.flags||[],duplicate:Boolean(d.duplicate),isHoliday:Boolean(d.isHoliday),
        leaves:(d.leaves||[]).map(x=>({id:x.id,leaveType:x.leaveType,documentNumber:x.documentNumber||'',documentDate:x.documentDate||'',
          startDate:x.startDate,endDate:x.endDate,note:x.note||'',documents:sanitizeDocuments(x.documents)})),
+       previewLeaves:(d.previewLeaves||d.leaves||[]).map(x=>({id:x.id,employeeId:x.employeeId||e.id,leaveType:x.leaveType,documentNumber:x.documentNumber||'',documentDate:x.documentDate||'',
+         startDate:x.startDate,endDate:x.endDate,note:x.note||'',documents:sanitizeDocuments(x.documents)})),
+       previewAssignments:(d.previewAssignments||d.assignments||[]).map(x=>({id:x.id,accountable:x.accountable!==false,assignmentType:x.assignmentType,activity:x.activity,letterNumber:x.letterNumber||'',
+         letterDate:x.letterDate||'',location:x.location||'',note:x.note||'',startDate:x.startDate,endDate:x.endDate,
+         employeeIds:x.employeeIds,documents:sanitizeDocuments(x.documents)})),
        assignments:(d.assignments||[]).map(x=>({id:x.id,assignmentType:x.assignmentType,activity:x.activity,letterNumber:x.letterNumber||'',
          letterDate:x.letterDate||'',location:x.location||'',note:x.note||'',startDate:x.startDate,endDate:x.endDate,
          employeeIds:x.employeeIds,documents:sanitizeDocuments(x.documents)})),
@@ -49,7 +54,7 @@
    const meta={year,month,period:`${year}-${String(month).padStart(2,'0')}`,createdAt:new Date().toISOString(),
      ownerUid:a.uid,ownerEmail:a.email,ownerName:a.name,status:'writing',summary,
      holidays:Array.isArray(settings.holidays)?settings.holidays.slice():[],
-     holidayNotes:settings.holidayNotes||{},archiveKey:String(settings.archiveKey||''),schemaVersion:6};
+     holidayNotes:settings.holidayNotes||{},archiveKey:String(settings.archiveKey||''),schemaVersion:7};
    await ref.set(meta);
    try{
      const stored=employees.map(sanitizeEmployee);

@@ -19,6 +19,7 @@ function fixture(){
    assert.equal(employees.length,2);
    return {filename:'Rekap_September.xlsx',blob:new Blob(['Isi rekap Excel'])};
   }},
+  AttendanceDocumentPolicy:{fetch:async()=>({stale:[],exportable:()=>true})},
   SharePointStorage:{downloadAttachment:async (item,interactive)=>{
    assert.equal(interactive,true);
    requested.push(`${item.driveId}:${item.itemId}`);
@@ -140,4 +141,31 @@ test('Nama berkas identik pada absensi, cuti, dan surat tugas tidak saling menim
  assert.equal(await zip.file('Pegawai/Pegawai A/Dokumen (3).pdf').async('string'),'File-tugas');
  const employeeFiles=Object.keys(zip.files).filter(name=>!zip.files[name].dir&&name.startsWith('Pegawai/Pegawai A/'));
  assert.ok(employeeFiles.every(name=>name.split('/').length===3));
+});
+
+test('Dokumen tereliminasi tetap ada dalam metadata pratinjau namun tidak ditambahkan ke ZIP',async()=>{
+ const {gen,window}=fixture();
+ window.AttendanceDocumentPolicy.fetch=async()=>({stale:[],exportable:(kind,row,employeeId)=>!(kind==='surat'&&row.id==='st-eliminated'&&employeeId==='1')});
+ const doc={id:'stfile',file:{name:'ST-dieliminasi.pdf',driveId:'d',itemId:'st-dieliminasi'}};
+ const archived={
+  '2026-09-14':{leaves:[],assignments:[],previewLeaves:[],previewAssignments:[{id:'st-eliminated',documents:[doc]}]}
+ };
+ const data=[employee('Pegawai A','1',{name:'Absen_A.xlsx',file:new Blob(['a'])},archived),
+  employee('Pegawai B','2',{name:'Absen_B.xlsx',file:new Blob(['b'])})];
+ const result=await gen.generate(2026,9,data);
+ const zip=await JSZip.loadAsync(await result.blob.arrayBuffer());
+ assert.equal(result.evidenceCount,0);
+ assert.equal(zip.file('Pegawai/Pegawai A/ST-dieliminasi.pdf'),null);
+ assert.equal(archived['2026-09-14'].previewAssignments.length,1,'Metadata pratinjau tidak dihapus');
+});
+
+test('Surat Tugas tidak dipertanggungjawabkan dihapus dari daftar berkas ZIP',async()=>{
+ const {gen,window}=fixture();
+ window.AttendanceDocumentPolicy.fetch=async()=>({stale:[],exportable:(kind,row)=>kind!=='surat'||row.accountable!==false});
+ const doc={id:'stfile',file:{name:'ST-jalan.pdf',driveId:'d',itemId:'jalan'}};
+ const data=[employee('Pegawai A','1',{name:'Absen_A.xlsx',file:new Blob(['a'])},{
+  '2026-09-14':{assignments:[{id:'st-no',accountable:false,documents:[doc]}]}
+ }),employee('Pegawai B','2',{name:'Absen_B.xlsx',file:new Blob(['b'])})];
+ const result=await gen.generate(2026,9,data);
+ assert.equal(result.evidenceCount,0);
 });

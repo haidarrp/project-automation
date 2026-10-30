@@ -23,6 +23,8 @@ function appHarness(R){
   alert:message=>warnings.push(String(message)),
   location:{hash:''}
  });
+ ctx.window.AttendanceDocumentPolicy={fetch:async()=>({stale:[],exportable:()=>true})};
+ ctx.window.__umTest.state.documentPolicy={exportable:()=>true};
  return Object.assign(ctx.window.__umTest,{client:ctx.window,doc:ctx.document,warnings});
 } 
 function rules(){return sandbox(ruleCode).window.UangMakanRules;}

@@ -21,7 +21,7 @@
   }
 
   function assignmentUsesAutoZero(assignment) {
-    return normalizeAssignmentType(assignment?.assignmentType, assignment?.adjustmentType) === 'official_travel';
+    return assignment?.accountable !== false && normalizeAssignmentType(assignment?.assignmentType, assignment?.adjustmentType) === 'official_travel';
   }
 
   function db() {
@@ -82,6 +82,7 @@
       location: String(row.location || ''),
       assignmentType: normalizeAssignmentType(row.assignmentType, row.adjustmentType),
       adjustmentType: String(row.adjustmentType || ''),
+      accountable: row.accountable !== false,
       employeeIds: (Array.isArray(row.employees) ? row.employees : [])
         .map((employee) => String(employee?.employeeId || employee?.id || ''))
         .filter(Boolean),
@@ -473,8 +474,8 @@
     return mergeAutomaticEvidence(record, desiredAssignmentEvidence(evidenceAssignments));
   }
 
-  function applyConflict(record, leave, assignments) {
-    const evidenceResult = mergeAutomaticEvidence(record, []);
+  function applyConflict(record, leave, assignments, desiredEvidence) {
+    const evidenceResult = mergeAutomaticEvidence(record, desiredEvidence);
     record.adjustedPercent = null;
     record.adjustmentSource = 'conflict';
     record.adjustmentNote = conflictNote(leave, assignments);
@@ -491,10 +492,10 @@
 
   function attachSupportToManual(record, leave, assignments, leaveEvidenceOwner, assignmentOwnerById) {
     const desired = [];
-    if (leave && !assignments.length && leaveEvidenceOwner === record) {
+    if (leave && leaveEvidenceOwner === record) {
       desired.push(...desiredLeaveEvidence(leave, true));
     }
-    if (!leave && assignments.length) {
+    if (assignments.length) {
       const evidenceAssignments = assignments.filter((assignment) => assignmentOwnerById.get(assignment.id) === record);
       desired.push(...desiredAssignmentEvidence(evidenceAssignments));
     }
@@ -517,7 +518,8 @@
 
   async function apply(employees, period) {
     const list = Array.isArray(employees) ? employees : [];
-    const [leaves, assignments] = await Promise.all([fetchLeaves(period), fetchAssignments(period)]);
+    const [leaves, assignments, policy] = await Promise.all([fetchLeaves(period), fetchAssignments(period), window.AttendanceDocumentPolicy.fetch(periodYears(period))]);
+    if (policy.stale.length) throw new Error('Ada verifikasi dokumen Register yang perlu diperiksa ulang. Buka Register dan verifikasi kembali sebelum menghitung Tukin.');
     const leavesByEmployee = new Map();
     leaves.forEach((leave) => {
       if (!leavesByEmployee.has(leave.employeeId)) leavesByEmployee.set(leave.employeeId, []);
@@ -552,8 +554,10 @@
         unresolvedEmployees += 1;
         continue;
       }
-      const employeeLeaves = leavesByEmployee.get(masterEmployeeId) || [];
-      const employeeAssignments = assignmentsByEmployee.get(masterEmployeeId) || [];
+      const allEmployeeLeaves = leavesByEmployee.get(masterEmployeeId) || [];
+      const allEmployeeAssignments = assignmentsByEmployee.get(masterEmployeeId) || [];
+      const employeeLeaves = allEmployeeLeaves.filter(item=>policy.exportable('cuti',item,masterEmployeeId));
+      const employeeAssignments = allEmployeeAssignments.filter(item=>policy.exportable('surat',item,masterEmployeeId));
       if (employeeLeaves.length || employeeAssignments.length) matchedEmployees += 1;
 
       const records = Object.values(employee.records || {}).sort((a, b) => dateKey(a.key || a.date).localeCompare(dateKey(b.key || b.date)));
@@ -565,7 +569,7 @@
           const key = dateKey(record.key || record.date);
           const assignmentsOnDate = employeeAssignments.filter((assignment) => sourceMatchesDate(assignment, key));
           return sourceMatchesDate(leave, key) && !assignmentsOnDate.length;
-        }) || null;
+        }) || records.find(record=>sourceMatchesDate(leave,dateKey(record.key||record.date))) || null;
         if (owner) leaveOwnerById.set(leave.id, owner);
       }
 
@@ -574,12 +578,15 @@
           const key = dateKey(record.key || record.date);
           const leaveOnDate = employeeLeaves.find((leave) => sourceMatchesDate(leave, key));
           return sourceMatchesDate(assignment, key) && !leaveOnDate;
-        }) || null;
+        }) || records.find(record=>sourceMatchesDate(assignment,dateKey(record.key||record.date))) || null;
         if (owner) assignmentOwnerById.set(assignment.id, owner);
       }
 
       for (const record of records) {
         const key = dateKey(record.key || record.date);
+        const omitted=[...allEmployeeLeaves.filter(item=>sourceMatchesDate(item,key)&&!policy.exportable('cuti',item,masterEmployeeId)).map(item=>({kind:'Cuti',number:item.documentNumber||item.id,reason:policy.reason('cuti',item,masterEmployeeId),fileUrl:(item.documents||[]).find(x=>x.file?.webUrl)?.file?.webUrl||''})),
+          ...allEmployeeAssignments.filter(item=>sourceMatchesDate(item,key)&&!policy.exportable('surat',item,masterEmployeeId)).map(item=>({kind:'Surat Tugas',number:item.letterNumber||item.id,reason:policy.reason('surat',item,masterEmployeeId),fileUrl:(item.documents||[]).find(x=>x.file?.webUrl)?.file?.webUrl||''}))];
+        record.nonExportDocuments=omitted; // Preview untuk pertimbangan; bukan bukti ekspor.
         const matchingLeave = employeeLeaves.find((leave) => sourceMatchesDate(leave, key)) || null;
         const matchingAssignments = employeeAssignments.filter((assignment) => sourceMatchesDate(assignment, key));
 
@@ -601,7 +608,10 @@
           } else {
             const autoZeroAssignments = matchingAssignments.filter(assignmentUsesAutoZero);
             if (matchingLeave && matchingAssignments.length) {
-              evidenceResult = applyConflict(record, matchingLeave, matchingAssignments);
+              evidenceResult = applyConflict(record, matchingLeave, matchingAssignments, [
+                ...desiredLeaveEvidence(matchingLeave, leaveOwnerById.get(matchingLeave.id)===record),
+                ...desiredAssignmentEvidence(matchingAssignments.filter(a=>assignmentOwnerById.get(a.id)===record))
+              ]);
               conflictRecords += 1;
             } else if (matchingLeave) {
               const includeEvidence = leaveOwnerById.get(matchingLeave.id) === record;

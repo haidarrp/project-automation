@@ -4,7 +4,7 @@ const root=document.getElementById('app');
 const R=window.UangMakanRules;
 const prev=new Date();prev.setDate(1);prev.setMonth(prev.getMonth()-1);
 const state={view:'process',step:1,year:prev.getFullYear(),month:prev.getMonth()+1,master:[],
-  files:[],parsed:[],employees:[],leaves:[],assignments:[],supportLoaded:false,history:[],
+  files:[],parsed:[],employees:[],leaves:[],assignments:[],supportLoaded:false,documentPolicy:null,history:[],
   busy:false,error:'',message:'',filter:'all',search:'',modalId:'',modalDate:'',savedRun:null,archiveKey:'',dirty:false,
   holidays:[],holidayNotes:{},documentPreviews:{},
   sharePointChecking:false,sharePointBusy:false,sharePointReady:false,sharePointError:''};
@@ -44,7 +44,7 @@ function notify(s){state.error='';state.message=String(s||'');render();}
 function summary(){return R.overall(state.employees);}
 function pendingCount(){return state.employees.filter(e=>R.overview(e).status!=='Siap').length;}
 function makeEmptyEmployee(e){return {...e,files:[],sourceFiles:[],fileWarnings:[],coverageAcknowledged:false,coverageReason:'',days:{}};}
-function resetProcess(){state.files=[];state.parsed=[];state.employees=[];state.leaves=[];state.assignments=[];state.supportLoaded=false;state.modalId='';state.modalDate='';state.savedRun=null;state.archiveKey='';state.dirty=false;state.search='';state.filter='all';state.documentPreviews={};state.step=1;clearNotice();}
+function resetProcess(){state.files=[];state.parsed=[];state.employees=[];state.leaves=[];state.assignments=[];state.documentPolicy=null;state.supportLoaded=false;state.modalId='';state.modalDate='';state.savedRun=null;state.archiveKey='';state.dirty=false;state.search='';state.filter='all';state.documentPreviews={};state.step=1;clearNotice();}
 function pageTitle(view){return {process:'Proses Uang Makan',dashboard:'Dashboard Uang Makan',history:'Riwayat Uang Makan'}[view]||'Uang Makan';}
 function metric(label,value,description){return `<div class="um-panel um-kpi"><small>${esc(label)}</small><strong>${esc(value)}</strong><span>${esc(description||'')}</span></div>`;}
 function showStatus(){return `${state.error?`<div class="um-note error" role="alert" style="margin-bottom:13px">${esc(state.error)}</div>`:''}${state.message?`<div class="um-note good" role="status" style="margin-bottom:13px">${esc(state.message)}</div>`:''}`;}
@@ -199,13 +199,15 @@ function assignmentTypeLabel(type){
 // yang menyebabkan konflik presensi. Termasuk pengaturan kerja dan hari libur.
 function dailySupporting(day){
  const matches=[];
- (day.leaves||[]).forEach((item,index)=>matches.push({kind:'cuti',id:String(item.id||`cuti-${index+1}`),
+ (day.previewLeaves||day.leaves||[]).forEach((item,index)=>matches.push({kind:'cuti',id:String(item.id||`cuti-${index+1}`),
    title:`Cuti: ${item.leaveType||'Cuti'}`,type:'Cuti',subject:item.leaveType||'Cuti',
+   excluded:!(day.leaves||[]).some(d=>String(d.id)===String(item.id)),excludeReason:!(day.leaves||[]).some(d=>String(d.id)===String(item.id))?'Dieliminasi pada Register':'',
    reference:item.documentNumber||'',referenceLabel:'Nomor dokumen',referenceDate:item.documentDate||'',
    startDate:item.startDate||'',endDate:item.endDate||'',note:item.note||'',
    documents:Array.isArray(item.documents)?item.documents:[]}));
- (day.assignments||[]).forEach((item,index)=>matches.push({kind:'tugas',id:String(item.id||`tugas-${index+1}`),
+ (day.previewAssignments||day.assignments||[]).forEach((item,index)=>matches.push({kind:'tugas',id:String(item.id||`tugas-${index+1}`),
    title:`Surat Tugas: ${assignmentTypeLabel(item.assignmentType)}`,type:'Surat Tugas',
+   excluded:!(day.assignments||[]).some(d=>String(d.id)===String(item.id)),excludeReason:item.accountable===false?'Tidak dipertanggungjawabkan':'Dieliminasi pada Register',
    subject:item.activity||assignmentTypeLabel(item.assignmentType),
    assignmentType:assignmentTypeLabel(item.assignmentType),
    reference:item.letterNumber||'',referenceLabel:'Nomor surat',referenceDate:item.letterDate||'',
@@ -230,8 +232,8 @@ function supportingRecordsSection(day){
  return `<section class="um-source-records" aria-label="Data cuti dan surat tugas terintegrasi">
   <div class="um-source-head"><h4>Data Cuti &amp; Surat Tugas Terintegrasi</h4><span>${groups.length} catatan dari data sumber</span></div>
   <div class="um-source-record-list">${groups.map(group=>`<article class="um-source-record ${group.kind}">
-   <div class="um-source-record-top"><span class="um-source-type ${group.kind}">${esc(group.type)}</span><strong>${esc(group.subject)}</strong></div>
-   <dl><div><dt>${esc(group.referenceLabel)}</dt><dd>${esc(group.reference||'—')}</dd></div>
+   <div class="um-source-record-top"><span class="um-source-type ${group.kind}">${esc(group.type)}</span><strong>${esc(group.subject)}</strong>${group.excluded?'<span class="um-pill">Tidak diikutkan</span>':''}</div>
+   ${group.excluded?`<div class="um-note" style="color:#9b5b15">Hanya pratinjau — ${esc(group.excludeReason)}; tidak memengaruhi hitungan/ZIP.</div>`:''}<dl><div><dt>${esc(group.referenceLabel)}</dt><dd>${esc(group.reference||'—')}</dd></div>
    <div><dt>Periode</dt><dd>${esc(supportPeriod(group))}</dd></div>
    ${group.referenceDate?`<div><dt>Tanggal dokumen</dt><dd>${esc(supportDate(group.referenceDate))}</dd></div>`:''}
    ${group.assignmentType?`<div><dt>Jenis penugasan</dt><dd>${esc(group.assignmentType)}</dd></div>`:''}
@@ -267,7 +269,7 @@ function supportFilePreview(group,doc,index){
   const target=`um-support-${index}`;
   body=`<div class="um-document-placeholder" data-um-preview-target="${target}" data-um-preview-title="Pratinjau ${esc(fileName)}">Pratinjau dimuat saat bagian ini ditampilkan.</div><form data-um-preview-post method="post" action="${esc(safeHttps(ctx.postUrl))}" target="${target}">${previewPostFields(ctx.postParameters)}</form>`;
  }else body='<div class="um-document-status">Microsoft 365 tidak memberikan tautan pratinjau yang valid.</div>';
- return `<article class="um-document-card"><div class="um-document-heading"><div><strong>${esc(fileName)}</strong><small>${esc(group.title)}${group.reference?' · '+esc(group.reference):''}${doc.type?' · '+esc(doc.type):''}${doc.number?' · '+esc(doc.number):''}</small></div>${actions}</div>${body}</article>`;
+ return `<article class="um-document-card"><div class="um-document-heading"><div><strong>${esc(fileName)}${group.excluded?' (hanya pratinjau — tidak diekspor)':''}</strong><small>${esc(group.title)}${group.reference?' · '+esc(group.reference):''}${doc.type?' · '+esc(doc.type):''}${doc.number?' · '+esc(doc.number):''}</small></div>${actions}</div>${body}</article>`;
 }
 function supportingFilesSection(day){
  const groups=dailySupporting(day);
@@ -496,9 +498,11 @@ async function getSupportingData(){
    const type=['official_travel','work_arrangement','other'].includes(x.assignmentType)?x.assignmentType:'official_travel';
    const ids=(x.employees||[]).map(e=>String(e.employeeId||e.id||'')).filter(Boolean);
    if(ids.length&&startDate<=to&&endDate>=from)as.set(doc.id,{id:doc.id,employeeIds:ids,startDate,endDate,
-     assignmentType:type,activity:String(x.activity||''),letterNumber:String(x.letterNumber||''),letterDate:String(x.letterDate||''),location:String(x.location||''),note:String(x.note||''),documents:supportDocuments(x.documents)});
+     assignmentType:type,accountable:x.accountable!==false,activity:String(x.activity||''),letterNumber:String(x.letterNumber||''),letterDate:String(x.letterDate||''),location:String(x.location||''),note:String(x.note||''),documents:supportDocuments(x.documents)});
  });
- return {leaves:Array.from(ls.values()),assignments:Array.from(as.values())};
+ const policy=await window.AttendanceDocumentPolicy.fetch(years);
+ if(policy.stale.length)throw new Error('Ada keputusan Register yang perlu diverifikasi ulang. Selesaikan dahulu sebelum memproses Uang Makan.');
+ return {leaves:Array.from(ls.values()),assignments:Array.from(as.values()),policy};
 }
 // Saat data sumber diubah/dibatalkan, verifikasi yang lama tidak boleh
 // dianggap masih berlaku hanya karena jumlah/jenis isu tetap sama.
@@ -509,7 +513,11 @@ function supportSignature(day){
 }
 function computeEmployees(list,leaves,assignments){
  return list.map(employee=>{
-   let updated=R.applySupporting(employee,leaves,assignments,state.year,state.month,state.holidays);
+   const policy=state.documentPolicy;
+   if(!policy)throw new Error('Keputusan Register belum dimuat.');
+   const goodLeaves=leaves.filter(item=>String(item.employeeId)===String(employee.id)&&policy.exportable('cuti',item,employee.id));
+   const goodAssignments=assignments.filter(item=>item.employeeIds.includes(String(employee.id))&&policy.exportable('surat',item,employee.id));
+   let updated=R.applySupporting(employee,goodLeaves,goodAssignments,state.year,state.month,state.holidays);
    const revised={...updated.days};
    let changed=false;
    for(const [date,day] of Object.entries(updated.days)){
@@ -524,8 +532,12 @@ function computeEmployees(list,leaves,assignments){
        changed=true;
      }
    }
-   if(changed)updated=R.applySupporting({...updated,days:revised},leaves,assignments,
+   if(changed)updated=R.applySupporting({...updated,days:revised},goodLeaves,goodAssignments,
      state.year,state.month,state.holidays);
+   for (const [date,day] of Object.entries(updated.days||{})) {
+     day.previewLeaves=leaves.filter(x=>String(x.employeeId)===String(employee.id)&&x.startDate<=date&&x.endDate>=date);
+     day.previewAssignments=assignments.filter(x=>x.employeeIds.includes(String(employee.id))&&x.startDate<=date&&x.endDate>=date);
+   }
    return updated;
  });
 }
@@ -606,7 +618,7 @@ async function calculate(){
     if(observed[observed.length-1]<end)e.fileWarnings.push(`Tanggal terakhir yang tersedia ${observed[observed.length-1]} (seharusnya ${end})`);
   }
   const supports=await getSupportingData();
-  state.leaves=supports.leaves;state.assignments=supports.assignments;state.supportLoaded=true;state.documentPreviews={};
+  state.leaves=supports.leaves;state.assignments=supports.assignments;state.documentPolicy=supports.policy;state.supportLoaded=true;state.documentPreviews={};
   state.employees=computeEmployees(employees,state.leaves,state.assignments);
   state.parsed=list;state.step=3;state.savedRun=null;state.archiveKey='';state.dirty=true;
   state.message=`Berhasil mengolah ${parsed.length} berkas untuk ${employees.length} pegawai yang diunggah. Pegawai master lainnya tidak ikut dihitung; cuti dan surat tugas telah disinkronkan.`;
@@ -618,14 +630,14 @@ async function sync(){
  state.busy=true;clearNotice();render();
  try{
    const supports=await getSupportingData();
-   state.leaves=supports.leaves;state.assignments=supports.assignments;state.documentPreviews={};
+   state.leaves=supports.leaves;state.assignments=supports.assignments;state.documentPolicy=supports.policy;state.documentPreviews={};
    state.employees=computeEmployees(state.employees,supports.leaves,supports.assignments);state.dirty=true;
    state.message=`Sinkronisasi selesai: ${supports.leaves.length} data cuti, ${supports.assignments.length} surat tugas.`;
  }catch(e){fail(e);return;}
  state.busy=false;render();
 }
 function recalculateEmployee(employee){
- const revised=R.applySupporting(employee,state.leaves,state.assignments,state.year,state.month,state.holidays);
+ const revised=computeEmployees([employee],state.leaves,state.assignments)[0];
  state.employees=state.employees.map(e=>e.id===employee.id?revised:e);
  state.dirty=true;state.savedRun=null;
  return revised;
@@ -651,8 +663,7 @@ function saveSupport(kind,sourceId,index){
  // pemilik dokumen ID yang sama, tidak cukup mencocokkan nomor suratnya.
  state.employees=state.employees.map(employee=>{
   if(!employeeIds.has(employee.id))return employee;
-  return R.applySupporting({...employee,supportReviews:{...(employee.supportReviews||{}),[id]:{...decision}}},
-   state.leaves,state.assignments,state.year,state.month,state.holidays);
+  return computeEmployees([{...employee,supportReviews:{...(employee.supportReviews||{}),[id]:{...decision}}}],state.leaves,state.assignments)[0];
  });
  state.dirty=true;state.savedRun=null;
  const count=participants.reduce((n,p)=>n+p.dates.length,0);
@@ -690,9 +701,14 @@ function allowFinal(){
  if(!state.employees.length)throw new Error('Belum ada hasil perhitungan.');
  if(pendingCount())throw new Error(`${pendingCount()} pegawai belum siap. Periksa status verifikasi terlebih dahulu.`);
 }
+async function assertDocumentPolicyFresh(){
+ if(!state.documentPolicy)throw new Error('Keputusan Register belum dimuat. Sinkronkan ulang data Cuti/Surat Tugas.');
+ const latest=await window.AttendanceDocumentPolicy.fetch([state.year-1,state.year]);
+ if(latest.stale.length||latest.signature!==state.documentPolicy.signature)throw new Error('Dokumen/keputusan Register berubah setelah perhitungan. Klik Sinkronkan Ulang dan periksa kembali sebelum menyimpan atau mengekspor.');
+}
 async function exportData(){
  if(!permission('process.export')||state.busy)return;
- try{allowFinal();await window.ResourceLoader.ensure('jszip');const result=await window.UangMakanExport.generate(state.year,state.month,state.employees,{holidays:state.holidays});notify(`File ${result.filename} berhasil dibuat.`);}
+ try{allowFinal();await assertDocumentPolicyFresh();await window.ResourceLoader.ensure('jszip');const result=await window.UangMakanExport.generate(state.year,state.month,state.employees,{holidays:state.holidays});notify(`File ${result.filename} berhasil dibuat.`);}
  catch(e){fail(e);}
 }
 async function exportZip(){
@@ -700,6 +716,7 @@ async function exportZip(){
  try{allowFinal();}catch(e){fail(e);return;}
  state.busy=true;clearNotice();render();
  try{
+  await assertDocumentPolicyFresh();
   await window.ResourceLoader.ensure('jszip');
   const result=await window.UangMakanZip.generate(state.year,state.month,state.employees,{holidays:state.holidays});
   window.UangMakanZip.download(result);
@@ -742,6 +759,7 @@ async function saveRun(){
  if(!state.dirty&&state.savedRun){notify('Hasil ini sudah tersimpan pada riwayat.');return;}
  state.busy=true;clearNotice();render();
  try{
+  await assertDocumentPolicyFresh();
   await archiveAbsences();
   const run=await window.UangMakanStorage.save(state.year,state.month,state.employees,summary(),{
    holidays:state.holidays,holidayNotes:state.holidayNotes,archiveKey:state.archiveKey
@@ -771,6 +789,11 @@ function storedSupporting(employees){
 // pengecualian historis ini TIDAK dipakai untuk pengolahan/sinkronisasi baru.
 function hydrateArchivedEmployee(employee,supportData,year,month,holidays,schemaVersion){
  const calculated=R.applySupporting(employee,supportData.leaves,supportData.assignments,year,month,holidays);
+ for(const [date,day] of Object.entries(calculated.days||{})){
+   const source=employee.days?.[date]||{};
+   day.previewLeaves=source.previewLeaves||source.leaves||[];
+   day.previewAssignments=source.previewAssignments||source.assignments||[];
+ }
  if(schemaVersion>=6)return calculated;
  const days={...calculated.days};
  for(const [date,original] of Object.entries(employee.days||{})){

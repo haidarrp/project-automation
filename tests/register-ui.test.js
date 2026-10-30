@@ -42,7 +42,11 @@ test('UI menampilkan formulir klarifikasi dan laporan realisasi tanpa duplikasi 
  const target={closest(selector){return selector==='[data-open]'?{dataset:{open:match[1]}}:null;}};
  app.listeners.click({target});
  assert.match(app.innerHTML,/Tindak Lanjut Konflik/);
- assert.match(app.innerHTML,/Simpan &amp; verifikasi TU|Simpan & verifikasi TU/);
+ assert.match(app.innerHTML,/Simpan — Sudah Verifikasi/);
+ assert.match(app.innerHTML,/name="selectedSourceKeys"/);
+ assert.match(app.innerHTML,/Catatan \(opsional\)/);
+ assert.doesNotMatch(app.innerHTML,/Sumber klarifikasi \/ pihak/);
+ assert.doesNotMatch(app.innerHTML,/Rujukan \/ bukti/);
  const newTarget={closest(selector){return selector==='[data-new-realization]'?{}:null;}};
  app.listeners.click({target:newTarget});
  assert.match(app.innerHTML,/Status Realisasi Dokumen/);
