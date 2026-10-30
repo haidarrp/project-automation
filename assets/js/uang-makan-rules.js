@@ -1,7 +1,7 @@
 /* Uang Makan: perhitungan berdasarkan bulan kalender.
  * Verifikasi satu dokumen Cuti/Surat Tugas berlaku untuk seluruh tanggal
  * dalam rentang dokumen yang termasuk periode pengolahan. Hari libur
- * tetap bernilai nol; WFA/WFH selain Jumat perlu verifikasi.
+ * tetap bernilai nol; WFA/WFH selain Jumat diberi catatan (penyesuaian opsional).
  */
 (function () {
   'use strict';
@@ -76,10 +76,10 @@
       if(activeAssignments.length)issues.push('Konfirmasi pelaksanaan surat tugas (termasuk jika batal/tidak berangkat)');
       // WFH/WFA di luar Jumat adalah rekomendasi nol, bukan keputusan final.
       // Pegawai mungkin memiliki surat sakit/cuti yang belum tersinkron.
-      if(remoteExcluded)issues.push('WFH/WFA selain Jumat: verifikasi hasil aktual dan periksa data sakit/cuti yang belum tersinkron');
+      if(remoteExcluded)issues.push('WFH/WFA selain Jumat: periksa hasil aktual dan data sakit/cuti bila perlu');
     }
     // Surat Tugas yang dipertanggungjawabkan memberi rekomendasi awal 0
-    // meskipun presensi WFO tercatat. Hasil akhir masih bisa diverifikasi.
+    // meskipun presensi WFO tercatat. Penyesuaian manual tetap opsional.
     const automatic=(present&&!nonWorking&&!remoteExcluded&&!activeAssignments.length)?1:0;
     const hasManual=record?.manualValue===0||record?.manualValue===1;
     const lockedZero=nonWorking;
@@ -139,7 +139,7 @@
         // Hasil dua dokumen yang bertentangan tidak bisa diselesaikan
         // memakai pengecualian tanggal; perbaiki sumber dan sinkronkan ulang.
         d.reviewed=d.pendingSourceKeys.length===0&&!d.reviewConflict;
-        if(d.reviewConflict)d.issues.push('Hasil verifikasi dokumen yang tumpang tindih berbeda; perbaiki dokumen koreksi pada modul Cuti/Surat Tugas dan sinkronkan ulang');
+        if(d.reviewConflict)d.issues.push('Hasil penyesuaian dokumen yang tumpang tindih berbeda; perbaiki dokumen koreksi pada modul Cuti/Surat Tugas dan sinkronkan ulang');
         if(d.reviewed){
           const latest=sources.map(k=>supportReviews[k]).filter(Boolean).sort((a,b)=>String(b.reviewedAt||'').localeCompare(String(a.reviewedAt||'')))[0];
           d.reviewedAt=latest?.reviewedAt||'';
@@ -160,7 +160,7 @@
       manual:days.filter(d=>d.manualValue!==null&&!d.nonWorking&&d.manualValue!==d.automatic).length,
       missing:false,missingType:!employee.jenisPegawai,
       coverage:!!employee.fileWarnings?.length&&!employee.coverageAcknowledged,
-      status:issues||!employee.jenisPegawai||(employee.fileWarnings?.length&&!employee.coverageAcknowledged)?'Perlu verifikasi':'Siap'};
+      status:issues||!employee.jenisPegawai||(employee.fileWarnings?.length&&!employee.coverageAcknowledged)?'Terdapat Catatan':'Siap'};
   }
   function overall(employees){
     const s={employees:employees.length,days:0,issues:0,manual:0,missing:0,ready:0};

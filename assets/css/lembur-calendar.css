@@ -210,3 +210,9 @@
 .lm-support-file-body p{margin:0 0 8px}
 .lm-support-file-frame{display:block;width:100%;height:480px;border:1px solid #e1e7ed;border-radius:8px;background:#f8fafc;scroll-margin:0;overflow-anchor:none}
 @media(max-width:575px){.lm-support-file-head{align-items:stretch}.lm-support-file-frame{height:360px}}
+
+/* Auto-preview: pertahankan tinggi panel saat URL Microsoft 365 diminta dan
+   saat iframe disisipkan. Posisi scroll tidak boleh berpindah ke pratinjau. */
+.lm-support-file-body-ready {min-height:504px;overflow-anchor:none}
+.lm-support-file-preview {height:480px;display:flex;align-items:center;justify-content:center;text-align:center;border:1px solid #e1e7ed;border-radius:8px;background:#f8fafc;color:#60788b;overflow-anchor:none}
+@media(max-width:575px){.lm-support-file-body-ready{min-height:384px}.lm-support-file-preview{height:360px}}

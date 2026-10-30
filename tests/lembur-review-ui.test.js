@@ -27,11 +27,11 @@ function boot(){
   const win={APP_CONFIG:{INDONESIAN_MONTHS:months,RULES:{MEAL_ALLOWANCE_MIN_HOURS:2}},BusinessRules:rules,
     LemburDocumentIntegration:docs,addEventListener:()=>{},scrollTo:()=>{},scrollX:0,scrollY:0};
   const sandbox={window:win,document:doc,console,Date,Set,Map,URL};
-  const injected=app.replace('  init();\n})();',`  window.__lemburTestHooks={state,renderReview,renderReviewEmployeeList,renderReviewEmployeeCalendar,renderReviewDayPanel,renderReviewDateCalendar,renderReviewTable,openInlineDocumentDetail,employeePendingDocuments};
+  const injected=app.replace('  init();\n})();',`  window.__lemburTestHooks={state,renderReview,renderReviewEmployeeList,renderReviewEmployeeCalendar,renderReviewDayPanel,renderReviewDateCalendar,renderReviewTable,openInlineDocumentDetail,employeePendingDocuments,documentRelevantToOvertime,loadDocumentPreview};
 })();`);
   assert.notEqual(injected,app,'sisipan pengujian harus berhasil');
   vm.runInNewContext(injected,sandbox,{filename:'app.js'});
-  return {hooks:win.__lemburTestHooks,rules};
+  return {hooks:win.__lemburTestHooks,rules,win,doc};
 }
 function recordsFor(days){
   return Object.fromEntries(days.map(d=>[`2026-10-${String(d).padStart(2,'0')}`,{
@@ -122,10 +122,10 @@ test('Kalender menggunakan warna dokumen secara informatif dan koreksi manual be
 });
 
 test('HTML mengandung cache-busting baru untuk CSS dan JavaScript serta SW dinaikkan',()=>{
- assert.match(html,/lembur-calendar\.css\?v=4/);
+ assert.match(html,/lembur-calendar\.css\?v=5/);
  assert.match(html,/lembur-document-integration\.js\?v=3/);
- assert.match(html,/assets\/js\/app\.js\?v=16/);
- assert.match(fs.readFileSync(path.join(root,'sw.js'),'utf8'),/pusdatin-static-v35/);
+ assert.match(html,/assets\/js\/app\.js\?v=17/);
+ assert.match(fs.readFileSync(path.join(root,'sw.js'),'utf8'),/pusdatin-static-v37/);
 });
 
 test('Dua dokumen beririsan tetap memiliki kontrol tersendiri dalam panel tanggal yang sama',()=>{
@@ -158,7 +158,7 @@ test('Penyesuaian opsional, lanjut dan ekspor tidak diblokir oleh dokumen belum 
  assert.match(app,/data-action="generate" \$\{state\.busy\?'disabled':''\}/);
 });
 
-test('Metadata berkas Surat Tugas dan Cuti tampil di bawah Penyesuaian, tanpa memuat iframe otomatis',()=>{
+test('Metadata berkas Surat Tugas dan Cuti tampil dengan loader pratinjau otomatis',()=>{
  const {hooks}=boot();const {employees,a}=sample();
  const st={id:'st1',employeeIds:['101','202'],startDate:'2026-10-08',endDate:'2026-10-09',accountable:true,letterNumber:'253/ST',
    documents:[{id:'f1',name:'Berkas Surat Tugas',type:'Surat Tugas',file:{name:'Surat Tugas.pdf',driveId:'drive1',itemId:'item1',webUrl:'https://tenant.sharepoint.com/docs/st.pdf'}}]};
@@ -172,19 +172,95 @@ test('Metadata berkas Surat Tugas dan Cuti tampil di bawah Penyesuaian, tanpa me
  assert.match(html8,/Berkas Pendukung Cuti \/ Surat Tugas/);
  assert.match(html8,/Surat Tugas\.pdf/);
  assert.match(html8,/Buka SharePoint/);
- assert.match(html8,/data-lm-preview-load="surat:st1\|0"/);
+ assert.match(html8,/data-lm-preview-auto="surat:st1\|0"/);
+ assert.match(html8,/Memuat pratinjau berkas/);
+ assert.doesNotMatch(html8,/Tampilkan Pratinjau/);
  assert.doesNotMatch(html8,/<iframe/);
  assert.doesNotMatch(html8,/Dokumen Cuti\.pdf/);
  assert.match(html12,/Dokumen Cuti\.pdf/);
  assert.doesNotMatch(html12,/Surat Tugas\.pdf/);
  assert.match(app,/window\.SharePointStorage\.getPreviewInfo/);
+ assert.match(app,/querySelectorAll\('\[data-lm-preview-auto\]'\)/);
+ assert.match(app,/keepPreviewScrollPosition\(iframe, x, y\)/);
+ assert.match(css,/\.lm-support-file-preview/);
  assert.match(html,/sharepoint-storage\.js\?v=4/);
 });
 
 test('Tidak ada auto-scroll ke detail; dokumen tetap ditandai meskipun sudah disesuaikan',()=>{
  assert.doesNotMatch(app,/scrollIntoView\s*\(/);
- assert.match(app,/record\?\.documentSources\?\.length\) return 'needs-review'/);
- assert.match(app,/state\.reviewFilter === 'documents' && !record\?\.documentSources\?\.length/);
+ assert.match(app,/documentRelevantToOvertime\(record\)\) return 'needs-review'/);
+ assert.match(app,/state\.reviewFilter === 'documents' && !documentRelevantToOvertime\(record\)/);
  assert.match(css,/\.lm-support-file-frame/);
  assert.match(css,/overflow-anchor:none/);
+});
+
+
+test('Dokumen pada hari tanpa jam lembur tidak diberi tanda; dokumen yang memblokir jam potensial tetap ditandai',()=>{
+ const {hooks}=boot();const {employees,a,b}=sample();
+ const noOvertime={date:new Date(2026,9,27,12),status:'tidak_hadir',inMinutes:null,outMinutes:null,
+   originalOvertimeHours:0,overtimeHours:0,documentReviews:{}};
+ a.records['2026-10-27']=noOvertime;
+ b.records['2026-10-27']={...noOvertime,documentReviews:{}};
+ docs.applyDocuments(employees,[],[{kind:'surat',id:'withoutHours',employeeIds:['101','202'],
+   startDate:'2026-10-27',endDate:'2026-10-28',accountable:true,letterNumber:'ST/Tanpa Jam'}],
+   {allows:()=>true},e=>e.nip);
+ hooks.state.employees=employees; hooks.state.period={month:10,year:2026};
+ assert.equal(hooks.documentRelevantToOvertime(a.records['2026-10-27']),false);
+ assert.equal(hooks.documentRelevantToOvertime(a.records['2026-10-08']),false); // Dokumen lama dihapus saat sinkron ulang
+ const day=hooks.renderReviewDayPanel(a,'2026-10-27');
+ assert.doesNotMatch(day,/Penyesuaian Cuti \/ Surat Tugas/);
+ assert.doesNotMatch(day,/Berkas Pendukung/);
+ assert.doesNotMatch(day,/Dokumen terkait/);
+ const cal=hooks.renderReviewEmployeeCalendar();
+ const b27=cal.match(/<button[^>]+data-review-day="2026-10-27"[\s\S]*?<\/button>/)?.[0]||'';
+ assert.match(b27,/0 jam/);
+ assert.doesNotMatch(b27,/Ada dokumen|lm-needs-review/);
+ const stats=hooks.renderReviewDateCalendar();
+ const day27=stats.match(/<button[^>]+data-review-day="2026-10-27"[\s\S]*?<\/button>/)?.[0]||'';
+ assert.doesNotMatch(day27,/ada dokumen|lm-needs-review/);
+ assert.doesNotMatch(hooks.renderReviewTable(),/data-review-inspect="101\|2026-10-27"/);
+ // Sumber tetap tersimpan untuk penghitungan/konsistensi, tetapi tidak ditandai.
+ assert.equal(a.records['2026-10-27'].documentSources.length,1);
+ a.records['2026-10-27'].originalOvertimeHours=2;
+ assert.equal(hooks.documentRelevantToOvertime(a.records['2026-10-27']),true);
+ assert.match(hooks.renderReviewDayPanel(a,'2026-10-27'),/Penyesuaian Cuti \/ Surat Tugas/);
+ assert.match(hooks.renderReviewEmployeeCalendar(),/Ada dokumen/);
+ assert.match(hooks.renderReviewTable(),/data-review-inspect="101\|2026-10-27"/);
+});
+
+test('Status 0 jam karena pembatasan dokumen tetap memunculkan panel untuk jam potensial',()=>{
+ const {hooks}=boot();const {employees,a}=sample();hooks.state.employees=employees;
+ const rec=a.records['2026-10-08'];
+ assert.equal(rec.originalOvertimeHours,2);assert.equal(rec.overtimeHours,0);
+ assert.equal(hooks.documentRelevantToOvertime(rec),true);
+ assert.match(hooks.renderReviewDayPanel(a,'2026-10-08'),/Penyesuaian Cuti \/ Surat Tugas/);
+});
+
+test('Auto-preview memasang iframe tanpa fokus dan memulihkan posisi scroll setelah selesai dimuat',async()=>{
+ const {hooks,win,doc}=boot();
+ const {employees,a}=sample();
+ docs.applyDocuments(employees,[],[{id:'st1',employeeIds:['101','202'],startDate:'2026-10-08',endDate:'2026-10-09',accountable:true,letterNumber:'253/ST',documents:[{file:{name:'Lampiran.pdf',driveId:'drive1',itemId:'item1'}}]}],{allows:()=>true},e=>e.nip);
+ hooks.state.employees=employees;
+ hooks.state.period={month:10,year:2026};
+ hooks.state.reviewEmployeeKey='101';hooks.state.reviewDateKey='2026-10-08';
+ const calls=[];
+ win.scrollX=16;win.scrollY=350;
+ win.scrollTo=(x,y)=>calls.push([x,y]);
+ win.addEventListener=()=>{};win.removeEventListener=()=>{};
+ win.setTimeout=()=>0;win.requestAnimationFrame=fn=>fn();
+ win.SharePointStorage={getPreviewInfo:async()=>({getUrl:'https://tenant.sharepoint.com/preview'})};
+ doc.createElement=(name)=>({tagName:name,attributes:{},isConnected:true,
+   addEventListener(type,cb){this['on_'+type]=cb;},setAttribute(key,val){this.attributes[key]=val;}});
+ const body={isConnected:true,children:[],replaceChildren(...els){this.children=els;},appendChild(el){this.children.push(el);}};
+ const card={dataset:{lmFileKey:'surat:st1|0'},querySelector:()=>body};
+ const placeholder={dataset:{lmPreviewAuto:'surat:st1|0'},closest:()=>card,isConnected:true};
+ await hooks.loadDocumentPreview(placeholder);
+ assert.equal(body.children.length,1);
+ const iframe=body.children[0];
+ assert.equal(iframe.src,'https://tenant.sharepoint.com/preview');
+ assert.equal(iframe.tabIndex,-1);
+ assert.equal(iframe.loading,'eager');
+ assert.deepEqual(calls.at(-1),[16,350]);
+ iframe.on_load();
+ assert.deepEqual(calls.at(-1),[16,350]);
 });

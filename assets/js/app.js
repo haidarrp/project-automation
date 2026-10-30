@@ -365,6 +365,11 @@
   function fullDayLabel(key) { return rules.formatIndonesianDate(rules.dateFromKey(key), true); }
   function autoHours(record) { return Number(record?.originalOvertimeHours ?? record?.overtimeHours ?? 0); }
   function finalHours(record) { return Number(record?.overtimeHours || 0); }
+  // Dokumen hanya perlu ditandai jika ada jam lembur potensial. Hasil final
+  // dapat 0 karena Surat Tugas/Cuti, tetapi jam asal > 0 tetap perlu ditinjau.
+  function documentRelevantToOvertime(record) {
+    return Boolean(record?.documentSources?.length && (autoHours(record) > 0 || finalHours(record) > 0));
+  }
   function documentReviewMarkup(record) {
     const sources=record?.documentSources||[];
     if(!sources.length)return '';
@@ -379,7 +384,7 @@
   // rentang tanggal dan pegawai yang terkait. Tidak memblokir proses/ekspor.
   function renderInlineDocumentReview(record) {
     const sources = record?.documentSources || [];
-    if (!sources.length) return '';
+    if (!documentRelevantToOvertime(record)) return '';
     const groups = window.LemburDocumentIntegration?.reviewGroups?.(state.employees) || [];
     const byKey = new Map(groups.map(group => [group.key, group]));
     const pending = sources.filter(source => !byKey.get(source.key)?.verified).length;
@@ -426,17 +431,40 @@
       return `<article class="lm-support-file" data-lm-file-key="${esc(key)}">
         <div class="lm-support-file-head"><div><strong>${esc(name)}</strong><small>${esc(source.label)}${doc.type ? ` · ${esc(doc.type)}` : ''}</small></div>
           ${url ? `<a class="btn btn-secondary btn-sm" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Buka SharePoint ↗</a>` : ''}</div>
-        <div class="lm-support-file-body">${ready ? `<button type="button" class="btn btn-secondary btn-sm" data-lm-preview-load="${esc(key)}">Tampilkan Pratinjau</button>` : '<p>Berkas digital belum diunggah ke SharePoint.</p>'}</div>
+        <div class="lm-support-file-body ${ready ? 'lm-support-file-body-ready' : ''}">${ready ? `<div class="lm-support-file-preview" role="status" data-lm-preview-auto="${esc(key)}">Memuat pratinjau berkas...</div>` : '<p>Berkas digital belum diunggah ke SharePoint.</p>'}</div>
       </article>`;
     });
     return `<section class="lm-support-files" aria-label="Berkas pendukung Cuti dan Surat Tugas">
-      <div class="lm-support-files-head"><h4>Berkas Pendukung Cuti / Surat Tugas</h4><p>Pratinjau berada di bawah panel Penyesuaian. Klik Tampilkan Pratinjau agar halaman tidak otomatis bergulir ketika berkas Microsoft 365 dimuat.</p></div>
+      <div class="lm-support-files-head"><h4>Berkas Pendukung Cuti / Surat Tugas</h4><p>Pratinjau SharePoint dimuat otomatis di bawah panel Penyesuaian tanpa memindahkan posisi halaman.</p></div>
       ${cards.length ? `<div class="lm-support-file-list">${cards.join('')}</div>` : '<div class="lm-document-hint">Belum ada berkas digital pada Cuti / Surat Tugas terkait. Periksa unggahan pada modul sumber.</div>'}
     </section>`;
   }
-  async function loadDocumentPreview(button) {
-    const key = button.dataset.lmPreviewLoad;
-    const card = button.closest('.lm-support-file');
+  // Jaga posisi viewport saat Microsoft 365 mengisi iframe pratinjau.
+  // Pengguna tetap bebas menggulir: pemulihan posisi dibatalkan jika ada
+  // input scroll/navigasi setelah permintaan iframe dimulai.
+  function keepPreviewScrollPosition(iframe, originX, originY) {
+    let userMoved = false;
+    const markMoved = () => { userMoved = true; };
+    const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
+    events.forEach(type => window.addEventListener(type, markMoved, {passive:true, capture:true}));
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      events.forEach(type => window.removeEventListener(type, markMoved, true));
+      if (!userMoved && iframe.isConnected) window.scrollTo(originX, originY);
+    };
+    iframe.addEventListener('load', () => {
+      if (!userMoved && iframe.isConnected) window.scrollTo(originX, originY);
+      window.requestAnimationFrame?.(finish);
+      if (!window.requestAnimationFrame) finish();
+    }, {once:true});
+    // Jangan menyisakan event listener jika penampil Microsoft 365 gagal memuat.
+    window.setTimeout(finish, 15000);
+  }
+  async function loadDocumentPreview(placeholder) {
+    const key = placeholder.dataset.lmPreviewAuto;
+    const card = placeholder.closest('.lm-support-file');
     const body = card?.querySelector('.lm-support-file-body');
     const record = activeReviewEmployee()?.records?.[activeReviewDate()];
     const pos = String(key || '').lastIndexOf('|');
@@ -445,23 +473,26 @@
     const source = record?.documentSources?.find(item => item.key === sourceKey);
     const file = source?.documents?.[index]?.file;
     if (!body || !file?.driveId || !file?.itemId || !Number.isInteger(index)) return;
-    button.disabled = true;
-    button.textContent = 'Menyiapkan pratinjau...';
+    if (placeholder.dataset.previewLoading === 'true') return;
+    placeholder.dataset.previewLoading = 'true';
     try {
       if (!window.SharePointStorage?.getPreviewInfo) throw new Error('Layanan SharePoint belum tersedia. Periksa koneksi Microsoft 365.');
       const preview = await window.SharePointStorage.getPreviewInfo({...file,file:null},true);
-      if (!body.isConnected || card.dataset.lmFileKey !== key) return;
+      if (!body.isConnected || card.dataset.lmFileKey !== key || !placeholder.isConnected) return;
       const target = `lm-support-${Math.random().toString(36).slice(2)}`;
       const iframe = document.createElement('iframe');
       iframe.className = 'lm-support-file-frame';
       iframe.title = `Pratinjau ${file.name || 'berkas'}`;
-      iframe.loading = 'lazy';
+      iframe.loading = 'eager';
+      iframe.tabIndex = -1;
       iframe.referrerPolicy = 'no-referrer';
       iframe.name = target;
       iframe.setAttribute('allow','fullscreen');
       const getUrl = safePreviewUrl(preview.getUrl);
       const postUrl = safePreviewUrl(preview.postUrl);
       if (!getUrl && !postUrl) throw new Error('Microsoft 365 tidak menyediakan tautan pratinjau yang valid.');
+      const x = window.scrollX || 0, y = window.scrollY || 0;
+      keepPreviewScrollPosition(iframe, x, y);
       body.replaceChildren(iframe);
       if (getUrl) iframe.src = getUrl;
       else {
@@ -474,18 +505,26 @@
         body.appendChild(form);
         form.submit();
       }
+      // Tinggi placeholder sama dengan iframe, sehingga tidak ada layout shift.
+      window.scrollTo(x, y);
     } catch (error) {
-      if (!body.isConnected) return;
+      if (!body.isConnected || card.dataset.lmFileKey !== key) return;
       body.textContent = '';
       const warning = document.createElement('p'); warning.textContent = `Pratinjau belum tersedia: ${String(error?.message || error)}`;
       const retry = document.createElement('button'); retry.type='button'; retry.className='btn btn-secondary btn-sm';
-      retry.textContent = 'Coba Lagi'; retry.dataset.lmPreviewLoad = key;
+      retry.textContent = 'Coba Lagi';
+      retry.addEventListener('click',()=>{
+        const status = document.createElement('div');
+        status.className='lm-support-file-preview'; status.dataset.lmPreviewAuto = key;
+        status.textContent='Memuat ulang pratinjau berkas...';
+        body.replaceChildren(status);
+        loadDocumentPreview(status);
+      });
       body.append(warning,retry);
-      retry.addEventListener('click',()=>loadDocumentPreview(retry));
     }
   }
   function employeePendingDocuments(employee) {
-    return new Set(Object.values(employee?.records || {}).flatMap(record =>
+    return new Set(Object.values(employee?.records || {}).filter(documentRelevantToOvertime).flatMap(record =>
       (record.documentSources || []).map(source => source.key))).size;
   }
   function saveDocumentPeriodReview(key) {
@@ -512,7 +551,7 @@
     const list = state.employees || [];
     let current = list.find(e => rules.employeeKey(e) === state.reviewEmployeeKey);
     if (!current) {
-      current = list.find(e => Object.values(e.records || {}).some(r=>r.documentReviewPending))
+      current = list.find(e => Object.values(e.records || {}).some(documentRelevantToOvertime))
         || list.find(e => Object.values(e.records || {}).some(hasOvertime)) || list[0];
       state.reviewEmployeeKey = current ? rules.employeeKey(current) : null;
     }
@@ -521,7 +560,7 @@
   function activeReviewDate() {
     if (!dateBelongsToPeriod(state.reviewDateKey, state.period)) {
       const employee = activeReviewEmployee();
-      const first = Object.keys(employee?.records || {}).sort().find(key => employee.records[key]?.documentReviewPending)
+      const first = Object.keys(employee?.records || {}).sort().find(key => documentRelevantToOvertime(employee.records[key]))
         || Object.keys(employee?.records || {}).sort().find(key => hasOvertime(employee.records[key]));
       state.reviewDateKey = first || monthKeys(state.period)[0];
     }
@@ -551,9 +590,9 @@
       Object.keys(employee.records || {}).sort().forEach(key => {
         const record = employee.records[key];
         if (!record) return;
-        if (state.reviewTableFilter === 'overtime' && !(autoHours(record) > 0 || finalHours(record) > 0 || isManualOvertime(record) || record.documentSources?.length)) return;
+        if (state.reviewTableFilter === 'overtime' && !(autoHours(record) > 0 || finalHours(record) > 0 || isManualOvertime(record))) return;
         if (state.reviewTableFilter === 'adjusted' && !isManualOvertime(record)) return;
-        if (state.reviewTableFilter === 'documents' && !record.documentSources?.length) return;
+        if (state.reviewTableFilter === 'documents' && !documentRelevantToOvertime(record)) return;
         rows.push({ employee, record, key });
       });
     });
@@ -562,7 +601,7 @@
       || String(employee.nip || '').includes(q) || fullDayLabel(key).toLowerCase().includes(q));
   }
   function reviewStatus(record, key) {
-    if (record?.documentSources?.length) return 'needs-review';
+    if (documentRelevantToOvertime(record)) return 'needs-review';
     if (isManualOvertime(record)) return 'adjusted';
     if (rules.isWeekendLike(rules.dateFromKey(key), state.holidays)) return 'holiday';
     if (hasOvertime(record)) return 'overtime';
@@ -577,7 +616,7 @@
         const stats = employeeStats(e), key = rules.employeeKey(e);
         const changed = Object.values(e.records || {}).filter(isManualOvertime).length;
         const pending = employeePendingDocuments(e);
-        const hasDocs = Object.values(e.records || {}).some(r => r.documentSources?.length);
+        const hasDocs = Object.values(e.records || {}).some(documentRelevantToOvertime);
         const isSelected = Boolean(selected && rules.employeeKey(selected) === key);
         return `<button type="button" class="lm-person ${pending ? 'lm-person-pending' : hasDocs ? 'lm-person-verified' : ''} ${isSelected ? 'selected' : ''}" data-review-person="${esc(key)}" aria-pressed="${isSelected}" aria-label="${esc(e.name)}${pending ? `, ${pending} dokumen terdeteksi` : hasDocs ? ', dokumen terdeteksi' : ''}">
           <span class="lm-person-top"><span class="lm-person-name">${esc(e.name)}</span>${pending ? `<span class="lm-person-badge pending">${pending} Dokumen</span>` : hasDocs ? '<span class="lm-person-badge verified">Dokumen</span>' : ''}</span>
@@ -593,13 +632,13 @@
       const record = employee.records?.[key];
       const status = reviewStatus(record, key);
       const weekend = rules.isWeekendLike(rules.dateFromKey(key), state.holidays);
-      const faded = state.reviewFilter === 'overtime' && !hasOvertime(record) && !record?.documentSources?.length
+      const faded = state.reviewFilter === 'overtime' && !hasOvertime(record) && !(autoHours(record) > 0)
         || state.reviewFilter === 'adjusted' && !isManualOvertime(record)
         || state.reviewFilter === 'holiday' && !weekend
-        || state.reviewFilter === 'documents' && !record?.documentSources?.length;
+        || state.reviewFilter === 'documents' && !documentRelevantToOvertime(record);
       return `<button type="button" class="lm-cal-day lm-${status} ${weekend ? 'lm-rest' : ''} ${selected === key ? 'selected' : ''} ${faded ? 'lm-dim' : ''}" data-review-day="${key}" aria-pressed="${selected === key}" aria-label="${esc(fullDayLabel(key))}, ${record ? `${finalHours(record)} jam lembur` : 'tidak ada catatan presensi'}">
         <span class="lm-date">${Number(key.slice(-2))}</span><span class="lm-dayname">${shortWeekday(key)}</span><strong>${record && finalHours(record) > 0 ? `${finalHours(record)} jam` : '–'}</strong>
-        <small>${record?.documentSources?.length?'Ada dokumen':isManualOvertime(record) ? 'Koreksi' : weekend ? rules.isHoliday(rules.dateFromKey(key), state.holidays) ? 'Tanggal merah' : 'Libur' : hasOvertime(record) ? 'Lembur' : record ? '0 jam' : 'Tanpa data'}</small>
+        <small>${documentRelevantToOvertime(record)?'Ada dokumen':isManualOvertime(record) ? 'Koreksi' : weekend ? rules.isHoliday(rules.dateFromKey(key), state.holidays) ? 'Tanggal merah' : 'Libur' : hasOvertime(record) ? 'Lembur' : record ? '0 jam' : 'Tanpa data'}</small>
       </button>`;
     });
     return `<div class="lm-cal-layout">${renderReviewEmployeeList()}<section class="lm-cal-panel">
@@ -611,7 +650,7 @@
     const category = resultCategory(record || { date: rules.dateFromKey(key) }, state.holidays);
     return `<section class="lm-day-panel" id="lm-review-day-panel" aria-live="polite">
       <div class="lm-day-panel-head"><div><strong>${esc(fullDayLabel(key))}</strong><span class="category-pill ${category.rest ? 'rest-day' : ''}">${esc(category.label)}</span></div>
-      ${record && !record.documentSources?.length ? `<button type="button" class="btn btn-primary btn-sm" data-review-edit="${esc(rules.employeeKey(employee))}|${esc(key)}">Koreksi Jam Lembur</button>` : ''}</div>
+      ${record && !documentRelevantToOvertime(record) ? `<button type="button" class="btn btn-primary btn-sm" data-review-edit="${esc(rules.employeeKey(employee))}|${esc(key)}">Koreksi Jam Lembur</button>` : ''}</div>
       ${record ? `<div class="lm-day-grid">
         <div><span>Jam Masuk</span><strong>${esc(rules.formatMinutes(record.inMinutes))}</strong></div>
         <div><span>Mulai Lembur</span><strong>${esc(rules.formatMinutes(record.overtimeStartMinutes))}</strong></div>
@@ -619,13 +658,13 @@
         <div><span>Hasil Otomatis</span><strong>${autoHours(record)} jam</strong></div>
         <div class="lm-final-value"><span>Hasil Final</span><strong>${finalHours(record)} jam</strong></div>
         <div><span>Uang Makan Lembur</span><strong>${mealEligible(record) ? 'Memenuhi' : 'Tidak'}</strong></div>
-      </div><div class="lm-day-subrow"><span>Status presensi: ${esc(record.status || '-')}</span>${isManualOvertime(record) ? `<span>Alasan koreksi: ${esc(record.adjustmentReason || 'Koreksi lama, alasan belum dicatat')}</span>` : ''}${record.documentSources?.length?`<span>Dokumen terkait${record.documentBlocksOvertime?' · klaim lembur ditolak':''}</span>`:''}</div>${renderInlineDocumentReview(record)}`
+      </div><div class="lm-day-subrow"><span>Status presensi: ${esc(record.status || '-')}</span>${isManualOvertime(record) ? `<span>Alasan koreksi: ${esc(record.adjustmentReason || 'Koreksi lama, alasan belum dicatat')}</span>` : ''}${documentRelevantToOvertime(record)?`<span>Dokumen terkait${record.documentBlocksOvertime?' · klaim lembur ditolak':''}</span>`:''}</div>${renderInlineDocumentReview(record)}`
       : '<div class="lm-empty lm-inline">Tidak ada data presensi untuk tanggal ini. Data lembur baru tidak dapat dibuat melalui editor.</div>'}</section>`;
   }
   function dailyReviewStats(key) {
     let count = 0, hours = 0, corrected = 0, records = 0, pending = 0, verifiedDocs = 0;
     state.employees.forEach(e => { const r = e.records?.[key]; if(!r) return; records += 1;
-      if(hasOvertime(r)){count += 1; hours += finalHours(r);} if(isManualOvertime(r)) corrected += 1; if(r.documentSources?.length)pending += 1; if(r.documentSources?.length && !r.documentReviewPending)verifiedDocs += 1; });
+      if(hasOvertime(r)){count += 1; hours += finalHours(r);} if(isManualOvertime(r)) corrected += 1; if(documentRelevantToOvertime(r))pending += 1; if(documentRelevantToOvertime(r) && !r.documentReviewPending)verifiedDocs += 1; });
     return { count, hours, corrected, records, pending, verifiedDocs };
   }
   function renderReviewDateCalendar() {
@@ -643,7 +682,7 @@
     const rows = state.employees.map(e => ({ employee:e, record:e.records?.[selected] })).filter(x => x.record);
     return `<section class="lm-date-view"><div class="lm-cal-panel-head"><div><strong>Kalender per Tanggal</strong><span>${esc(periodLabel(state.period))} · Total pegawai dan jam lembur per hari</span></div></div>
       ${calendar}<div class="lm-day-panel" id="lm-review-day-panel"><div class="lm-day-panel-head"><strong>${esc(fullDayLabel(selected))}</strong><span class="lm-count">${rows.length} data presensi</span></div>
-      ${rows.length ? `<div class="table-wrap"><table class="data-table lm-rows"><thead><tr><th>Pegawai</th><th>Masuk</th><th>Mulai</th><th>Pulang</th><th>Otomatis</th><th>Final</th><th>Aksi</th></tr></thead><tbody>${rows.map(({employee,record}) => `<tr><td><b>${esc(employee.name)}</b></td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.overtimeStartMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${autoHours(record)} jam</td><td>${finalHours(record)} jam ${isManualOvertime(record) ? '<span class="lm-mod-label">Koreksi</span>' : ''}${record.documentSources?.length?`<span class="lm-mod-label">${record.documentReviewPending?'Ada dokumen':record.documentBlocksOvertime?'Tidak dapat diklaim':'Dokumen diperiksa'}</span>`:''}</td><td>${record.documentSources?.length?`<button class="btn btn-secondary btn-sm" type="button" data-review-inspect="${esc(rules.employeeKey(employee))}|${esc(selected)}">Lihat Detail</button>`:`<button class="btn btn-secondary btn-sm" type="button" data-review-edit="${esc(rules.employeeKey(employee))}|${esc(selected)}">Edit</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="lm-empty lm-inline">Tidak ada data presensi pada tanggal ini.</div>'}</div></section>`;
+      ${rows.length ? `<div class="table-wrap"><table class="data-table lm-rows"><thead><tr><th>Pegawai</th><th>Masuk</th><th>Mulai</th><th>Pulang</th><th>Otomatis</th><th>Final</th><th>Aksi</th></tr></thead><tbody>${rows.map(({employee,record}) => `<tr><td><b>${esc(employee.name)}</b></td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.overtimeStartMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${autoHours(record)} jam</td><td>${finalHours(record)} jam ${isManualOvertime(record) ? '<span class="lm-mod-label">Koreksi</span>' : ''}${documentRelevantToOvertime(record)?`<span class="lm-mod-label">${record.documentReviewPending?'Ada dokumen':record.documentBlocksOvertime?'Tidak dapat diklaim':'Dokumen diperiksa'}</span>`:''}</td><td>${documentRelevantToOvertime(record)?`<button class="btn btn-secondary btn-sm" type="button" data-review-inspect="${esc(rules.employeeKey(employee))}|${esc(selected)}">Lihat Detail</button>`:`<button class="btn btn-secondary btn-sm" type="button" data-review-edit="${esc(rules.employeeKey(employee))}|${esc(selected)}">Edit</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="lm-empty lm-inline">Tidak ada data presensi pada tanggal ini.</div>'}</div></section>`;
   }
   function renderReviewTable() {
     const rows = reviewRows();
@@ -651,7 +690,7 @@
       <select id="review-table-filter" class="lm-select" aria-label="Filter tabel"><option value="overtime" ${state.reviewTableFilter === 'overtime' ? 'selected' : ''}>Ada lembur / koreksi</option><option value="all" ${state.reviewTableFilter === 'all' ? 'selected' : ''}>Semua data presensi</option><option value="adjusted" ${state.reviewTableFilter === 'adjusted' ? 'selected' : ''}>Hanya koreksi</option><option value="documents" ${state.reviewTableFilter === 'documents' ? 'selected' : ''}>Ada Cuti / Surat Tugas</option></select>
       <span class="lm-count">${rows.length} baris</span></div>
       <div class="card table-wrap"><table class="data-table lm-rows"><thead><tr><th>No.</th><th>Pegawai</th><th>Tanggal</th><th>Kategori</th><th>Masuk</th><th>Pulang</th><th>Status</th><th>Otomatis</th><th>Final</th><th>Aksi</th></tr></thead><tbody>
-        ${rows.length ? rows.map(({employee,record,key},i) => { const category = resultCategory(record, state.holidays); return `<tr><td>${i+1}</td><td><button type="button" class="employee-link" data-review-person="${esc(rules.employeeKey(employee))}">${esc(employee.name)}</button></td><td class="nowrap">${esc(fullDayLabel(key))}</td><td><span class="category-pill ${category.rest ? 'rest-day' : ''}">${category.label}</span></td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${esc(record.status || '-')}</td><td>${autoHours(record)} jam</td><td><b>${finalHours(record)} jam</b> ${isManualOvertime(record) ? '<span class="lm-mod-label">Koreksi</span>' : ''}${record.documentSources?.length?`<span class="lm-mod-label">${record.documentReviewPending?'Ada dokumen':record.documentBlocksOvertime?'Tidak dapat diklaim':'Dokumen diperiksa'}</span>`:''}</td><td>${record.documentSources?.length?`<button class="btn btn-secondary btn-sm" type="button" data-review-inspect="${esc(rules.employeeKey(employee))}|${esc(key)}">Lihat Detail</button>`:`<button class="btn btn-secondary btn-sm" type="button" data-review-edit="${esc(rules.employeeKey(employee))}|${esc(key)}">Edit</button>`}</td></tr>`; }).join('') : '<tr><td colspan="10" class="lm-empty">Tidak ada data pada filter ini.</td></tr>'}
+        ${rows.length ? rows.map(({employee,record,key},i) => { const category = resultCategory(record, state.holidays); return `<tr><td>${i+1}</td><td><button type="button" class="employee-link" data-review-person="${esc(rules.employeeKey(employee))}">${esc(employee.name)}</button></td><td class="nowrap">${esc(fullDayLabel(key))}</td><td><span class="category-pill ${category.rest ? 'rest-day' : ''}">${category.label}</span></td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${esc(record.status || '-')}</td><td>${autoHours(record)} jam</td><td><b>${finalHours(record)} jam</b> ${isManualOvertime(record) ? '<span class="lm-mod-label">Koreksi</span>' : ''}${documentRelevantToOvertime(record)?`<span class="lm-mod-label">${record.documentReviewPending?'Ada dokumen':record.documentBlocksOvertime?'Tidak dapat diklaim':'Dokumen diperiksa'}</span>`:''}</td><td>${documentRelevantToOvertime(record)?`<button class="btn btn-secondary btn-sm" type="button" data-review-inspect="${esc(rules.employeeKey(employee))}|${esc(key)}">Lihat Detail</button>`:`<button class="btn btn-secondary btn-sm" type="button" data-review-edit="${esc(rules.employeeKey(employee))}|${esc(key)}">Edit</button>`}</td></tr>`; }).join('') : '<tr><td colspan="10" class="lm-empty">Tidak ada data pada filter ini.</td></tr>'}
       </tbody></table></div>`;
   }
   function renderReview() {
@@ -664,7 +703,7 @@
       ${isEdit ? '<div class="alert alert-warning"><div class="alert-title">Mode edit riwayat</div>Koreksi akan mengganti hasil tersimpan setelah Anda menekan Simpan & Generate Ulang.</div>' : ''}
       <div class="grid-4 section-gap">${metric(summary.employees,'Pegawai')}${metric(summary.overtimeEmployees,'Pegawai Lembur')}${metric(summary.totalHours,'Total Jam Lembur')}${metric(summary.mealDays,'Hari Uang Makan')}</div>
       ${renderHolidayManager()}
-      <div class="card lm-review-card"><div class="lm-review-head"><div><div class="card-title">Pemeriksaan dan Koreksi ${window.LemburDocumentIntegration?.reviewGroups?.(state.employees).length?`<span class="lm-review-counter pending">${window.LemburDocumentIntegration.reviewGroups(state.employees).length} dokumen terdeteksi</span>`:''}</div><div class="card-subtitle">Pilih pegawai dan tanggal untuk melihat dokumen. Penyesuaian hasil lembur tersedia bila diperlukan, tanpa kewajiban penyesuaian.</div></div>
+      <div class="card lm-review-card"><div class="lm-review-head"><div><div class="card-title">Pemeriksaan dan Koreksi ${window.LemburDocumentIntegration?.reviewGroups?.(state.employees).filter(group=>group.records.some(({record})=>documentRelevantToOvertime(record))).length?`<span class="lm-review-counter pending">${window.LemburDocumentIntegration.reviewGroups(state.employees).filter(group=>group.records.some(({record})=>documentRelevantToOvertime(record))).length} dokumen terkait lembur</span>`:''}</div><div class="card-subtitle">Pilih pegawai dan tanggal untuk melihat dokumen. Penyesuaian hasil lembur tersedia bila diperlukan, tanpa kewajiban penyesuaian.</div></div>
       <div class="lm-segment" role="group" aria-label="Tampilan editor">${['calendar','table'].map((mode)=>`<button type="button" data-review-mode="${mode}" aria-pressed="${state.reviewMode === mode}" class="${state.reviewMode === mode ? 'active' : ''}">${mode === 'calendar' ? 'Kalender' : 'Tabel'}</button>`).join('')}</div></div>
       ${state.reviewMode === 'calendar' ? `<div class="lm-review-controls"><div class="lm-segment" role="group" aria-label="Perspektif kalender"><button type="button" class="${state.reviewGroup === 'employee' ? 'active' : ''}" data-review-group="employee">Per Pegawai</button><button type="button" class="${state.reviewGroup === 'date' ? 'active' : ''}" data-review-group="date">Per Tanggal</button></div>
         ${state.reviewGroup === 'employee' ? `<input id="lm-person-search" class="lm-input" type="search" placeholder="Cari pegawai / NIP" value="${esc(state.filter)}">` : ''}
@@ -722,7 +761,7 @@
     const [employeeKey, dateKey] = key.split('|');
     const record=state.employees.find(e=>rules.employeeKey(e)===employeeKey)?.records?.[dateKey];
     if(!record)return;
-    if(record.documentSources?.length){openInlineDocumentDetail(employeeKey,dateKey);return;}
+    if(documentRelevantToOvertime(record)){openInlineDocumentDetail(employeeKey,dateKey);return;}
     state.reviewEditKey = key;
     renderStay();
   }
@@ -1299,7 +1338,7 @@
     bindReviewSearch('review-search');
     bindReviewSearch('lm-person-search');
     document.querySelectorAll('[data-lm-document-save]').forEach(btn=>btn.addEventListener('click',()=>saveDocumentPeriodReview(btn.dataset.lmDocumentSave)));
-    document.querySelectorAll('[data-lm-preview-load]').forEach(btn=>btn.addEventListener('click',()=>loadDocumentPreview(btn)));
+    document.querySelectorAll('[data-lm-preview-auto]').forEach(placeholder=>{loadDocumentPreview(placeholder);});
     document.querySelectorAll('[data-review-inspect]').forEach(btn=>btn.addEventListener('click',()=>{
       const [employeeKey,dateKey]=btn.dataset.reviewInspect.split('|');
       openInlineDocumentDetail(employeeKey,dateKey);
