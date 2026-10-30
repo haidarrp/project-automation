@@ -137,3 +137,33 @@
 .lm-audit-history p strong{display:block;margin-bottom:4px}
 .lm-audit-history p span{color:var(--muted);line-height:1.5}
 @media(max-width:850px){.lm-editor-bottom{position:static;bottom:auto}}
+
+/* Verifikasi Cuti / Surat Tugas per periode, mengikuti alur Uang Makan. */
+.lm-period-review{border:1px solid #c9def5;border-radius:14px;background:#f3f8fd;padding:17px;margin:18px 0;scroll-margin-top:26px}
+.lm-period-review-title{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;flex-wrap:wrap;margin-bottom:15px}
+.lm-period-review-title h3{margin:0 0 6px;font-size:14px;color:#163a5a}
+.lm-period-review-title p{margin:0;max-width:880px;font-size:11px;line-height:1.6;color:#4d657c}
+.lm-review-counter{display:inline-block;padding:7px 11px;border-radius:30px;font-size:10px;font-weight:730;white-space:nowrap}
+.lm-review-counter.pending{color:#85530d;background:#fff0ce}.lm-review-counter.complete{color:#245f45;background:#e2f1e6}
+.lm-period-review-items{display:grid;gap:12px}
+.lm-period-document{border:1px solid #d6e2ee;border-left:3px solid #93b2cd;border-radius:12px;padding:15px;background:#fff;min-width:0}
+.lm-period-document.pending{border-left-color:#ec9e2a}.lm-period-document.verified{border-left-color:#53a076}
+.lm-period-document-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.lm-period-document-head>div{display:flex;align-items:center;gap:9px;flex-wrap:wrap;min-width:0}
+.lm-period-document-head strong{font-size:11px;color:#233845;overflow-wrap:anywhere}
+.lm-document-type{border-radius:6px;padding:5px 7px;font-size:10px;font-weight:760}
+.lm-document-type.leave{color:#235a76;background:#e2f2fb}.lm-document-type.assignment{color:#315b90;background:#e5f0ff}
+.lm-document-status{padding:5px 10px;font-size:10px;font-weight:720;border-radius:30px;white-space:nowrap}
+.lm-document-status.pending{background:#fff3dc;color:#87590f}.lm-document-status.verified{background:#e5f3e9;color:#246449}
+.lm-document-meta{display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;font-size:10px;color:#677889;margin:12px 0 13px;line-height:1.6}
+.lm-document-controls{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+.lm-document-controls>label{display:flex;flex-direction:column;gap:6px;min-width:240px;flex:1;font-size:10px;font-weight:750;color:#293b4c}
+.lm-document-controls select{width:100%;height:38px;font-size:11px}
+.lm-document-controls>.btn{min-height:38px;white-space:nowrap}
+.lm-document-hint{margin:11px 0 0;padding:10px 12px;border:1px solid #e8ecef;background:#f8fafb;color:#647585;border-radius:9px;font-size:10px;line-height:1.6}
+.lm-dot-orange{background:#ffe1ac;color:#d58a18}
+/* Prioritaskan status verifikasi di atas warna lembur, koreksi, dan libur. */
+.lm-cal-day.lm-needs-review,.lm-cal-day.lm-needs-review.lm-rest,.lm-cal-day.lm-needs-review.lm-adjusted{background:#fff0d9;border:2px solid #e7a649;padding:8px 6px;box-shadow:inset 0 0 0 1px #ffe2b0}
+.lm-cal-day.lm-needs-review small{color:#895714;font-weight:760}
+.lm-cal-day.lm-needs-review.selected{border-color:#ac6818;box-shadow:0 0 0 3px rgba(230,155,51,.20);z-index:1}
+@media(max-width:575px){.lm-period-review{padding:11px}.lm-period-document{padding:11px}.lm-document-controls{align-items:stretch}.lm-document-controls>label{min-width:0;width:100%}.lm-document-controls>.btn{width:100%}.lm-cal-day.lm-needs-review{padding:4px 1px}}

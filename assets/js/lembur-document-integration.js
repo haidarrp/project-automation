@@ -1,6 +1,6 @@
-/* Cuti / Surat Tugas sebagai pembatas klaim lembur.
- * Jam dari absensi tetap menjadi referensi; jam final menjadi 0 jika ada
- * Cuti yang diakui atau Surat Tugas yang dipertanggungjawabkan.
+/* Verifikasi Cuti / Surat Tugas untuk proses Lembur.
+ * Satu keputusan per dokumen berlaku untuk semua tanggal dan pegawai dalam
+ * proses yang sama. Jam presensi asli tidak pernah diubah oleh keputusan ini.
  */
 (function(root,factory){
   const api=factory(root);
@@ -8,6 +8,15 @@
   if(root)root.LemburDocumentIntegration=api;
 })(typeof window!=='undefined'?window:null,function(root){
   'use strict';
+  const sourceKey=doc=>`${doc.kind}:${doc.id}`;
+  function signature(doc){
+    return JSON.stringify([
+      doc.kind,String(doc.id),String(doc.startDate),String(doc.endDate),
+      doc.kind==='cuti'?String(doc.employeeId):[...(doc.employeeIds||[])].map(String).sort(),
+      doc.kind==='cuti'?String(doc.leaveType||''):doc.accountable!==false,
+      String(doc.documentNumber||doc.letterNumber||'')
+    ]);
+  }
   function documentMatches(record,date,employeeId,policy){
     if(!record||!record.startDate||!record.endDate||date<record.startDate||date>record.endDate)return false;
     if(record.kind==='cuti')return String(record.employeeId)===String(employeeId)&&policy.allows('cuti',record.id,employeeId);
@@ -18,38 +27,94 @@
       ? `Cuti ${doc.leaveType||''} (${doc.documentNumber||doc.id})`
       : `Surat Tugas ${doc.letterNumber||doc.id}${doc.accountable===false?' (tidak dipertanggungjawabkan)':''}`;
   }
+  function toSource(doc){
+    return {id:String(doc.id),key:sourceKey(doc),kind:doc.kind,label:describe(doc),
+      signature:signature(doc),startDate:doc.startDate,endDate:doc.endDate,
+      accountable:doc.accountable!==false,blockByDefault:doc.kind==='cuti'||doc.accountable!==false};
+  }
+  function validReview(record,source){
+    const review=record.documentReviews?.[source.key];
+    return review&&review.signature===source.signature&&['allow','deny'].includes(review.choice)?review:null;
+  }
+  function recalculateRecord(record){
+    const sources=record.documentSources||[];
+    const previousBlock=Boolean(record.documentBlocksOvertime);
+    const blocked=sources.some(source=>source.blockByDefault||validReview(record,source)?.choice==='deny');
+    record.documentReviewPending=sources.some(source=>!validReview(record,source));
+    record.documentBlocksOvertime=blocked;
+    record.documentSignature=sources.length?JSON.stringify(sources.map(s=>[s.key,s.signature]).sort((a,b)=>a[0].localeCompare(b[0]))):'';
+    if(record.originalOvertimeHours===undefined||record.originalOvertimeHours===null){
+      record.originalOvertimeHours=Number(record.overtimeHours||0);
+    }
+    if(blocked){
+      if(Number(record.overtimeHours||0)!==0||!previousBlock){record.overtimeHours=0;record.manualOverride=false;}
+      record.documentBlockNote=sources.some(s=>s.blockByDefault)
+        ?'Klaim lembur tidak diperkenankan karena ada Cuti yang berlaku atau Surat Tugas yang dipertanggungjawabkan, meskipun presensi tercatat WFO.'
+        :'Klaim lembur tidak diberikan berdasarkan keputusan verifikasi dokumen per periode.';
+    }else{
+      if(previousBlock){record.overtimeHours=Number(record.originalOvertimeHours||0);record.manualOverride=false;}
+      record.documentBlockNote='';
+    }
+    return blocked;
+  }
   function applyDocuments(employees,leaves,assignments,policy,resolveId){
     let held=0,pending=0,linked=0;
+    const docs=[...leaves.map(d=>({...d,kind:'cuti'})),...assignments.map(d=>({...d,kind:'surat'}))];
     for(const employee of employees){
       const id=String(resolveId(employee)||'');
       if(!id)throw new Error(`Identitas pegawai ${employee.name||employee.nip||'-'} tidak ditemukan pada Master Pegawai. Klaim lembur tidak dapat diverifikasi.`);
-      const docs=[...leaves.map(d=>({...d,kind:'cuti'})),...assignments.map(d=>({...d,kind:'surat'}))];
       for(const [date,record] of Object.entries(employee.records||{})){
         const matches=docs.filter(d=>documentMatches(d,date,id,policy));
-        const blocked=matches.some(d=>d.kind==='cuti'||d.accountable!==false);
-        const signature=JSON.stringify(matches.map(d=>[d.kind,d.id,d.startDate,d.endDate,d.accountable!==false,d.documentNumber||d.letterNumber||'']).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))));
-        const beforeBlocked=Boolean(record.documentBlocksOvertime);
-        // Pertahankan jam hasil absensi ketika memblokir klaim pada data lama.
-        if(record.originalOvertimeHours===undefined||record.originalOvertimeHours===null){
-          record.originalOvertimeHours=Number(record.overtimeHours||0);
-        }
-        record.documentSources=matches.map(d=>({id:d.id,kind:d.kind,label:describe(d),accountable:d.accountable!==false}));
-        record.documentBlocksOvertime=blocked;
-        record.documentSignature=matches.length?signature:'';
-        record.documentReviewPending=matches.length>0&&record.documentVerifiedSignature!==signature;
-        if(blocked){
-          if(Number(record.overtimeHours||0)!==0||!beforeBlocked){record.overtimeHours=0;record.manualOverride=false;}
-          record.documentBlockNote='Klaim lembur tidak diperkenankan karena ada Cuti yang berlaku atau Surat Tugas yang dipertanggungjawabkan, meskipun presensi tercatat WFO.';
-          held++;
-        }else{
-          if(beforeBlocked){record.overtimeHours=Number(record.originalOvertimeHours||0);record.manualOverride=false;}
-          record.documentBlockNote='';
-        }
+        record.documentSources=matches.map(toSource);
+        if(recalculateRecord(record))held++;
         if(matches.length)linked++;
         if(record.documentReviewPending)pending++;
       }
     }
     return {held,pending,linked};
+  }
+  function reviewGroups(employees){
+    const groups=new Map();
+    for(const employee of employees||[]){
+      for(const [date,record] of Object.entries(employee.records||{})){
+        for(const source of record.documentSources||[]){
+          const key=source.key;
+          if(!groups.has(key))groups.set(key,{...source,dates:new Set(),employees:new Set(),records:[],reviewed:0,pending:0});
+          const group=groups.get(key);
+          // Signature is unique to a current source. The same source must not
+          // be applied across dissimilar versions within one processing batch.
+          if(group.signature!==source.signature)throw new Error(`Data ${source.label} tidak konsisten; sinkronkan ulang dokumen.`);
+          group.dates.add(date);
+          group.employees.add(String(employee.name||employee.nip||'-'));
+          group.records.push({employee,date,record});
+          if(validReview(record,source))group.reviewed++;
+          else group.pending++;
+        }
+      }
+    }
+    return [...groups.values()].sort((a,b)=>a.startDate.localeCompare(b.startDate)||a.key.localeCompare(b.key))
+      .map(g=>{
+        const savedChoices=new Set(g.records.map(({record})=>validReview(record,g)?.choice).filter(Boolean));
+        const verified=g.pending===0&&savedChoices.size===1;
+        return {...g,dates:[...g.dates].sort(),employees:[...g.employees].sort(),verified,
+          choice:verified?[...savedChoices][0]:(g.blockByDefault?'deny':'allow')};
+      });
+  }
+  function verifySource(employees,key,expectedSignature,choice,actor={}){
+    if(!['allow','deny'].includes(choice))throw new Error('Pilihan klaim lembur tidak valid.');
+    const group=reviewGroups(employees).find(g=>g.key===key);
+    if(!group||group.signature!==expectedSignature)throw new Error('Dokumen berubah. Muat ulang hasil proses sebelum memverifikasi.');
+    if(choice==='allow'&&group.blockByDefault){
+      throw new Error('Cuti yang berlaku atau Surat Tugas yang dipertanggungjawabkan tidak dapat diklaim untuk lembur. Ubah status dokumen pada modul sumber terlebih dahulu.');
+    }
+    const now=new Date().toISOString();
+    const review={signature:group.signature,choice,reviewedAt:now,
+      reviewedBy:String(actor.displayName||actor.email||'Operator'),reviewedByUid:String(actor.uid||'')};
+    for(const {record} of group.records){
+      record.documentReviews={...(record.documentReviews||{}),[key]:{...review}};
+      recalculateRecord(record);
+    }
+    return {records:group.records.length,employees:group.employees.length,dates:group.dates.length};
   }
   function periodYears(period){return [...new Set([period.year-1,period.year])];}
   async function fetchDocuments(period){
@@ -83,6 +148,10 @@
     }
     return applyDocuments(employees,documents.leaves,documents.assignments,documents.policy,e=>ids.get(e));
   }
-  function remaining(employees){return (employees||[]).reduce((count,e)=>count+Object.values(e.records||{}).filter(r=>r.documentReviewPending).length,0);}
-  return Object.freeze({apply,applyDocuments,remaining});
+  function remaining(employees){
+    const pendingDays=(employees||[]).reduce((count,e)=>count+Object.values(e.records||{}).filter(r=>r.documentReviewPending).length,0);
+    // Lindungi arsip yang berisi keputusan berbeda untuk satu dokumen yang sama.
+    return Math.max(pendingDays,reviewGroups(employees).filter(group=>!group.verified).length);
+  }
+  return Object.freeze({apply,applyDocuments,remaining,reviewGroups,verifySource});
 });
