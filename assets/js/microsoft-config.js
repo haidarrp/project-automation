@@ -15,7 +15,7 @@
     rootFolderName: 'TUKIN',
 
     // Least-privileged delegated permission yang digunakan untuk operasi file/folder.
-    scopes: Object.freeze(['Files.ReadWrite']),
+    scopes: Object.freeze(['Files.ReadWrite.All']),
 
     // Pembatasan akun Microsoft yang boleh dipakai pada UI.
     allowedEmailDomain: 'pkp.go.id',
