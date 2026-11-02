@@ -10,6 +10,44 @@
   const app = document.getElementById('app');
 
   let historyUnsubscribe = null;
+  let processingSequence = 0;
+  const MASTER_LOOKUP_TIMEOUT_MS = 25000;
+  const DOCUMENT_LOOKUP_TIMEOUT_MS = 35000;
+
+  // Firestore may wait indefinitely while offline. A timeout must always
+  // return the UI to a recoverable state rather than leaving a frozen spinner.
+  async function withTimeout(work, timeoutMs, label) {
+    let timer;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(work),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(
+            `${label} tidak selesai dalam ${timeoutMs / 1000} detik. Periksa koneksi internet, status login, dan izin akses Firestore.`
+          )), timeoutMs);
+        })
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // A retry must never share mutable attendance records with an earlier,
+  // timed-out attempt whose Firestore requests may still finish later.
+  function cloneEmployeesForProcessing(employees) {
+    return (employees || []).map(employee => ({
+      ...employee,
+      records: Object.fromEntries(Object.entries(employee.records || {}).map(([key, record]) => [key, {...record}]))
+    }));
+  }
+
+  function processingErrorText(error) {
+    const message = String(error?.message || error || 'Kesalahan tidak diketahui.');
+    if (String(error?.code || '').includes('permission-denied') || /permission-denied|missing or insufficient permissions/i.test(message)) {
+      return `Akses ke Firestore ditolak. Periksa izin membaca Master Pegawai, Cuti, dan Surat Tugas untuk akun ini. Detail: ${message}`;
+    }
+    return message;
+  }
 
   const state = {
     started: false,
@@ -33,7 +71,7 @@
     reviewEditKey: null,
     pendingHoliday: null,
     dirtyKeys: new Set(),
-    processing: { percent: 0, active: 0 },
+    processing: { percent: 0, active: 0, error: null },
     generated: null,
     currentRun: null,
     resultFromHistory: false,
@@ -348,7 +386,10 @@
 
   function renderProcessing() {
     const labels = ['Membaca file','Mengidentifikasi pegawai','Memvalidasi periode','Menghitung jam lembur','Menyiapkan hasil review'];
-    return `<div class="page-title"><div><h2>Memproses Data Presensi</h2><p>Sistem menyiapkan data lembur untuk direview.</p></div></div><div class="card progress-wrap"><div class="progress-title"><h3>Memproses Data Presensi</h3><p>Jangan menutup halaman selama proses berlangsung.</p></div><div class="progress-bar"><div class="progress-fill" style="width:${state.processing.percent}%"></div></div><div class="progress-meta"><span>${state.processing.percent}%</span><span>${state.files.length} file</span></div><ul class="process-list">${labels.map((l,i)=>`<li class="${i<state.processing.active?'done':i===state.processing.active?'active':''}"><span class="process-bullet">${i<state.processing.active?'✓':i+1}</span>${l}</li>`).join('')}</ul></div>`;
+    const problem = state.processing.error;
+    const errorSection = problem ? `<div class="section-gap alert alert-danger" role="alert"><div class="alert-title">Proses tidak dapat dilanjutkan</div><p>${esc(problem)}</p><p>File presensi yang telah divalidasi tetap tersedia. Periksa koneksi dan akses Master Pegawai pada Firebase, lalu coba lagi.</p></div>
+      <div class="actions"><button type="button" class="btn btn-secondary" data-action="back-validation">Kembali ke Validasi</button><button type="button" class="btn btn-primary" data-action="retry-process">Coba Lagi</button></div>` : '';
+    return `<div class="page-title"><div><h2>Memproses Data Presensi</h2><p>Sistem menyiapkan data lembur untuk direview.</p></div></div><div class="card progress-wrap"><div class="progress-title"><h3>${problem ? 'Proses terhenti' : 'Memproses Data Presensi'}</h3><p>${problem ? 'Silakan periksa rincian kesalahan di bawah.' : 'Jangan menutup halaman selama proses berlangsung.'}</p></div><div class="progress-bar"><div class="progress-fill" style="width:${state.processing.percent}%"></div></div><div class="progress-meta"><span>${state.processing.percent}%</span><span>${state.files.length} file</span></div><ul class="process-list">${labels.map((l,i)=>`<li class="${i<state.processing.active?'done':i===state.processing.active?'active':''}"><span class="process-bullet">${i<state.processing.active?'✓':i+1}</span>${l}</li>`).join('')}</ul>${errorSection}</div>`;
   }
 
   // Kalender menggunakan tanggal lokal pukul 12.00 agar aman dari pergeseran zona waktu.
@@ -996,6 +1037,9 @@
   }
 
   function resetProcess() {
+    processingSequence += 1;
+    state.busy = false;
+    state.processing = {percent: 0, active: 0, error: null};
     state.view = 'process';
     state.processStep = 'period';
     state.files = [];
@@ -1052,28 +1096,45 @@
   }
 
   async function processData() {
-    if (!state.validation || state.validation.errors.length) return;
-    state.processStep = 'processing'; state.processing = {percent:8,active:0}; render();
-    const stages = [20,38,58,78,92];
-    for (let i=0;i<stages.length;i+=1) {
-      state.processing = {percent:stages[i],active:i}; render(); await new Promise(r=>setTimeout(r,180));
-      if (i===1) await rules.assignSatkerCodes(state.validation.employees);
-    }
+    if (!state.validation || state.validation.errors.length || state.busy) return;
+    const sequence = ++processingSequence;
+    const employees = cloneEmployeesForProcessing(state.validation.employees);
+    state.busy = true;
+    state.processStep = 'processing';
+    state.processing = {percent:8,active:0,error:null}; render();
     try {
-      // Sinkronisasi sumber wajib untuk memastikan aturan klaim otomatis; penyesuaian manual tidak wajib.
-      await window.LemburDocumentIntegration.apply(state.validation.employees,state.period);
-    }catch(error){
-      state.processStep='validation';
-      alert(`Gagal membaca Cuti/Surat Tugas: ${error.message||error}`);
-      render();return;
+      const stages = [20,38,58,78,92];
+      for (let i=0;i<stages.length;i+=1) {
+        if (sequence !== processingSequence) return;
+        state.processing = {percent:stages[i],active:i,error:null}; render();
+        await new Promise(resolve=>setTimeout(resolve,180));
+        if (i===1) {
+          await withTimeout(() => rules.assignSatkerCodes(employees), MASTER_LOOKUP_TIMEOUT_MS,
+            'Pencocokan pegawai dengan Master Pegawai');
+        }
+      }
+      // Required validation: never skip Cuti/Surat Tugas if Firebase is unavailable.
+      await withTimeout(() => window.LemburDocumentIntegration.apply(employees,state.period),
+        DOCUMENT_LOOKUP_TIMEOUT_MS, 'Pemeriksaan Cuti/Surat Tugas');
+      if (sequence !== processingSequence) return;
+      state.employees = employees;
+      state.reviewEmployeeKey = null;
+      state.reviewDateKey = null;
+      state.dirtyKeys.clear();
+      resources?.warm?.(['exceljs', 'filesaver']);
+      state.processing = {percent:100,active:5,error:null}; render();
+      await new Promise(resolve=>setTimeout(resolve,220));
+      if (sequence !== processingSequence) return;
+      state.busy = false;
+      state.processStep = 'review'; render();
+    } catch (error) {
+      if (sequence !== processingSequence) return;
+      console.error('Pemrosesan data lembur gagal:', error);
+      state.processing = {...state.processing, error:processingErrorText(error)};
+      render();
+    } finally {
+      if (sequence === processingSequence) state.busy = false;
     }
-    state.employees = state.validation.employees;
-    state.reviewEmployeeKey = null;
-    state.reviewDateKey = null;
-    state.dirtyKeys.clear();
-    resources?.warm?.(['exceljs', 'filesaver']);
-    state.processing = {percent:100,active:5}; render(); await new Promise(r=>setTimeout(r,220));
-    state.processStep = 'review'; render();
   }
 
   // Mode tabel juga menggunakan modal yang sama agar koreksi selalu tercatat.
@@ -1251,7 +1312,7 @@
   }
 
   function bindEvents() {
-    document.querySelectorAll('[data-nav]').forEach(btn=>btn.addEventListener('click',(event)=>{ event.preventDefault(); const target=btn.dataset.nav; if(target==='process') resetProcess(); else { state.view=target; state.editingHistoryId=null; } history.replaceState(null,'',`lembur.html#${target}`); render(); }));
+    document.querySelectorAll('[data-nav]').forEach(btn=>btn.addEventListener('click',(event)=>{ event.preventDefault(); const target=btn.dataset.nav; if(target==='process') resetProcess(); else { processingSequence += 1; state.busy = false; state.view=target; state.editingHistoryId=null; } history.replaceState(null,'',`lembur.html#${target}`); render(); }));
     document.querySelector('[data-action="enter-app"]')?.addEventListener('click',()=>{ state.started=true; resetProcess(); history.replaceState(null,'','lembur.html#process'); render(); });
     document.querySelector('[data-action="start-process"]')?.addEventListener('click',()=>{ resetProcess(); history.replaceState(null,'','lembur.html#process'); render(); });
     document.querySelector('[data-action="go-history"]')?.addEventListener('click',()=>{ state.view='history'; state.editingHistoryId=null; history.replaceState(null,'','lembur.html#history'); render(); });
@@ -1270,7 +1331,12 @@
     document.querySelector('[data-action="validate"]')?.addEventListener('click',validateFiles);
     document.querySelector('[data-action="back-upload"]')?.addEventListener('click',()=>{state.processStep='upload';render();});
     document.querySelector('[data-action="process-data"]')?.addEventListener('click',processData);
-    document.querySelector('[data-action="back-validation"]')?.addEventListener('click',()=>{state.processStep='validation';render();});
+    document.querySelector('[data-action="retry-process"]')?.addEventListener('click',processData);
+    document.querySelector('[data-action="back-validation"]')?.addEventListener('click',()=>{
+      processingSequence += 1;
+      state.busy = false;
+      state.processStep='validation';render();
+    });
     document.querySelector('[data-action="to-confirm"]')?.addEventListener('click',()=>{state.processStep='confirm';render();});
     document.querySelector('[data-action="back-review"]')?.addEventListener('click',()=>{state.processStep='review';render();});
     document.querySelector('[data-action="generate"]')?.addEventListener('click',generateDocs);
