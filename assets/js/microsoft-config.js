@@ -9,8 +9,8 @@
     clientId: '3eaa9458-9800-42cf-878a-f7c3e69a11ea',
 
     // Folder SharePoint/OneDrive for Business yang diberikan sebagai root penyimpanan.
-    shareUrl: 'https://kemenpkp-my.sharepoint.com/:f:/g/personal/haidar_rasyid_pkp_go_id/IgBUU-kkbmhFQZoyFaBIzSPNAeWMrJrwlTFe7Kb29SrVtpo?e=cPWVIx',
-
+    // shareUrl: 'https://kemenpkp-my.sharepoint.com/:f:/g/personal/haidar_rasyid_pkp_go_id/IgBUU-kkbmhFQZoyFaBIzSPNAeWMrJrwlTFe7Kb29SrVtpo?e=cPWVIx',
+    shareUrl: 'https://kemenpkp-my.sharepoint.com/:f:/g/personal/haidar_rasyid_pkp_go_id/IgBUU-kkbmhFQZoyFaBIzSPNATntjQ-pG9m7SR6l-Yjic6U?e=NkoiJ3',
     // Aplikasi membuat folder ini di bawah folder yang dibagikan di atas.
     rootFolderName: 'TUKIN',
 

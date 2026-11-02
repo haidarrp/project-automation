@@ -4,7 +4,7 @@
   const cfg = window.MICROSOFT_CONFIG || {};
   const auth = window.MicrosoftAuth;
   const rootFolderName = String(window.SHAREPOINT_STORAGE_ROOT_FOLDER || cfg.rootFolderName || '').trim();
-  const rootCache = { resolved: null, appRoot: null };
+  const rootCache = { resolved: null, appRoot: null, accountKey: null };
   const monthNames = window.TUKIN_CONFIG?.MONTHS || [
     'Januari','Februari','Maret','April','Mei','Juni',
     'Juli','Agustus','September','Oktober','November','Desember'
@@ -93,14 +93,42 @@
     return true;
   }
 
+  // Hindari memakai drive/item dari akun Microsoft sebelumnya jika akun berganti.
+  function syncRootCacheAccount() {
+    const accountKey = String(auth?.getStatus?.()?.email || '').trim().toLowerCase();
+    if (rootCache.accountKey === accountKey) return;
+    rootCache.accountKey = accountKey;
+    rootCache.resolved = null;
+    rootCache.appRoot = null;
+  }
+
   async function resolveSharedRoot(interactive) {
+    syncRootCacheAccount();
     if (rootCache.resolved) return rootCache.resolved;
-    if (!cfg.shareUrl) throw new Error('shareUrl SharePoint belum diisi.');
-    const encoded = base64Url(cfg.shareUrl);
-    const item = await graphJson(`/shares/${encoded}/driveItem?$select=id,name,webUrl,parentReference,folder`, {
-      interactive,
-      headers: { Prefer: 'redeemSharingLink' }
-    });
+    const shareUrl = String(cfg.shareUrl || '').trim();
+    if (!shareUrl) throw new Error('shareUrl SharePoint belum diisi.');
+    const encoded = base64Url(shareUrl);
+    let item;
+    try {
+      item = await graphJson(`/shares/${encoded}/driveItem?$select=id,name,webUrl,parentReference,folder`, {
+        interactive,
+        headers: { Prefer: 'redeemSharingLink' }
+      });
+    } catch (error) {
+      if (error?.status === 404) {
+        const notFound = new Error(
+          'Microsoft Graph 404: sharing link folder tidak ditemukan. ' +
+          'Periksa Manage access > Links pada folder sumber, buat sharing link baru ' +
+          'untuk pengguna tertentu (Specific people, Can edit), lalu perbarui ' +
+          'shareUrl di assets/js/microsoft-config.js. Akses langsung Can edit ' +
+          'pada tab People tidak otomatis membuat sharing link.'
+        );
+        notFound.status = 404;
+        notFound.cause = error;
+        throw notFound;
+      }
+      throw error;
+    }
     const driveId = item?.parentReference?.driveId;
     if (!item?.id || !driveId || !item?.folder) {
       throw new Error('Tautan SharePoint tidak mengarah ke folder yang dapat ditulis.');
@@ -155,6 +183,7 @@
   }
 
   async function resolveAppRoot(interactive) {
+    syncRootCacheAccount();
     if (rootCache.appRoot) return rootCache.appRoot;
     const shared = await resolveSharedRoot(interactive);
     const appRoot = rootFolderName
@@ -670,6 +699,7 @@
   }
 
   function resetCache() {
+    rootCache.accountKey = null;
     rootCache.resolved = null;
     rootCache.appRoot = null;
   }

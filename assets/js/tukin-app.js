@@ -47,6 +47,9 @@
     sharePointRun: null,
     pendingSharePointDeletes: [],
     sharePointBusy: false,
+    sharePointChecking: false,
+    sharePointReady: false,
+    sharePointError: '',
     supportIntegration: { status: 'idle', leaveRecords: 0, assignmentRecords: 0, adjustedRecords: 0, cutiAdjustedRecords: 0, assignmentAdjustedRecords: 0, conflictRecords: 0, clearedRecords: 0, matchedEmployees: 0, unresolvedEmployees: 0, preservedManualRecords: 0, evidenceFiles: 0, linkedRecords: 0, cutiLinkedRecords: 0, assignmentLinkedRecords: 0, message: '' }
   };
 
@@ -150,10 +153,16 @@
     if (!status.libraryLoaded) {
       return `<div class="alert alert-warning"><div class="alert-title">MSAL belum termuat</div><code>tenantId</code> dan <code>clientId</code> sudah terbaca, tetapi <code>assets/vendor/msal-browser.bundle.js</code> belum tersedia/termuat. Jalankan <code>npm install</code> lalu <code>npm run build</code>, kemudian deploy ulang.</div>`;
     }
-    if (status.connected) {
+    if (state.sharePointChecking) {
+      return '<div class="alert alert-warning"><div class="alert-title">Memeriksa akses SharePoint...</div>Memverifikasi akses folder melalui Microsoft Graph.</div>';
+    }
+    if (status.connected && state.sharePointReady) {
       return `<div class="alert alert-success"><div class="alert-title">SharePoint terhubung</div>${esc(status.name || status.email || 'Akun Microsoft 365')} ${status.email ? `· ${esc(status.email)}` : ''}${state.sharePointRun?.runFolderWebUrl ? ` · <a href="${esc(state.sharePointRun.runFolderWebUrl)}" target="_blank" rel="noopener noreferrer">Buka folder run ↗</a>` : ''}</div>`;
     }
-    return `<div class="alert alert-warning"><div class="alert-title">Hubungkan SharePoint</div>Hubungkan akun Microsoft 365 Kementerian PKP agar file Excel asli dan bukti dukung tersimpan dan dapat dibuka lintas perangkat.<div style="margin-top:10px"><button class="btn btn-secondary btn-sm" data-action="connect-sharepoint" type="button" ${state.sharePointBusy ? 'disabled' : ''}>${state.sharePointBusy ? 'Menghubungkan...' : 'Hubungkan SharePoint'}</button></div></div>`;
+    const title = status.connected ? 'Koneksi SharePoint perlu diperiksa' : 'Hubungkan SharePoint';
+    const detail = state.sharePointError || 'Hubungkan akun Microsoft 365 Kementerian PKP dan verifikasi akses folder untuk menyimpan file Excel serta bukti dukung.';
+    const buttonLabel = state.sharePointBusy ? 'Menghubungkan...' : status.connected ? 'Periksa Koneksi SharePoint' : 'Hubungkan SharePoint';
+    return `<div class="alert alert-warning"><div class="alert-title">${esc(title)}</div>${esc(detail)}<div style="margin-top:10px"><button class="btn btn-secondary btn-sm" data-action="connect-sharepoint" type="button" ${state.sharePointBusy ? 'disabled' : ''}>${esc(buttonLabel)}</button></div></div>`;
   }
 
   function shell(content) {
@@ -1330,10 +1339,13 @@
       render();
       try {
         await microsoftAuth?.connect?.();
-        await sharePoint?.resolveAppRoot?.(true);
+        await sharePoint?.ensureReady?.(true);
+        state.sharePointReady = true;
+        state.sharePointError = '';
       } catch (error) {
-        console.error(error);
-        alert(`Koneksi SharePoint gagal: ${error.message || error}`);
+        state.sharePointReady = false;
+        state.sharePointError = `Gagal menghubungkan SharePoint: ${String(error?.message || error)}`;
+        console.error('[Tukin] Koneksi SharePoint:', error);
       } finally {
         state.sharePointBusy = false;
         render();
@@ -1584,6 +1596,23 @@
     }
   });
 
+  async function checkSharePointOnLoad() {
+    if (!microsoftAuth?.getStatus?.()?.connected) return;
+    state.sharePointChecking = true;
+    render();
+    try {
+      await sharePoint.ensureReady(false);
+      state.sharePointReady = true;
+      state.sharePointError = '';
+    } catch (error) {
+      state.sharePointReady = false;
+      state.sharePointError = `Tidak dapat mengakses penyimpanan SharePoint: ${String(error?.message || error)}`;
+    } finally {
+      state.sharePointChecking = false;
+      render();
+    }
+  }
+
   async function init() {
     if (!(await window.UserAccess.requireModule('tukin'))) return;
     await window.AppSettingsService?.loadAndApply?.();
@@ -1593,6 +1622,7 @@
     if (!location.hash) history.replaceState(null, '', 'tukin.html#dashboard');
     state.historyBusy = state.view === 'history' || state.view === 'dashboard';
     render();
+    void checkSharePointOnLoad();
     if (window.UserAccess.can('tukin','process.save')) await storage.migrateLegacyOnce?.();
     historyUnsubscribe = storage.subscribeRuns?.((history) => {
       state.history = history;
