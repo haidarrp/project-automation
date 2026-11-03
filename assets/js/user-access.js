@@ -17,11 +17,8 @@
       { id:'documents',label:'Berkas Surat Tugas',parent:'data',actions:[['upload','Unggah/Ganti Berkas'],['download','Unduh Berkas']] },
       { id:'kalender',label:'Kalender Surat Tugas',actions:[] }
     ]},
-    { id:'register',label:'Register Kehadiran',sections:[
-      { id:'dashboard',label:'Dashboard Register',actions:[] },
-      { id:'cases',label:'Konflik dan Realisasi',actions:[['create','Catat Realisasi/Kasus'],['edit','Ubah Tindak Lanjut'],['verify','Verifikasi TU']] },
-      { id:'reconcile',label:'Rekonsiliasi',actions:[['save','Simpan Hasil Rekonsiliasi']] },
-      { id:'history',label:'Riwayat Klarifikasi',parent:'cases',actions:[] }
+    { id:'register',label:'Monitoring Konflik Kehadiran',sections:[
+      { id:'cases',label:'Monitoring Konflik',actions:[] }
     ]},
     { id:'pelatihan',label:'Pelatihan Pegawai',sections:[
       { id:'dashboard',label:'Dashboard Pelatihan',actions:[] },
@@ -71,6 +68,10 @@
           if (allowed.has(key) && value === true) result[m.id][key] = true;
         }
       }
+      // Izin tampilan Register yang lama tetap bisa membaca monitoring satu halaman.
+      // Firestore masih dapat membaca grant dashboard/reconcile/history yang lama.
+      if (m.id === 'register' && ['dashboard.view','reconcile.view']
+          .some(key => raw?.[key] === true)) result[m.id]['cases.view'] = true;
       for (const s of m.sections) {
         if (s.parent && !result[m.id][`${s.parent}.view`]) {
           for (const key of Object.keys(result[m.id])) if (key.startsWith(`${s.id}.`)) delete result[m.id][key];
@@ -279,7 +280,7 @@
       const anchor=event.target.closest?.('a[href]');
       if(!anchor) return;
       const path=anchor.getAttribute('href')||'';
-      const match=path.match(/^(register|cuti|surat-tugas|pelatihan|tukin|lembur|uang-makan)\.html(?:#([a-z]+))?$/i);
+      const match=path.match(/^(register|cuti|surat-tugas|pelatihan|tukin|lembur|uang-makan)\.html(?:\?[^#]*)?(?:#([a-z]+))?$/i);
       if (!match) return;
       const module={register:'register',cuti:'cuti','surat-tugas':'surat',pelatihan:'pelatihan',tukin:'tukin',lembur:'lembur','uang-makan':'uangMakan'}[match[1].toLowerCase()];
       if(!canView(module,match[2]||firstView(module))) {event.preventDefault();event.stopImmediatePropagation();deny();}

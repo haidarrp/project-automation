@@ -13,35 +13,53 @@ const source=E.makeSources([leave],[st]);
 const conflict=E.conflicts(source)[0];
 const keyType=type=>source.find(x=>x.type===type&&x.employeeId==='emp1').key;
 const verified=selected=>({type:'conflict',workflow:'verified',key:conflict.key,fingerprint:conflict.fingerprint,selectedSourceKeys:selected,year:2026});
-test('pilih hanya Surat Tugas mengeliminasi Cuti untuk pegawai terkait, bukan pegawai lain',()=>{
- const policy=P.build([leave],[st],[verified([keyType('surat')])]);
- assert.equal(policy.exportable('cuti',leave,'emp1'),false);
+test('keputusan verifikasi historis tidak lagi mengecualikan Cuti atau Surat Tugas',()=>{
+ const oldCase=verified([keyType('surat')]);
+ const policy=P.build([leave],[st],[oldCase]);
+ const plain=P.build([leave],[st]);
+ assert.equal(policy.exportable('cuti',leave,'emp1'),true);
  assert.equal(policy.exportable('surat',st,'emp1'),true);
  assert.equal(policy.exportable('surat',st,'emp2'),true);
- assert.match(policy.reason('cuti',leave,'emp1'),/Dieliminasi/);
-});
-test('pilih semua mengikutkan kedua dokumen, tidak memaksa penyesuaian hasil konflik',()=>{
- const policy=P.build([leave],[st],[verified([keyType('cuti'),keyType('surat')])]);
- assert.equal(policy.exportable('cuti',leave,'emp1'),true);
- assert.equal(policy.exportable('surat',st,'emp1'),true);
+ assert.equal(policy.reason('cuti',leave,'emp1'),'');
  assert.equal(policy.excluded.size,0);
+ assert.equal(policy.stale.length,0);
+ assert.equal(policy.signature,plain.signature);
 });
-test('sebelum verifikasi tidak mengeliminasi bukti secara diam-diam',()=>{
- const policy=P.build([leave],[st],[{...verified([keyType('surat')]),workflow:'pending'}]);
- assert.equal(policy.exportable('cuti',leave,'emp1'),true);
- assert.equal(policy.exportable('surat',st,'emp1'),true);
+test('konflik tetap dua dokumen sumber, perubahan dilakukan pada Cuti/Surat Tugas',()=>{
+ const policy=P.build([leave],[st]);
+ assert.equal(policy.sources.length,3);
+ assert.equal(E.conflicts(policy.sources).length,1);
+ assert.equal(policy.allows('cuti','leaveA','emp1'),true);
+ assert.equal(policy.allows('surat','taskA','emp1'),true);
 });
-test('dokumen yang diedit memerlukan verifikasi ulang dan keputusan lama tidak dipakai',()=>{
+test('perubahan data sumber mengubah signature, tanpa mewajibkan verifikasi Register',()=>{
  const changed={...leave,endDate:'2026-09-16'};
  const policy=P.build([changed],[st],[verified([keyType('surat')])]);
- assert.equal(policy.stale.length,1);
+ const before=P.build([leave],[st]);
+ assert.notEqual(policy.signature,before.signature);
+ assert.equal(policy.stale.length,0);
  assert.equal(policy.exportable('cuti',changed,'emp1'),true);
 });
-test('ketika irisan telah hilang, pilihan historis tidak mengeliminasi dokumen yang kini berdiri sendiri',()=>{
+test('jika irisan dihapus dari dokumen sumber, konflik ikut hilang',()=>{
  const moved={...leave,startDate:'2026-09-10',endDate:'2026-09-10'};
- const policy=P.build([moved],[st],[verified([keyType('surat')])]);
- assert.equal(policy.stale.length,0);
+ const policy=P.build([moved],[st]);
+ assert.equal(E.conflicts(policy.sources).length,0);
  assert.equal(policy.exportable('cuti',moved,'emp1'),true);
+});
+test('pengambilan kebijakan hanya membaca Cuti dan Surat Tugas, tidak attendanceCases',async()=>{
+ const accessed=[];
+ const docs={leaveRecords:[leave],assignmentRecords:[st]};
+ const original=global.window;
+ global.window={FirebaseClient:{getDb:()=>({collection(name){
+  accessed.push(name);
+  if(!Object.hasOwn(docs,name))throw Error('Koleksi tidak boleh dibaca: '+name);
+  return {where:()=>({get:async()=>({docs:docs[name].map(row=>({id:row.id,data:()=>row}))})})};
+ }})}};
+ try {
+  const policy=await P.fetch([2026]);
+  assert.equal(policy.exportable('cuti',leave,'emp1'),true);
+  assert.deepEqual(accessed.sort(),['assignmentRecords','leaveRecords']);
+ } finally {global.window=original;}
 });
 test('Surat Tugas tidak dipertanggungjawabkan selalu hanya preview, bisa diaktifkan kembali',()=>{
  const disabled={...st,accountable:false};

@@ -18,13 +18,8 @@
 
   const MODULES = Object.freeze({
     register: {
-      label: 'Register Kehadiran', icon: 'history', file: 'register.html',
-      items: [
-        { view:'dashboard', label:'Dashboard' },
-        { view:'cases', label:'Konflik & Realisasi' },
-        { view:'reconcile', label:'Rekonsiliasi' },
-        { view:'history', label:'Riwayat Klarifikasi' }
-      ]
+      label: 'Monitoring Konflik', icon: 'history', file: 'register.html',
+      items: [{ view:'cases', label:'Irisan Cuti & Surat Tugas' }]
     },
     tukin: {
       label: 'Tunjangan Kinerja',
@@ -154,7 +149,7 @@
   function breadcrumb(module, viewLabel) {
     if (module === 'dashboard') return '<strong>Generator Dokumen</strong><span>/ Dashboard</span>';
     if (module === 'admin') return `<strong>Generator Dokumen</strong><span>/ Administrasi / ${viewLabel || 'Master Data'}</span>`;
-    if (module === 'register') return `<strong>Pusdatin PKP</strong><span>/ Register Kehadiran / ${viewLabel || ''}</span>`;
+    if (module === 'register') return `<strong>Pusdatin PKP</strong><span>/ Monitoring Konflik / ${viewLabel || ''}</span>`;
     if (module === 'uangMakan') return `<strong>Pusdatin PKP</strong><span>/ Uang Makan / ${viewLabel || ''}</span>`;
     if (module === 'training') return `<strong>Pusdatin PKP</strong><span>/ Pelatihan Pegawai / ${viewLabel || ''}</span>`;
     if (module === 'leave') return `<strong>Pusdatin PKP</strong><span>/ Cuti / ${viewLabel || ''}</span>`;
@@ -175,15 +170,10 @@
       opts.overlays = '';
     }
     const overlays = opts.overlays || '';
-    const hasRegister = window.UserAccess?.canView?.('register','cases') === true;
+    const hasMonitoring = window.UserAccess?.canView?.('register','cases') === true;
     const isSource = ['leave','assignment'].includes(module) && view === 'data';
-    const isFinance = ['tukin','uangMakan','lembur'].includes(module) && view === 'process';
-    if (hasRegister && (isSource || isFinance)) {
-      const reason = isSource
-        ? 'Setelah mencatat atau mengubah dokumen, periksa potensi irisan dan konfirmasi realisasi kegiatan.'
-        : 'Sebelum finalisasi, periksa konflik dan rekonsiliasi. Perubahan dokumen yang terlambat masuk perlu ditinjau terhadap hasil proses.';
-      const destination = isSource || !window.UserAccess?.canView?.('register','reconcile') ? 'cases' : 'reconcile';
-      content = `<aside class="rg-app-hint" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;margin-bottom:14px;border:1px solid #d8e2ec;border-radius:10px;background:#f1f6fb;color:#27425f;font-size:.83rem;line-height:1.5"><span><strong>Register Kehadiran</strong> · ${reason}</span><a class="btn btn-secondary btn-sm" href="register.html#${destination}">Buka register</a></aside>` + content;
+    if (hasMonitoring && isSource) {
+      content = `<aside class="rg-app-hint" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;margin-bottom:14px;border:1px solid #d8e2ec;border-radius:10px;background:#f1f6fb;color:#27425f;font-size:.83rem;line-height:1.5"><span><strong>Monitoring Konflik Kehadiran</strong> · Periksa potensi irisan Cuti dan Surat Tugas. Koreksi tetap dilakukan di menu sumber masing-masing.</span><a class="btn btn-secondary btn-sm" href="register.html#cases">Lihat konflik</a></aside>` + content;
     }
     const user = window.FirebaseClient?.getCurrentUser?.();
     const displayName = user?.displayName || (user?.email ? user.email.split('@')[0] : 'Pengguna');

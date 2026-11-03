@@ -13,7 +13,7 @@
      const sources=E.makeSources(leaveSnap.docs.map(x=>({...x.data(),id:x.id})),assignmentSnap.docs.map(x=>({...x.data(),id:x.id})));
      return E.conflicts(sources).filter(c=>c.sources.some(s=>s.type===type&&s.id===id)).length;
    } catch(error) {
-     console.warn('Pemeriksaan Register pasca-input tidak berhasil, periksa kembali dari menu Register:',error);
+     console.warn('Pemeriksaan konflik pasca-input tidak berhasil, periksa menu Monitoring Konflik:',error);
      return -1;
    }
  }

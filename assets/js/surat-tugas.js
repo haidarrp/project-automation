@@ -641,8 +641,8 @@
       await loadData();
       showToast(existing.id ? 'Surat Tugas berhasil diperbarui.' : 'Surat Tugas berhasil disimpan dan file telah diunggah ke SharePoint.');
       window.AttendanceQuickCheck?.checkSource('surat', id, assignmentYear).then(count => {
-        if(count>0) showToast(`${count} potensi irisan dokumen terdeteksi. Periksa Register Kehadiran.`);
-        else if(count<0) console.info('Pemeriksaan register dapat diulang dari menu Register Kehadiran.');
+        if(count>0) showToast(`${count} potensi irisan dokumen terdeteksi. Periksa Monitoring Konflik Kehadiran.`);
+        else if(count<0) console.info('Pemeriksaan register dapat diulang dari menu Monitoring Konflik Kehadiran.');
       });
     } catch (error) {
       if (uploadedFile?.driveId && uploadedFile?.itemId && !firestoreSaved) {
@@ -858,6 +858,18 @@
     }
     if (!location.hash) history.replaceState(null, '', '#dashboard');
     await loadData();
+    // Tautan dari Monitoring Konflik membuka dokumen sumber yang tepat.
+    try {
+      const recordId = new URLSearchParams(location.search || '').get('record');
+      if (recordId && window.UserAccess.canView('surat', 'data')) {
+        const found = state.assignments.find(row => row.id === recordId);
+        if (found) {
+          state.filters.year = Number(found.assignmentYear || CURRENT_YEAR);
+          state.view = 'data';
+          openAssignmentDetail(found.id);
+        }
+      }
+    } catch (error) { console.warn('Tautan Surat Tugas tidak dapat dibuka:', error); }
   }
 
   init();

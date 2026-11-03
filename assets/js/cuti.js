@@ -954,8 +954,8 @@
       render();
       showToast(existingId ? 'Data cuti berhasil diperbarui.' : 'Data cuti berhasil ditambahkan.');
       window.AttendanceQuickCheck?.checkSource('cuti', ref.id, leaveYear).then(count => {
-        if(count>0) showToast(`${count} potensi irisan dokumen terdeteksi. Periksa Register Kehadiran.`);
-        else if(count<0) console.info('Pemeriksaan register dapat diulang dari menu Register Kehadiran.');
+        if(count>0) showToast(`${count} potensi irisan dokumen terdeteksi. Periksa Monitoring Konflik Kehadiran.`);
+        else if(count<0) console.info('Pemeriksaan register dapat diulang dari menu Monitoring Konflik Kehadiran.');
       });
     } catch (error) {
       button.disabled = false;
@@ -1432,6 +1432,24 @@
     }
     if (!location.hash) history.replaceState(null, '', '#dashboard');
     await loadData();
+    // Tautan dari Monitoring Konflik membuka dokumen sumber yang tepat.
+    try {
+      const params = new URLSearchParams(location.search || '');
+      const recordId = params.get('record');
+      const targetYear = Number(params.get('year'));
+      if (recordId && window.UserAccess.canView('cuti', 'data')) {
+        if (Number.isInteger(targetYear) && targetYear >= 2000 && targetYear <= 2100) {
+          await ensureYearData(targetYear);
+        }
+        const found = state.leaves.find(row => row.id === recordId);
+        if (found) {
+          state.filters.year = Number(found.leaveYear || targetYear || CURRENT_YEAR);
+          state.view = 'data';
+          render();
+          openLeaveDetail(found.id);
+        }
+      }
+    } catch (error) { console.warn('Tautan dokumen Cuti tidak dapat dibuka:', error); }
   }
 
   init();

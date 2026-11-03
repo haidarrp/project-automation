@@ -91,6 +91,7 @@ test('Daftar seluruh pegawai dengan dokumen terkait ditandai mandiri, tidak hany
 test('Penyesuaian per dokumen tetap mengubah hasil seluruh tanggal/pegawai tetapi tanda informatif tidak hilang',()=>{
  const {hooks}=boot(); const {employees,a,b}=sample();
  hooks.state.employees=employees;
+ hooks.state.period={month:10,year:2026};
  const group=docs.reviewGroups(employees).find(g=>g.kind==='surat');
  assert.equal(hooks.employeePendingDocuments(a),2);
  assert.equal(hooks.employeePendingDocuments(b),1);
@@ -125,7 +126,7 @@ test('HTML mengandung cache-busting baru untuk CSS dan JavaScript serta SW dinai
  assert.match(html,/lembur-calendar\.css\?v=5/);
  assert.match(html,/lembur-document-integration\.js\?v=3/);
  assert.match(html,/assets\/js\/app\.js\?v=18/);
- assert.match(fs.readFileSync(path.join(root,'sw.js'),'utf8'),/pusdatin-static-v38/);
+ assert.match(fs.readFileSync(path.join(root,'sw.js'),'utf8'),/pusdatin-static-v40/);
 });
 
 test('Dua dokumen beririsan tetap memiliki kontrol tersendiri dalam panel tanggal yang sama',()=>{
