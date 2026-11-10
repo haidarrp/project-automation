@@ -40,10 +40,35 @@
     const review=record.documentReviews?.[source.key];
     return review&&review.signature===source.signature&&['allow','deny'].includes(review.choice)?review:null;
   }
+  function requiresStatusDocument(status){
+    return ['offsite','off_site','tidak_hadir'].includes(String(status||'').trim().toLowerCase().replace(/[\s-]+/g,'_'));
+  }
+  function isWorkingDay(record,date,holidays=[]){
+    const key=String(date||'');
+    if(String(record?.status||'').trim().toLowerCase()==='libur')return false;
+    if((holidays||[]).includes(key))return false;
+    const parts=key.split('-').map(Number);
+    if(parts.length!==3||parts.some(n=>!Number.isInteger(n)))return true;
+    const weekday=new Date(parts[0],parts[1]-1,parts[2]).getDay();
+    return weekday!==0&&weekday!==6;
+  }
+  // Dokumen sumber harus cocok pada ID pegawai dan tanggal yang sama.
+  // Tanpa dokumen, status Perlu Cek tetap ada meskipun jam lembur otomatis 0.
+  function refreshStatusRestriction(record,date,holidays=[]){
+    const required=requiresStatusDocument(record?.status)&&isWorkingDay(record,date,holidays);
+    // Seperti Tukin, Surat Tugas non-pertanggungjawaban tidak cukup
+    // untuk mengesahkan status Offsite/Tidak Hadir.
+    const supported=(record?.documentSources||[]).some(source=>source.kind==='cuti'||source.accountable!==false);
+    record.statusDocumentNeedsReview=required&&!supported;
+    record.statusDocumentReview=required?{state:supported?'supported':'missing'}:null;
+    record.statusDocumentReviewNote=record.statusDocumentNeedsReview
+      ?`Perlu Cek: status ${record.status} pada hari kerja belum memiliki Surat Tugas atau Form Cuti yang sesuai. Klaim lembur dan uang makan lembur tidak diperkenankan (0 jam) sampai dokumen disinkronkan.`:'';
+    return recalculateRecord(record);
+  }
   function recalculateRecord(record){
     const sources=record.documentSources||[];
     const previousBlock=Boolean(record.documentBlocksOvertime);
-    const blocked=sources.some(source=>source.blockByDefault||validReview(record,source)?.choice==='deny');
+    const blocked=Boolean(record.statusDocumentNeedsReview)||sources.some(source=>source.blockByDefault||validReview(record,source)?.choice==='deny');
     record.documentReviewPending=sources.some(source=>!validReview(record,source));
     record.documentBlocksOvertime=blocked;
     record.documentSignature=sources.length?JSON.stringify(sources.map(s=>[s.key,s.signature]).sort((a,b)=>a[0].localeCompare(b[0]))):'';
@@ -52,7 +77,9 @@
     }
     if(blocked){
       if(Number(record.overtimeHours||0)!==0||!previousBlock){record.overtimeHours=0;record.manualOverride=false;}
-      record.documentBlockNote=sources.some(s=>s.blockByDefault)
+      record.documentBlockNote=record.statusDocumentNeedsReview
+        ?record.statusDocumentReviewNote
+        :sources.some(s=>s.blockByDefault)
         ?'Klaim lembur tidak diperkenankan karena ada Cuti yang berlaku atau Surat Tugas yang dipertanggungjawabkan, meskipun presensi tercatat WFO.'
         :'Klaim lembur tidak diberikan berdasarkan penyesuaian dokumen per periode.';
     }else{
@@ -61,8 +88,8 @@
     }
     return blocked;
   }
-  function applyDocuments(employees,leaves,assignments,policy,resolveId){
-    let held=0,pending=0,linked=0;
+  function applyDocuments(employees,leaves,assignments,policy,resolveId,holidays=[]){
+    let held=0,pending=0,linked=0,missingStatus=0;
     const docs=[...leaves.map(d=>({...d,kind:'cuti'})),...assignments.map(d=>({...d,kind:'surat'}))];
     for(const employee of employees){
       const id=String(resolveId(employee)||'');
@@ -70,12 +97,13 @@
       for(const [date,record] of Object.entries(employee.records||{})){
         const matches=docs.filter(d=>documentMatches(d,date,id,policy));
         record.documentSources=matches.map(toSource);
-        if(recalculateRecord(record))held++;
+        if(refreshStatusRestriction(record,date,holidays))held++;
         if(matches.length)linked++;
         if(record.documentReviewPending)pending++;
+        if(record.statusDocumentNeedsReview)missingStatus++;
       }
     }
-    return {held,pending,linked};
+    return {held,pending,linked,missingStatus};
   }
   function reviewGroups(employees){
     const groups=new Map();
@@ -140,7 +168,7 @@
     });
     return {leaves:[...leaves.values()],assignments:[...assignments.values()],policy};
   }
-  async function apply(employees,period){
+  async function apply(employees,period,holidays=[]){
     const documents=await fetchDocuments(period);
     const ids=new Map();
     for(const e of employees){
@@ -150,12 +178,13 @@
       e.masterEmployeeId=String(found.id);
       ids.set(e,String(found.id));
     }
-    return applyDocuments(employees,documents.leaves,documents.assignments,documents.policy,e=>ids.get(e));
+    return applyDocuments(employees,documents.leaves,documents.assignments,documents.policy,e=>ids.get(e),holidays);
   }
   function remaining(employees){
     const pendingDays=(employees||[]).reduce((count,e)=>count+Object.values(e.records||{}).filter(r=>r.documentReviewPending).length,0);
     // Lindungi arsip yang berisi keputusan berbeda untuk satu dokumen yang sama.
     return Math.max(pendingDays,reviewGroups(employees).filter(group=>!group.verified).length);
   }
-  return Object.freeze({apply,applyDocuments,remaining,reviewGroups,verifySource});
+  return Object.freeze({apply,applyDocuments,remaining,reviewGroups,verifySource,
+    requiresStatusDocument,isWorkingDay,refreshStatusRestriction});
 });

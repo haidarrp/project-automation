@@ -27,6 +27,11 @@
     if((flags||[]).some(flag=>ABSENCE_FLAGS.has(String(flag).toUpperCase())))return true;
     return /(?:^|\b)(cuti|sakit|izin|ijin|dinas luar|perjalanan dinas|tanpa keterangan|tidak hadir|alpa)(?:\b|$)/i.test(String(status||''));
   }
+  // Status presensi wajib memiliki dokumen pada tanggal/pegawai yang sama.
+  // Hal ini terpisah dari kalkulasi jam hadir dan aturan WFH/WFA.
+  function requiresStatusDocument(status){
+    return ['offsite','off_site','tidak_hadir'].includes(String(status||'').trim().toLowerCase().replace(/[\s-]+/g,'_'));
+  }
   function supportKey(kind,record){
     const id=String(record?.id||'').trim();
     // Firestore selalu memberikan id, fallback ini menjaga data impor lama.
@@ -62,9 +67,14 @@
     const isWeekend=weekend(dateKey);
     const isHoliday=Boolean(record?.isHoliday);
     const nonWorking=isWeekend||isHoliday;
+    // Konsisten dengan Tukin: Surat Tugas non-pertanggungjawaban tidak
+    // menjadi dasar pembuktian status kehadiran untuk proses keuangan.
+    const statusDocumentSupported=Boolean(leaves.length||activeAssignments.length);
+    const statusDocumentMissing=!nonWorking&&requiresStatusDocument(status)&&!statusDocumentSupported;
     const remoteExcluded=Boolean(workMode)&&weekday(dateKey)!==5;
     const issues=[];
     if(!nonWorking){
+      if(statusDocumentMissing)issues.push(`Perlu Cek: status ${status} belum memiliki Surat Tugas atau Form Cuti yang sesuai pada hari kerja ini. Uang makan tidak dapat diberikan sebelum dokumen tersedia.`);
       if(present && !(hasIn&&hasOut))issues.push('Presensi hanya satu kali');
       if(present && leaves.length)issues.push('Presensi bertentangan dengan data cuti');
       if(present && official.length)issues.push('Presensi bertentangan dengan dinas luar');
@@ -80,17 +90,18 @@
     }
     // Surat Tugas yang dipertanggungjawabkan memberi rekomendasi awal 0
     // meskipun presensi WFO tercatat. Penyesuaian manual tetap opsional.
-    const automatic=(present&&!nonWorking&&!remoteExcluded&&!activeAssignments.length)?1:0;
+    const automatic=(present&&!nonWorking&&!remoteExcluded&&!activeAssignments.length&&!statusDocumentMissing)?1:0;
     const hasManual=record?.manualValue===0||record?.manualValue===1;
-    const lockedZero=nonWorking;
+    const lockedZero=nonWorking||statusDocumentMissing;
     const manualValue=lockedZero?null:(hasManual?record.manualValue:null);
     const value=lockedZero?0:(manualValue===null?automatic:manualValue);
     return {key:dateKey,inMinutes:record?.inMinutes??null,outMinutes:record?.outMinutes??null,
       status,workMode,remoteExcluded,flags:Array.isArray(record?.flags)?record.flags:[],duplicate:Boolean(record?.duplicate),
       leaves,assignments:activeAssignments,workArrangements,official,issues,hasIn,hasOut,present,isWeekend,isHoliday,nonWorking,
-      automatic,value,manualValue,manualNote:nonWorking?'':String(record?.manualNote||''),
-      reviewed:nonWorking?false:Boolean(record?.reviewed),reviewedAt:nonWorking?'':String(record?.reviewedAt||''),
-      reviewedBy:nonWorking?'':String(record?.reviewedBy||'')};
+      statusDocumentMissing,statusDocumentSupported,
+      automatic,value,manualValue,manualNote:lockedZero?'':String(record?.manualNote||''),
+      reviewed:lockedZero?false:Boolean(record?.reviewed),reviewedAt:lockedZero?'':String(record?.reviewedAt||''),
+      reviewedBy:lockedZero?'':String(record?.reviewedBy||'')};
   }
   function applySupporting(employee,leaves,assignments,year,month,holidays=[]){
     const dates=monthDates(year,month),reds=new Set(holidays||[]);
@@ -123,7 +134,7 @@
       const d=classifyDay({...base,key:date,isHoliday:reds.has(date),manualValue:rawDateValue,
         reviewed:rawDateReviewed},dayLeaves,dayTasks);
       d.dateManualValue=d.manualValue;
-      d.dateReviewed=!d.nonWorking&&Boolean(rawDateReviewed);
+      d.dateReviewed=!d.nonWorking&&!d.statusDocumentMissing&&Boolean(rawDateReviewed);
       d.dateReviewedAt=d.dateReviewed?String(base.dateReviewedAt||base.reviewedAt||''):'';
       d.dateReviewedBy=d.dateReviewed?String(base.dateReviewedBy||base.reviewedBy||''):'';
       const sources=[...dayLeaves.map(x=>supportKey('cuti',x)),...dayTasks.map(x=>supportKey('tugas',x))];
@@ -146,6 +157,11 @@
           d.reviewedBy=latest?.reviewedBy||'';
         }else{d.reviewedAt='';d.reviewedBy='';}
       }
+      // Koreksi 1 hari dari riwayat lama tidak boleh melewati pembatas ini.
+      if(d.statusDocumentMissing){
+        d.automatic=0;d.value=0;d.manualValue=null;d.dateManualValue=null;
+        d.reviewed=false;d.dateReviewed=false;d.reviewedAt='';d.reviewedBy='';
+      }
       daily[date]=d;
     }
     return {...employee,supportReviews,days:daily};
@@ -154,13 +170,14 @@
     const days=Object.values(employee.days||{});
     const issues=days.filter(d=>d.issues.length&&!d.reviewed).length;
     return {days:days.filter(d=>d.value===1&&!d.nonWorking).length,issues,
-      present:days.filter(d=>d.present&&!d.nonWorking&&!d.remoteExcluded).length,
+      present:days.filter(d=>d.present&&!d.nonWorking&&!d.remoteExcluded&&!d.statusDocumentMissing).length,
       leave:days.filter(d=>(d.leaves||[]).length).length,travel:days.filter(d=>(d.official||[]).length).length,
       absence:days.filter(d=>!d.present&&isAbsenceStatus(d.status,d.flags)).length,
       manual:days.filter(d=>d.manualValue!==null&&!d.nonWorking&&d.manualValue!==d.automatic).length,
       missing:false,missingType:!employee.jenisPegawai,
       coverage:!!employee.fileWarnings?.length&&!employee.coverageAcknowledged,
-      status:issues||!employee.jenisPegawai||(employee.fileWarnings?.length&&!employee.coverageAcknowledged)?'Terdapat Catatan':'Siap'};
+      status:days.some(d=>d.statusDocumentMissing)?'Perlu Cek':
+        issues||!employee.jenisPegawai||(employee.fileWarnings?.length&&!employee.coverageAcknowledged)?'Terdapat Catatan':'Siap'};
   }
   function overall(employees){
     const s={employees:employees.length,days:0,issues:0,manual:0,missing:0,ready:0};
@@ -168,6 +185,6 @@
     return s;
   }
   window.UangMakanRules=Object.freeze({MONTHS,key,keyDate,weekday,periodLabel,periodDays,monthDates,weekend,
-    normalizeNip,normalizeName,detectWorkMode,isAbsenceStatus,supportKey,supportSignature,
+    normalizeNip,normalizeName,detectWorkMode,isAbsenceStatus,requiresStatusDocument,supportKey,supportSignature,
     classifyDay,applySupporting,overview,overall});
 })();

@@ -113,6 +113,44 @@
     return { schedule, holiday: false, tl, psw, totalPercent, reason: reasons.join(' · ') || 'Tidak ada potongan' };
   }
 
+  // Penilaian jam kerja berbeda dari verifikasi keabsahan status kehadiran.
+  // Offsite/tidak_hadir wajib didukung Cuti/Surat Tugas yang terdaftar pada
+  // tanggal dan pegawai yang sama, bahkan ketika TL/PSW menghasilkan 0,00%.
+  function normalizedAttendanceStatus(status) {
+    return String(status || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  }
+  function requiresStatusDocument(status) {
+    return ['offsite', 'off_site', 'tidak_hadir'].includes(normalizedAttendanceStatus(status));
+  }
+  function statusDocumentNeedsReview(record) {
+    if (!requiresStatusDocument(record?.status)) return false;
+    const current = record?.statusDocumentReview;
+    if (current && typeof current === 'object') return current.state !== 'supported';
+    // Riwayat dari versi lama tidak memiliki statusDocumentReview. Jika sudah
+    // menyimpan hasil sinkronisasi dokumen, jangan menandainya tanpa alasan.
+    return !Boolean(record?.cutiAdjustment?.automatic || record?.assignmentAdjustment?.assignments?.length);
+  }
+  function recalculateVerification(record) {
+    const attendanceIssue = Number(record?.autoTotalPercent || 0) > 0 ||
+      (record?.flags || []).some(flag => flag !== 'L');
+    record.needsVerification = attendanceIssue || statusDocumentNeedsReview(record);
+    return record.needsVerification;
+  }
+  function setStatusDocumentReview(record, hasValidDocument) {
+    record.statusDocumentReview = requiresStatusDocument(record?.status)
+      ? { state: hasValidDocument === true ? 'supported' : hasValidDocument === false ? 'missing' : 'pending' }
+      : null;
+    return recalculateVerification(record);
+  }
+  function statusDocumentReviewMessage(record) {
+    if (!statusDocumentNeedsReview(record)) return '';
+    const label = normalizedAttendanceStatus(record.status) === 'tidak_hadir' ? 'Tidak Hadir' : 'Offsite';
+    if (record?.statusDocumentReview?.state === 'pending') {
+      return `Status ${label} memerlukan Surat Tugas atau Cuti yang sesuai dengan pegawai dan tanggal ini. Pencocokan dokumen belum selesai atau identitas pegawai belum ditemukan.`;
+    }
+    return `Status ${label}: belum ditemukan Surat Tugas atau data Cuti yang sesuai untuk pegawai dan tanggal ini. Tetap Perlu Cek meskipun jam kerja normal dan potongan otomatis 0,00%.`;
+  }
+
   function recordFinalPercent(record) {
     return record && record.adjustedPercent !== null && record.adjustedPercent !== undefined
       ? Number(record.adjustedPercent)
@@ -149,7 +187,9 @@
   window.TukinRules = Object.freeze({
     pad2, normalizeName, dateKey, dateFromKey, addDays, inRange, attendancePeriod, formatDate,
     formatPeriodRange, formatMinutes, isWeekend, isManualHoliday, isSourceHoliday, isRamadan,
-    getSchedule, calculateDay, recordFinalPercent, summarizeEmployee, employeeKey, safeFolderName,
+    getSchedule, calculateDay, normalizedAttendanceStatus, requiresStatusDocument,
+    statusDocumentNeedsReview, setStatusDocumentReview, recalculateVerification,
+    statusDocumentReviewMessage, recordFinalPercent, summarizeEmployee, employeeKey, safeFolderName,
     normalizeHolidays, periodContainsKey
   });
 })();

@@ -290,7 +290,7 @@
     const linked = Number(info.linkedRecords || 0);
     const cutiLinked = Number(info.cutiLinkedRecords || 0);
     const assignmentLinked = Number(info.assignmentLinkedRecords || 0);
-    if (!linked && !adjusted && !assignmentInformational && !conflicts && !manual) return '';
+    if (!linked && !adjusted && !assignmentInformational && !conflicts && !manual && !Number(info.missingStatusDocumentRecords || 0) && !Number(info.pendingStatusDocumentRecords || 0)) return '';
 
     const synced = linked
       ? `<div class="alert alert-info"><div class="alert-title">${linked} tanggal data pendukung tersinkron</div>Cuti dan Surat Tugas dicocokkan dengan seluruh daftar hadir, termasuk tanggal yang tidak memerlukan koreksi.${cutiLinked ? ` ${cutiLinked} tanggal terkait Cuti.` : ''}${assignmentLinked ? ` ${assignmentLinked} tanggal terkait Surat Tugas.` : ''}</div>`
@@ -304,7 +304,12 @@
     const conflict = conflicts
       ? `<div class="alert alert-warning"><div class="alert-title">${conflicts} konflik Cuti dan Surat Tugas</div>Pada tanggal yang sama ditemukan Cuti dan Surat Tugas. Sistem tidak menerapkan 0% secara otomatis; tanggal tersebut tetap memerlukan verifikasi manual.</div>`
       : '';
-    return `${synced}${success}${information}${conflict}`;
+    const missingStatusDocuments = Number(info.missingStatusDocumentRecords || 0);
+    const pendingStatusDocuments = Number(info.pendingStatusDocumentRecords || 0);
+    const statusWarning = missingStatusDocuments || pendingStatusDocuments
+      ? `<div class="alert alert-warning"><div class="alert-title">${missingStatusDocuments + pendingStatusDocuments} tanggal status Offsite/Tidak Hadir perlu cek</div>${missingStatusDocuments ? `${missingStatusDocuments} tanggal belum memiliki Surat Tugas/Cuti yang cocok.` : ''}${pendingStatusDocuments ? ` ${pendingStatusDocuments} tanggal belum dapat dicocokkan karena identitas master pegawai tidak ditemukan.` : ''} Jam presensi normal dan potongan otomatis 0,00% tidak menghapus kewajiban verifikasi dokumen.</div>`
+      : '';
+    return `${synced}${success}${information}${conflict}${statusWarning}`;
   }
 
   async function syncSupportingAdjustments(options) {
@@ -418,6 +423,9 @@
 
   function calendarType(record) {
     if (!record) return 'missing';
+    // Verifikasi Offsite/Tidak Hadir yang belum didukung dokumen harus tampil
+    // bahkan pada hari libur atau sesudah koreksi manual menjadi 0%.
+    if (rules.statusDocumentNeedsReview(record)) return 'review';
     // Potongan manual pada hari libur tetap harus terlihat di kalender,
     // agar angka final tidak tersembunyi sebagai tanda libur (—).
     if (record.isHoliday || record.isWeekend || rules.isSourceHoliday(record.status)) {
@@ -431,7 +439,7 @@
   }
 
   function calendarTypeText(type) {
-    return ({ normal: 'Tanpa potongan', deduct: 'Ada potongan', review: 'Perlu verifikasi',
+    return ({ normal: 'Tanpa potongan', deduct: 'Ada potongan', review: 'Perlu cek',
       adjusted: 'Disesuaikan', holiday: 'Libur', missing: 'Belum ada absensi' })[type] || '-';
   }
 
@@ -533,7 +541,8 @@
     const rows = dates.filter(({ key }) => calendarTypeMatches(employee.records?.[key], state.drawerFilter)).map(({ key, date }) => {
       const record = employee.records[key];
       const type = calendarType(record);
-      const note = record.adjustmentNote || record.reason || '-';
+      const note = [rules.statusDocumentReviewMessage(record), record.adjustmentNote || record.reason || '-']
+        .filter(Boolean).join(' · ');
       return `<tr class="${type === 'review' ? 'tukin-row-needs-correction' : ''}${state.drawerSelectedDate === key ? ' tukin-calendar-selected-row' : ''}">
         <td class="nowrap">${esc(rules.formatDate(date, true))}</td>
         <td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td>
@@ -567,13 +576,13 @@
           : '';
     const evidence = (draft?.evidence || []).map((item, i) => `<div class="tukin-calendar-file"><span>${esc(item.name || 'Bukti dukung')} · ${bytes(item.size || 0)} ${attachmentOpenLink(item, 'Buka')}</span><button type="button" data-calendar-remove-evidence="${i}" aria-label="Hapus ${esc(item.name || 'bukti')}">Hapus</button></div>`).join('');
     return `<section class="tukin-calendar-detail" aria-label="Rincian verifikasi tanggal terpilih">
-      <div class="tukin-calendar-detail-head"><div><h4>Verifikasi ${esc(rules.formatDate(record.date, true))}</h4><p>Periksa potongan otomatis sebelum menyimpan hasil penyesuaian.</p></div><span class="tukin-calendar-status ${type}">${esc(calendarTypeText(type))}</span></div>
+      <div class="tukin-calendar-detail-head"><div><h4>Verifikasi ${esc(rules.formatDate(record.date, true))}</h4><p>Periksa potongan otomatis dan kelengkapan dokumen status presensi sebelum menyimpan hasil penyesuaian.</p></div><span class="tukin-calendar-status ${type}">${esc(calendarTypeText(type))}</span></div>
       <div class="tukin-calendar-detail-grid">
         <div class="tukin-calendar-detail-col"><h5>Data Kehadiran &amp; Hasil Otomatis</h5>
           <div class="tukin-calendar-info-row"><div><span>Jam masuk</span><strong>${esc(rules.formatMinutes(record.inMinutes))}</strong></div><div><span>Jam pulang</span><strong>${esc(rules.formatMinutes(record.outMinutes))}</strong></div><div><span>Status</span><strong>${esc(record.status || '-')}</strong></div></div>
           <div class="tukin-calendar-calc"><div><span>Terlambat (TL)</span><strong>${esc(record.tlCategory)} · ${pct(record.tlPercent)}</strong></div><div><span>Pulang sebelum waktunya (PSW)</span><strong>${esc(record.pswCategory)} · ${pct(record.pswPercent)}</strong></div><div class="tukin-calendar-calc-total"><span>Total otomatis</span><strong>${pct(record.autoTotalPercent)}</strong></div></div>
           <div class="tukin-calendar-context"><strong>Alasan perhitungan otomatis</strong><p>${esc(record.reason || 'Tidak ada potongan otomatis.')}</p>${record.flags?.length ? `<p>Penanda absensi: ${esc(record.flags.join(', '))}</p>` : ''}</div>
-          ${type === 'review' ? '<div class="tukin-calendar-context warning"><strong>Perlu verifikasi</strong><p>Periksa kelengkapan presensi dan bukti pendukung sebelum melakukan penyesuaian.</p></div>' : ''}
+          ${rules.statusDocumentNeedsReview(record) ? `<div class="tukin-calendar-context warning"><strong>Perlu Cek — Dokumen Status Presensi</strong><p>${esc(rules.statusDocumentReviewMessage(record))}</p></div>` : type === 'review' ? '<div class="tukin-calendar-context warning"><strong>Perlu verifikasi</strong><p>Periksa kelengkapan presensi dan bukti pendukung sebelum melakukan penyesuaian.</p></div>' : ''}
           ${integration}
           ${record.overtimeDocumentRestriction?`<div class="tukin-calendar-context warning"><strong>Verifikasi dokumen terhadap presensi WFO</strong><p>${esc(record.overtimeDocumentReviewNote)}</p></div>`:''}
         </div>
@@ -652,7 +661,7 @@
             : record.assignmentAdjustment?.informational
               ? `<div class="alert alert-info"><div class="alert-title">Data pendukung Surat Tugas</div>${esc(assignmentSupport || record.adjustmentNote || '')}</div>`
               : '';
-    return `<div class="tukin-modal-backdrop"><div class="tukin-modal"><div class="tukin-modal-head"><div><h3>Koreksi Perhitungan</h3><p>${esc(employee.name)} · ${esc(rules.formatDate(record.date, true))}</p></div><button class="icon-btn" data-action="close-edit" type="button">×</button></div><div class="alert alert-warning"><div class="alert-title">Hasil otomatis ${pct(record.autoTotalPercent)}</div>${esc(record.reason || '')}</div>${automaticContext}${record.overtimeDocumentRestriction?`<div class="alert alert-warning"><div class="alert-title">Periksa kelayakan lembur</div>${esc(record.overtimeDocumentReviewNote)}</div>`:''}
+    return `<div class="tukin-modal-backdrop"><div class="tukin-modal"><div class="tukin-modal-head"><div><h3>Koreksi Perhitungan</h3><p>${esc(employee.name)} · ${esc(rules.formatDate(record.date, true))}</p></div><button class="icon-btn" data-action="close-edit" type="button">×</button></div><div class="alert alert-warning"><div class="alert-title">Hasil otomatis ${pct(record.autoTotalPercent)}</div>${esc(record.reason || '')}</div>${automaticContext}${rules.statusDocumentNeedsReview(record) ? `<div class="alert alert-warning"><div class="alert-title">Perlu Cek — Dokumen Status Presensi</div>${esc(rules.statusDocumentReviewMessage(record))}</div>` : ''}${record.overtimeDocumentRestriction?`<div class="alert alert-warning"><div class="alert-title">Periksa kelayakan lembur</div>${esc(record.overtimeDocumentReviewNote)}</div>`:''}
       <div class="tukin-form-grid section-gap"><div class="field"><label>% Potongan Hasil Penyesuaian</label><input id="edit-percent" type="number" min="0" max="2.5" step="0.01" value="${esc(state.editDraft.percent)}"></div><div class="field"><label>Bukti Dukung</label><input id="edit-evidence" type="file" multiple accept="application/pdf,image/png,image/jpeg,image/webp"></div><div class="full field"><label>Keterangan</label><textarea id="edit-note" placeholder="Contoh: Dinas berdasarkan Surat Tugas ...">${esc(state.editDraft.note)}</textarea></div></div>
       <div class="tukin-evidence-list">${state.editDraft.evidence.length ? state.editDraft.evidence.map((evidence, i) => `<div class="tukin-evidence"><span>${esc(evidence.name)} · ${bytes(evidence.size || 0)} ${attachmentOpenLink(evidence, 'Buka')}</span><button data-remove-evidence="${i}" type="button">Hapus</button></div>`).join('') : '<div class="card-subtitle">Belum ada bukti dukung.</div>'}</div>
       <div class="actions"><button class="btn btn-secondary" data-action="reset-auto" type="button">Gunakan Hasil Otomatis</button><div class="actions-right"><button class="btn btn-secondary" data-action="close-edit" type="button">Batal</button><button class="btn btn-primary" data-action="save-edit" type="button">Simpan Koreksi</button></div></div></div></div>`;
@@ -1084,6 +1093,8 @@
       };
       state.validationResults = Array.isArray(run.validationResults) ? run.validationResults : [];
       state.employees = Array.isArray(run.employees) ? run.employees : [];
+      // Riwayat dari versi sebelumnya belum memiliki flag Offsite/Tidak Hadir.
+      state.employees.forEach(employee => parser.recalculateEmployee(employee, state.settings));
       state.files = collectSourceFiles(state.employees);
       state.generated = null;
       state.search = '';

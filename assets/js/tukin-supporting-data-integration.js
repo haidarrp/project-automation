@@ -552,6 +552,9 @@
       const masterEmployeeId = await resolveMasterEmployeeId(employee);
       if (!masterEmployeeId) {
         unresolvedEmployees += 1;
+        // Tidak boleh menyimpulkan bahwa dokumen tersedia jika pegawai belum
+        // terhubung ke master. Tandai sebagai menunggu pemeriksaan.
+        Object.values(employee.records || {}).forEach(record => rules.setStatusDocumentReview(record, null));
         continue;
       }
       const allEmployeeLeaves = leavesByEmployee.get(masterEmployeeId) || [];
@@ -589,6 +592,9 @@
         record.nonExportDocuments=omitted; // Preview untuk pertimbangan; bukan bukti ekspor.
         const matchingLeave = employeeLeaves.find((leave) => sourceMatchesDate(leave, key)) || null;
         const matchingAssignments = employeeAssignments.filter((assignment) => sourceMatchesDate(assignment, key));
+        // Surat Tugas non-pertanggungjawaban tidak dianggap sebagai pendukung.
+        // Aturan ini tidak mengubah nilai TL/PSW maupun persentase otomatis.
+        rules.setStatusDocumentReview(record, Boolean(matchingLeave || matchingAssignments.length));
         const presenceRecorded = String(record.status || '').trim().toUpperCase() === 'WFO' ||
           (record.inMinutes !== null && record.inMinutes !== undefined &&
            record.outMinutes !== null && record.outMinutes !== undefined);
@@ -673,6 +679,12 @@
       linkedRecords,
       cutiLinkedRecords,
       assignmentLinkedRecords,
+      missingStatusDocumentRecords: list.reduce((count, employee) => count +
+        Object.values(employee.records || {}).filter(record =>
+          rules.statusDocumentNeedsReview(record) && record?.statusDocumentReview?.state === 'missing').length, 0),
+      pendingStatusDocumentRecords: list.reduce((count, employee) => count +
+        Object.values(employee.records || {}).filter(record =>
+          rules.statusDocumentNeedsReview(record) && record?.statusDocumentReview?.state === 'pending').length, 0),
       removedEvidence
     };
   }

@@ -124,9 +124,9 @@ test('Kalender menggunakan warna dokumen secara informatif dan koreksi manual be
 
 test('HTML mengandung cache-busting baru untuk CSS dan JavaScript serta SW dinaikkan',()=>{
  assert.match(html,/lembur-calendar\.css\?v=5/);
- assert.match(html,/lembur-document-integration\.js\?v=3/);
- assert.match(html,/assets\/js\/app\.js\?v=18/);
- assert.match(fs.readFileSync(path.join(root,'sw.js'),'utf8'),/pusdatin-static-v41/);
+ assert.match(html,/lembur-document-integration\.js\?v=4/);
+ assert.match(html,/assets\/js\/app\.js\?v=19/);
+ assert.match(fs.readFileSync(path.join(root,'sw.js'),'utf8'),/pusdatin-static-v43/);
 });
 
 test('Dua dokumen beririsan tetap memiliki kontrol tersendiri dalam panel tanggal yang sama',()=>{

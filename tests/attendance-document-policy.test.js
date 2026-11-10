@@ -74,7 +74,8 @@ test('Surat Tugas tidak dipertanggungjawabkan selalu hanya preview, bisa diaktif
 function attendanceTukinHarness(leaves,assignments,decisions=[]){
  const files={leaveRecords:leaves,assignmentRecords:assignments};
  const db={collection(name){return {where(){return {get:async()=>({docs:(files[name]||[]).map(d=>({id:d.id,data:()=>d}))})};}};}};
- const rules={dateKey:d=>typeof d==='string'?d.slice(0,10):d.toISOString().slice(0,10),attendancePeriod:()=>({start:new Date(2026,8,1),end:new Date(2026,8,30)})};
+ const rules={dateKey:d=>typeof d==='string'?d.slice(0,10):d.toISOString().slice(0,10),attendancePeriod:()=>({start:new Date(2026,8,1),end:new Date(2026,8,30)}),
+  setStatusDocumentReview:()=>{},statusDocumentNeedsReview:()=>false};
  const win={TukinRules:rules,MasterDataService:{findByIdentity:async()=>({id:'emp1'})},FirebaseClient:{getDb:()=>db},
   AttendanceDocumentPolicy:{fetch:async()=>P.build(leaves,assignments,decisions)}};
  vm.runInNewContext(fs.readFileSync(path.join(dir,'tukin-supporting-data-integration.js'),'utf8'),{window:win,console});

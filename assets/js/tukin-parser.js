@@ -135,8 +135,10 @@
         pswCategory:calc.psw.category,pswPercent:calc.psw.percent,shortageMinutes:calc.psw.shortageMinutes,
         requiredEndMinutes:calc.psw.requiredEndMinutes,autoTotalPercent:calc.totalPercent,reason:calc.reason,
         adjustedPercent:null,adjustmentNote:'',evidence:[],
-        needsVerification:calc.totalPercent>0 || flags.some(f=>f!=='L')
+        needsVerification:false,statusDocumentReview:null
       };
+      // Status khusus tetap Perlu Cek sampai Surat Tugas/Cuti diverifikasi.
+      rules.setStatusDocumentReview(record, null);
       records[key]=record;
     }
     if (!rowsInPeriod) throw new Error(`Tidak ditemukan data pada periode ${rules.formatPeriodRange(range)}.`);
@@ -185,7 +187,8 @@
       rec.isHoliday=calc.holiday;rec.schedule=calc.schedule;rec.tlCategory=calc.tl.category;rec.tlPercent=calc.tl.percent;
       rec.pswCategory=calc.psw.category;rec.pswPercent=calc.psw.percent;rec.shortageMinutes=calc.psw.shortageMinutes;
       rec.requiredEndMinutes=calc.psw.requiredEndMinutes;rec.autoTotalPercent=calc.totalPercent;rec.reason=calc.reason;
-      rec.needsVerification=calc.totalPercent>0 || (rec.flags||[]).some(f=>f!=='L');
+      // Pertahankan pemeriksaan dokumen walaupun TL/PSW menjadi 0%.
+      rules.recalculateVerification(rec);
     });
   }
 
