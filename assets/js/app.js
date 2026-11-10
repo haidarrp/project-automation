@@ -408,19 +408,22 @@
   function fullDayLabel(key) { return rules.formatIndonesianDate(rules.dateFromKey(key), true); }
   function autoHours(record) { return Number(record?.originalOvertimeHours ?? record?.overtimeHours ?? 0); }
   function finalHours(record) { return Number(record?.overtimeHours || 0); }
-  // Dokumen hanya perlu ditandai jika ada jam lembur potensial. Hasil final
-  // dapat 0 karena Surat Tugas/Cuti, tetapi jam asal > 0 tetap perlu ditinjau.
+  // Dokumen ditampilkan untuk jam lembur potensial dan temuan presensi.
+  // Sabtu/Minggu berstatus Offsite/Tidak Hadir tetap perlu ditampilkan
+  // sebagai tidak dapat diklaim meskipun hasil otomatis sudah 0 jam.
   function documentRelevantToOvertime(record) {
-    return Boolean(record?.statusDocumentNeedsReview ||
+    return Boolean(record?.statusWeekendIneligible || record?.statusDocumentNeedsReview ||
       (record?.documentSources?.length && (autoHours(record) > 0 || finalHours(record) > 0)));
   }
   function documentReviewMarkup(record) {
     const sources=record?.documentSources||[];
+    const weekendBlock=record?.statusWeekendIneligible
+      ?`<div class="alert alert-warning" role="alert" style="margin-top:12px"><div class="alert-title">Tidak dapat diklaim - Status Sabtu/Minggu</div>${esc(record.statusWeekendReviewNote||record.documentBlockNote||'Offsite/Tidak Hadir pada Sabtu/Minggu tidak dapat diklaim sebagai lembur.')}</div>`:'';
     const missingStatus=record?.statusDocumentNeedsReview
       ?`<div class="alert alert-warning" role="alert" style="margin-top:12px"><div class="alert-title">Perlu Cek - Dokumen Status Presensi</div>${esc(record.statusDocumentReviewNote||'Offsite/Tidak Hadir tanpa Surat Tugas atau Form Cuti yang sesuai. Klaim lembur dikunci 0 jam.')}</div>`:'';
-    if(!sources.length)return missingStatus;
+    if(!sources.length)return `${weekendBlock}${missingStatus}`;
     const items=sources.map(item=>`<li>${esc(item.label)}</li>`).join('');
-    return `${missingStatus}<div class="alert ${record.documentBlocksOvertime?'alert-warning':'alert-info'}" style="margin-top:12px">
+    return `${weekendBlock}${missingStatus}<div class="alert ${record.documentBlocksOvertime?'alert-warning':'alert-info'}" style="margin-top:12px">
       <div class="alert-title">Dokumen Cuti / Surat Tugas terdeteksi</div>
       <ul style="margin:8px 0 8px 20px;padding:0">${items}</ul>
       ${record.documentBlocksOvertime?esc(record.documentBlockNote):'Surat Tugas tidak dipertanggungjawabkan tidak membatasi klaim lembur; hasil mengikuti presensi. Penyesuaian tersedia bila diperlukan.'}
@@ -431,13 +434,15 @@
   function renderInlineDocumentReview(record) {
     const sources = record?.documentSources || [];
     if (!documentRelevantToOvertime(record)) return '';
-    if(record?.statusDocumentNeedsReview&&!sources.length)return documentReviewMarkup(record);
+    if((record?.statusDocumentNeedsReview||record?.statusWeekendIneligible)&&!sources.length)return documentReviewMarkup(record);
+    const weekendWarning=record?.statusWeekendIneligible
+      ?`<div class="alert alert-warning" role="alert"><div class="alert-title">Tidak dapat diklaim - Status Sabtu/Minggu</div>${esc(record.statusWeekendReviewNote)}</div>`:'';
     const statusWarning=record?.statusDocumentNeedsReview
       ?`<div class="alert alert-warning" role="alert"><div class="alert-title">Perlu Cek - Dokumen Status Presensi</div>${esc(record.statusDocumentReviewNote)}</div>`:'';
     const groups = window.LemburDocumentIntegration?.reviewGroups?.(state.employees) || [];
     const byKey = new Map(groups.map(group => [group.key, group]));
     const pending = sources.filter(source => !byKey.get(source.key)?.verified).length;
-    return `${statusWarning}<section class="lm-inline-document-review" id="lm-inline-document-review" aria-label="Penyesuaian Cuti dan Surat Tugas pada tanggal ini">
+    return `${weekendWarning}${statusWarning}<section class="lm-inline-document-review" id="lm-inline-document-review" aria-label="Penyesuaian Cuti dan Surat Tugas pada tanggal ini">
       <div class="lm-inline-document-head"><div><h4>Penyesuaian Cuti / Surat Tugas (Opsional)</h4>
         <p>Dokumen terdeteksi otomatis. Hasil awal mengikuti status Cuti/Surat Tugas. <b>Penyesuaian tidak wajib</b>; jika diubah, keputusan berlaku untuk seluruh tanggal dan pegawai dalam dokumen yang sama.</p></div>
         <span class="lm-review-counter ${pending ? 'pending' : 'complete'}">${sources.length} dokumen terdeteksi</span></div>
@@ -639,7 +644,7 @@
       Object.keys(employee.records || {}).sort().forEach(key => {
         const record = employee.records[key];
         if (!record) return;
-        if (state.reviewTableFilter === 'overtime' && !(autoHours(record) > 0 || finalHours(record) > 0 || isManualOvertime(record) || record.statusDocumentNeedsReview)) return;
+        if (state.reviewTableFilter === 'overtime' && !(autoHours(record) > 0 || finalHours(record) > 0 || isManualOvertime(record) || record.statusDocumentNeedsReview || record.statusWeekendIneligible)) return;
         if (state.reviewTableFilter === 'adjusted' && !isManualOvertime(record)) return;
         if (state.reviewTableFilter === 'documents' && !documentRelevantToOvertime(record)) return;
         rows.push({ employee, record, key });
@@ -667,9 +672,10 @@
         const pending = employeePendingDocuments(e);
         const hasDocs = Object.values(e.records || {}).some(documentRelevantToOvertime);
         const missingStatus = Object.values(e.records || {}).filter(r=>r.statusDocumentNeedsReview).length;
+        const weekendIneligible = Object.values(e.records || {}).filter(r=>r.statusWeekendIneligible).length;
         const isSelected = Boolean(selected && rules.employeeKey(selected) === key);
-        return `<button type="button" class="lm-person ${missingStatus||pending ? 'lm-person-pending' : hasDocs ? 'lm-person-verified' : ''} ${isSelected ? 'selected' : ''}" data-review-person="${esc(key)}" aria-pressed="${isSelected}" aria-label="${esc(e.name)}${missingStatus?`, ${missingStatus} tanggal Perlu Cek`:pending ? `, ${pending} dokumen terdeteksi` : hasDocs ? ', dokumen terdeteksi' : ''}">
-          <span class="lm-person-top"><span class="lm-person-name">${esc(e.name)}</span>${missingStatus?`<span class="lm-person-badge pending">Perlu Cek (${missingStatus})</span>`:pending ? `<span class="lm-person-badge pending">${pending} Dokumen</span>` : hasDocs ? '<span class="lm-person-badge verified">Dokumen</span>' : ''}</span>
+        return `<button type="button" class="lm-person ${missingStatus||weekendIneligible||pending ? 'lm-person-pending' : hasDocs ? 'lm-person-verified' : ''} ${isSelected ? 'selected' : ''}" data-review-person="${esc(key)}" aria-pressed="${isSelected}" aria-label="${esc(e.name)}${missingStatus?`, ${missingStatus} tanggal Perlu Cek`:weekendIneligible?`, ${weekendIneligible} tanggal tidak dapat klaim`:pending ? `, ${pending} dokumen terdeteksi` : hasDocs ? ', dokumen terdeteksi' : ''}">
+          <span class="lm-person-top"><span class="lm-person-name">${esc(e.name)}</span>${missingStatus?`<span class="lm-person-badge pending">Perlu Cek (${missingStatus})</span>`:weekendIneligible?`<span class="lm-person-badge pending">Tidak dapat klaim (${weekendIneligible})</span>`:pending ? `<span class="lm-person-badge pending">${pending} Dokumen</span>` : hasDocs ? '<span class="lm-person-badge verified">Dokumen</span>' : ''}</span>
           <span class="lm-person-meta">${esc(e.nip || 'NIP belum tersedia')}</span>
           <span class="lm-person-stats">${stats.days} hari · ${stats.hours} jam${changed ? ` · ${changed} koreksi` : ''}</span></button>`;
       }).join('') : '<div class="lm-empty">Pegawai tidak ditemukan.</div>'}</div></aside>`;
@@ -688,7 +694,7 @@
         || state.reviewFilter === 'documents' && !documentRelevantToOvertime(record);
       return `<button type="button" class="lm-cal-day lm-${status} ${weekend ? 'lm-rest' : ''} ${selected === key ? 'selected' : ''} ${faded ? 'lm-dim' : ''}" data-review-day="${key}" aria-pressed="${selected === key}" aria-label="${esc(fullDayLabel(key))}, ${record ? `${finalHours(record)} jam lembur` : 'tidak ada catatan presensi'}">
         <span class="lm-date">${Number(key.slice(-2))}</span><span class="lm-dayname">${shortWeekday(key)}</span><strong>${record && finalHours(record) > 0 ? `${finalHours(record)} jam` : '–'}</strong>
-        <small>${record?.statusDocumentNeedsReview?'Perlu Cek':documentRelevantToOvertime(record)?'Ada dokumen':isManualOvertime(record) ? 'Koreksi' : weekend ? rules.isHoliday(rules.dateFromKey(key), state.holidays) ? 'Tanggal merah' : 'Libur' : hasOvertime(record) ? 'Lembur' : record ? '0 jam' : 'Tanpa data'}</small>
+        <small>${record?.statusWeekendIneligible?'Tidak dapat klaim':record?.statusDocumentNeedsReview?'Perlu Cek':documentRelevantToOvertime(record)?'Ada dokumen':isManualOvertime(record) ? 'Koreksi' : weekend ? rules.isHoliday(rules.dateFromKey(key), state.holidays) ? 'Tanggal merah' : 'Libur' : hasOvertime(record) ? 'Lembur' : record ? '0 jam' : 'Tanpa data'}</small>
       </button>`;
     });
     return `<div class="lm-cal-layout">${renderReviewEmployeeList()}<section class="lm-cal-panel">
@@ -708,14 +714,14 @@
         <div><span>Hasil Otomatis</span><strong>${autoHours(record)} jam</strong></div>
         <div class="lm-final-value"><span>Hasil Final</span><strong>${finalHours(record)} jam</strong></div>
         <div><span>Uang Makan Lembur</span><strong>${mealEligible(record) ? 'Memenuhi' : 'Tidak'}</strong></div>
-      </div><div class="lm-day-subrow"><span>Status presensi: ${esc(record.status || '-')}</span>${isManualOvertime(record) ? `<span>Alasan koreksi: ${esc(record.adjustmentReason || 'Koreksi lama, alasan belum dicatat')}</span>` : ''}${record.statusDocumentNeedsReview?'<span>Perlu Cek - Surat Tugas/Form Cuti tidak ditemukan; lembur 0 jam</span>':documentRelevantToOvertime(record)?`<span>Dokumen terkait${record.documentBlocksOvertime?' · klaim lembur ditolak':''}</span>`:''}</div>${renderInlineDocumentReview(record)}`
+      </div><div class="lm-day-subrow"><span>Status presensi: ${esc(record.status || '-')}</span>${isManualOvertime(record) ? `<span>Alasan koreksi: ${esc(record.adjustmentReason || 'Koreksi lama, alasan belum dicatat')}</span>` : ''}${record.statusWeekendIneligible?'<span>Tidak dapat diklaim - Offsite/Tidak Hadir pada Sabtu/Minggu; lembur 0 jam</span>':record.statusDocumentNeedsReview?'<span>Perlu Cek - Surat Tugas/Form Cuti tidak ditemukan; lembur 0 jam</span>':documentRelevantToOvertime(record)?`<span>Dokumen terkait${record.documentBlocksOvertime?' · klaim lembur ditolak':''}</span>`:''}</div>${renderInlineDocumentReview(record)}`
       : '<div class="lm-empty lm-inline">Tidak ada data presensi untuk tanggal ini. Data lembur baru tidak dapat dibuat melalui editor.</div>'}</section>`;
   }
   function dailyReviewStats(key) {
-    let count = 0, hours = 0, corrected = 0, records = 0, pending = 0, verifiedDocs = 0, statusMissing = 0;
+    let count = 0, hours = 0, corrected = 0, records = 0, pending = 0, verifiedDocs = 0, statusMissing = 0, weekendIneligible = 0;
     state.employees.forEach(e => { const r = e.records?.[key]; if(!r) return; records += 1;
-      if(hasOvertime(r)){count += 1; hours += finalHours(r);} if(isManualOvertime(r)) corrected += 1; if(documentRelevantToOvertime(r))pending += 1; if(r.statusDocumentNeedsReview)statusMissing += 1; if(documentRelevantToOvertime(r) && !r.documentReviewPending && !r.statusDocumentNeedsReview)verifiedDocs += 1; });
-    return { count, hours, corrected, records, pending, verifiedDocs, statusMissing };
+      if(hasOvertime(r)){count += 1; hours += finalHours(r);} if(isManualOvertime(r)) corrected += 1; if(documentRelevantToOvertime(r))pending += 1; if(r.statusDocumentNeedsReview)statusMissing += 1; if(r.statusWeekendIneligible)weekendIneligible += 1; if(documentRelevantToOvertime(r) && !r.documentReviewPending && !r.statusDocumentNeedsReview && !r.statusWeekendIneligible)verifiedDocs += 1; });
+    return { count, hours, corrected, records, pending, verifiedDocs, statusMissing, weekendIneligible };
   }
   function renderReviewDateCalendar() {
     const selected = activeReviewDate();
@@ -727,12 +733,12 @@
         || state.reviewFilter === 'holiday' && !weekend || state.reviewFilter === 'documents' && !info.pending;
       return `<button type="button" class="lm-cal-day ${info.pending ? 'lm-needs-review' : info.corrected ? 'lm-adjusted' : info.count ? 'lm-overtime' : info.verifiedDocs ? 'lm-doc-verified' : 'lm-empty-day'} ${weekend ? 'lm-rest' : ''} ${selected === key ? 'selected' : ''} ${faded ? 'lm-dim' : ''}" data-review-day="${key}" aria-pressed="${selected === key}">
         <span class="lm-date">${Number(key.slice(-2))}</span><span class="lm-dayname">${shortWeekday(key)}</span><strong>${info.hours ? `${info.hours} jam` : '–'}</strong>
-        <small>${info.statusMissing?`${info.statusMissing} Perlu Cek`:info.pending ? `${info.pending} ada dokumen` : info.verifiedDocs ? 'Dokumen' : info.count ? `${info.count} pegawai` : weekend ? 'Libur' : 'Tanpa lembur'}</small></button>`;
+        <small>${info.statusMissing?`${info.statusMissing} Perlu Cek`:info.weekendIneligible?`${info.weekendIneligible} tidak dapat klaim`:info.pending ? `${info.pending} ada dokumen` : info.verifiedDocs ? 'Dokumen' : info.count ? `${info.count} pegawai` : weekend ? 'Libur' : 'Tanpa lembur'}</small></button>`;
     });
     const rows = state.employees.map(e => ({ employee:e, record:e.records?.[selected] })).filter(x => x.record);
     return `<section class="lm-date-view"><div class="lm-cal-panel-head"><div><strong>Kalender per Tanggal</strong><span>${esc(periodLabel(state.period))} · Total pegawai dan jam lembur per hari</span></div></div>
       ${calendar}<div class="lm-day-panel" id="lm-review-day-panel"><div class="lm-day-panel-head"><strong>${esc(fullDayLabel(selected))}</strong><span class="lm-count">${rows.length} data presensi</span></div>
-      ${rows.length ? `<div class="table-wrap"><table class="data-table lm-rows"><thead><tr><th>Pegawai</th><th>Masuk</th><th>Mulai</th><th>Pulang</th><th>Otomatis</th><th>Final</th><th>Aksi</th></tr></thead><tbody>${rows.map(({employee,record}) => `<tr><td><b>${esc(employee.name)}</b></td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.overtimeStartMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${autoHours(record)} jam</td><td>${finalHours(record)} jam ${isManualOvertime(record) ? '<span class="lm-mod-label">Koreksi</span>' : ''}${documentRelevantToOvertime(record)?`<span class="lm-mod-label">${record.statusDocumentNeedsReview?'Perlu Cek':record.documentReviewPending?'Ada dokumen':record.documentBlocksOvertime?'Tidak dapat diklaim':'Dokumen diperiksa'}</span>`:''}</td><td>${documentRelevantToOvertime(record)?`<button class="btn btn-secondary btn-sm" type="button" data-review-inspect="${esc(rules.employeeKey(employee))}|${esc(selected)}">Lihat Detail</button>`:`<button class="btn btn-secondary btn-sm" type="button" data-review-edit="${esc(rules.employeeKey(employee))}|${esc(selected)}">Edit</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="lm-empty lm-inline">Tidak ada data presensi pada tanggal ini.</div>'}</div></section>`;
+      ${rows.length ? `<div class="table-wrap"><table class="data-table lm-rows"><thead><tr><th>Pegawai</th><th>Masuk</th><th>Mulai</th><th>Pulang</th><th>Otomatis</th><th>Final</th><th>Aksi</th></tr></thead><tbody>${rows.map(({employee,record}) => `<tr><td><b>${esc(employee.name)}</b></td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.overtimeStartMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${autoHours(record)} jam</td><td>${finalHours(record)} jam ${isManualOvertime(record) ? '<span class="lm-mod-label">Koreksi</span>' : ''}${documentRelevantToOvertime(record)?`<span class="lm-mod-label">${record.statusDocumentNeedsReview?'Perlu Cek':record.statusWeekendIneligible?'Tidak dapat diklaim':record.documentReviewPending?'Ada dokumen':record.documentBlocksOvertime?'Tidak dapat diklaim':'Dokumen diperiksa'}</span>`:''}</td><td>${documentRelevantToOvertime(record)?`<button class="btn btn-secondary btn-sm" type="button" data-review-inspect="${esc(rules.employeeKey(employee))}|${esc(selected)}">Lihat Detail</button>`:`<button class="btn btn-secondary btn-sm" type="button" data-review-edit="${esc(rules.employeeKey(employee))}|${esc(selected)}">Edit</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<div class="lm-empty lm-inline">Tidak ada data presensi pada tanggal ini.</div>'}</div></section>`;
   }
   function renderReviewTable() {
     const rows = reviewRows();
@@ -740,7 +746,7 @@
       <select id="review-table-filter" class="lm-select" aria-label="Filter tabel"><option value="overtime" ${state.reviewTableFilter === 'overtime' ? 'selected' : ''}>Ada lembur / koreksi</option><option value="all" ${state.reviewTableFilter === 'all' ? 'selected' : ''}>Semua data presensi</option><option value="adjusted" ${state.reviewTableFilter === 'adjusted' ? 'selected' : ''}>Hanya koreksi</option><option value="documents" ${state.reviewTableFilter === 'documents' ? 'selected' : ''}>Dokumen / Perlu Cek</option></select>
       <span class="lm-count">${rows.length} baris</span></div>
       <div class="card table-wrap"><table class="data-table lm-rows"><thead><tr><th>No.</th><th>Pegawai</th><th>Tanggal</th><th>Kategori</th><th>Masuk</th><th>Pulang</th><th>Status</th><th>Otomatis</th><th>Final</th><th>Aksi</th></tr></thead><tbody>
-        ${rows.length ? rows.map(({employee,record,key},i) => { const category = resultCategory(record, state.holidays); return `<tr><td>${i+1}</td><td><button type="button" class="employee-link" data-review-person="${esc(rules.employeeKey(employee))}">${esc(employee.name)}</button></td><td class="nowrap">${esc(fullDayLabel(key))}</td><td><span class="category-pill ${category.rest ? 'rest-day' : ''}">${category.label}</span></td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${esc(record.status || '-')}</td><td>${autoHours(record)} jam</td><td><b>${finalHours(record)} jam</b> ${isManualOvertime(record) ? '<span class="lm-mod-label">Koreksi</span>' : ''}${documentRelevantToOvertime(record)?`<span class="lm-mod-label">${record.statusDocumentNeedsReview?'Perlu Cek':record.documentReviewPending?'Ada dokumen':record.documentBlocksOvertime?'Tidak dapat diklaim':'Dokumen diperiksa'}</span>`:''}</td><td>${documentRelevantToOvertime(record)?`<button class="btn btn-secondary btn-sm" type="button" data-review-inspect="${esc(rules.employeeKey(employee))}|${esc(key)}">Lihat Detail</button>`:`<button class="btn btn-secondary btn-sm" type="button" data-review-edit="${esc(rules.employeeKey(employee))}|${esc(key)}">Edit</button>`}</td></tr>`; }).join('') : '<tr><td colspan="10" class="lm-empty">Tidak ada data pada filter ini.</td></tr>'}
+        ${rows.length ? rows.map(({employee,record,key},i) => { const category = resultCategory(record, state.holidays); return `<tr><td>${i+1}</td><td><button type="button" class="employee-link" data-review-person="${esc(rules.employeeKey(employee))}">${esc(employee.name)}</button></td><td class="nowrap">${esc(fullDayLabel(key))}</td><td><span class="category-pill ${category.rest ? 'rest-day' : ''}">${category.label}</span></td><td>${esc(rules.formatMinutes(record.inMinutes))}</td><td>${esc(rules.formatMinutes(record.outMinutes))}</td><td>${esc(record.status || '-')}</td><td>${autoHours(record)} jam</td><td><b>${finalHours(record)} jam</b> ${isManualOvertime(record) ? '<span class="lm-mod-label">Koreksi</span>' : ''}${documentRelevantToOvertime(record)?`<span class="lm-mod-label">${record.statusDocumentNeedsReview?'Perlu Cek':record.statusWeekendIneligible?'Tidak dapat diklaim':record.documentReviewPending?'Ada dokumen':record.documentBlocksOvertime?'Tidak dapat diklaim':'Dokumen diperiksa'}</span>`:''}</td><td>${documentRelevantToOvertime(record)?`<button class="btn btn-secondary btn-sm" type="button" data-review-inspect="${esc(rules.employeeKey(employee))}|${esc(key)}">Lihat Detail</button>`:`<button class="btn btn-secondary btn-sm" type="button" data-review-edit="${esc(rules.employeeKey(employee))}|${esc(key)}">Edit</button>`}</td></tr>`; }).join('') : '<tr><td colspan="10" class="lm-empty">Tidak ada data pada filter ini.</td></tr>'}
       </tbody></table></div>`;
   }
   function renderReview() {
@@ -753,6 +759,7 @@
       ${isEdit ? '<div class="alert alert-warning"><div class="alert-title">Mode edit riwayat</div>Koreksi akan mengganti hasil tersimpan setelah Anda menekan Simpan & Generate Ulang.</div>' : ''}
       <div class="grid-4 section-gap">${metric(summary.employees,'Pegawai')}${metric(summary.overtimeEmployees,'Pegawai Lembur')}${metric(summary.totalHours,'Total Jam Lembur')}${metric(summary.mealDays,'Hari Uang Makan')}</div>
       ${state.employees.some(e=>Object.values(e.records||{}).some(r=>r.statusDocumentNeedsReview))?`<div class="alert alert-warning section-gap" role="alert"><div class="alert-title">Perlu Cek - Dokumen Status Presensi</div>${state.employees.reduce((n,e)=>n+Object.values(e.records||{}).filter(r=>r.statusDocumentNeedsReview).length,0)} tanggal Offsite/Tidak Hadir pada hari kerja tidak memiliki Surat Tugas atau Form Cuti yang cocok. Seluruh klaim pada tanggal tersebut dikunci 0 jam, termasuk uang makan lembur. Lengkapi dokumen pada modul sumber lalu lakukan proses/sinkronisasi ulang sebelum klaim.</div>`:''}
+      ${state.employees.some(e=>Object.values(e.records||{}).some(r=>r.statusWeekendIneligible))?`<div class="alert alert-warning section-gap" role="alert"><div class="alert-title">Tidak dapat diklaim - Sabtu/Minggu</div>${state.employees.reduce((n,e)=>n+Object.values(e.records||{}).filter(r=>r.statusWeekendIneligible).length,0)} tanggal berstatus Offsite/Tidak Hadir pada Sabtu/Minggu dibatasi menjadi 0 jam lembur, tanpa pengecualian meskipun dokumen pendukung tersedia. Uang makan lembur juga tidak diberikan.</div>`:''}
       ${renderHolidayManager()}
       <div class="card lm-review-card"><div class="lm-review-head"><div><div class="card-title">Pemeriksaan dan Koreksi ${window.LemburDocumentIntegration?.reviewGroups?.(state.employees).filter(group=>group.records.some(({record})=>documentRelevantToOvertime(record))).length?`<span class="lm-review-counter pending">${window.LemburDocumentIntegration.reviewGroups(state.employees).filter(group=>group.records.some(({record})=>documentRelevantToOvertime(record))).length} dokumen terkait lembur</span>`:''}</div><div class="card-subtitle">Pilih pegawai dan tanggal untuk melihat dokumen. Penyesuaian hasil lembur tersedia bila diperlukan, tanpa kewajiban penyesuaian.</div></div>
       <div class="lm-segment" role="group" aria-label="Tampilan editor">${['calendar','table'].map((mode)=>`<button type="button" data-review-mode="${mode}" aria-pressed="${state.reviewMode === mode}" class="${state.reviewMode === mode ? 'active' : ''}">${mode === 'calendar' ? 'Kalender' : 'Tabel'}</button>`).join('')}</div></div>
@@ -826,7 +833,7 @@
     const reason = String(document.getElementById('lm-edit-reason')?.value || '').trim() || (record.documentBlocksOvertime ? record.documentBlockNote : '');
     const automatic = autoHours(record);
     if (!Number.isInteger(value) || value < 0 || value > 4) return alert('Jam lembur final harus antara 0 sampai 4 jam.');
-    if (record.documentBlocksOvertime && value !== 0) return alert('Perlu Cek: Offsite/Tidak Hadir tanpa dokumen atau Cuti/Surat Tugas yang membatasi tidak dapat diklaim sebagai lembur.');
+    if (record.documentBlocksOvertime && value !== 0) return alert('Tidak dapat klaim: Offsite/Tidak Hadir pada Sabtu/Minggu, Offsite/Tidak Hadir tanpa dokumen pada hari kerja, atau Cuti/Surat Tugas yang membatasi klaim.');
     if (value !== automatic && reason.length < 3) return alert('Isi alasan koreksi minimal 3 karakter.');
     if (value !== finalHours(record) || (value !== automatic && reason !== (record.adjustmentReason || '')) || (value === automatic && isManualOvertime(record))) {
       const actor = window.FirebaseClient?.getCurrentUser?.();
@@ -958,6 +965,7 @@
         : renderResultSummary(run, period, summary, holidays);
     return `<div class="card result-head"><div class="result-head-main"><div class="success-mark">✓</div><div><h3>${title}</h3><p>${esc(periodLabel(period))}${timeValue ? ` - ${timeLabel} ${esc(formatDateTime(timeValue))}` : ''}</p></div></div><div class="result-head-note">Hasil generate dapat diperiksa langsung pada aplikasi sebelum dokumen diunduh.</div></div>
       ${statusMissingCount?`<div class="alert alert-warning section-gap" role="alert"><div class="alert-title">Perlu Cek - ${statusMissingCount} tanggal</div>Offsite/Tidak Hadir tanpa Surat Tugas atau Form Cuti yang sesuai. Klaim pada tanggal tersebut dibatasi menjadi 0 jam. ${state.resultMode==='history'?'Riwayat lama ditampilkan dengan pemeriksaan aturan terbaru; untuk memperbarui hasil tersimpan, pilih Edit Data dan Generate Ulang.':''}</div>`:''}
+      ${employees.some(e=>Object.values(e.records||{}).some(r=>r.statusWeekendIneligible))?`<div class="alert alert-warning section-gap" role="alert"><div class="alert-title">Tidak dapat diklaim - Sabtu/Minggu</div>${employees.reduce((n,e)=>n+Object.values(e.records||{}).filter(r=>r.statusWeekendIneligible).length,0)} tanggal Offsite/Tidak Hadir pada akhir pekan: lembur dan uang makan lembur tetap 0. ${state.resultMode==='history'?'Riwayat lama perlu diedit dan di-generate ulang sebelum hasil tersimpan dapat diperbarui.':''}</div>`:''}
       ${renderResultTabs()}
       ${panel}
       <div class="result-actions actions"><button class="btn btn-secondary" data-action="go-history">Lihat Riwayat</button><div class="actions-right">${run?.id && canManageRun ? '<button class="btn btn-secondary" data-action="edit-current-run">Edit Data</button>' : ''}<button class="btn btn-primary" data-action="new-period">Proses Periode Baru</button></div></div>`;
@@ -1214,8 +1222,9 @@
         const sources=record.documentSources||[];
         if(record.documentBlocksOvertime||sources.some(s=>s.blockByDefault))return true;
         return window.LemburDocumentIntegration.requiresStatusDocument(record.status)
-          && window.LemburDocumentIntegration.isWorkingDay(record,date,holidays)
-          && !sources.some(s=>s.kind==='cuti'||s.accountable!==false);
+          && (window.LemburDocumentIntegration.isWeekendDate(date)
+            || (window.LemburDocumentIntegration.isWorkingDay(record,date,holidays)
+              && !sources.some(s=>s.kind==='cuti'||s.accountable!==false)));
       }));
       if(unsafeClaim)throw new Error('Riwayat memuat klaim lembur yang perlu diperiksa berdasarkan status Offsite/Tidak Hadir atau dokumen pembatas. Pilih Edit Data, sinkronkan ulang Cuti & Surat Tugas, lalu Generate Ulang sebelum mengunduh.');
       await resources?.ensure?.(['exceljs', 'filesaver']);

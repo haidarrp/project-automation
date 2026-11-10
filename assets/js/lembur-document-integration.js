@@ -52,10 +52,25 @@
     const weekday=new Date(parts[0],parts[1]-1,parts[2]).getDay();
     return weekday!==0&&weekday!==6;
   }
+  function isWeekendDate(date){
+    const key=String(date||'');
+    const parts=key.split('-').map(Number);
+    if(parts.length!==3||parts.some(n=>!Number.isInteger(n)))return false;
+    const weekday=new Date(parts[0],parts[1]-1,parts[2],12).getDay();
+    return weekday===0||weekday===6;
+  }
+  function weekendStatusIneligible(record,date){
+    return requiresStatusDocument(record?.status)&&isWeekendDate(date);
+  }
   // Dokumen sumber harus cocok pada ID pegawai dan tanggal yang sama.
   // Tanpa dokumen, status Perlu Cek tetap ada meskipun jam lembur otomatis 0.
   function refreshStatusRestriction(record,date,holidays=[]){
     const required=requiresStatusDocument(record?.status)&&isWorkingDay(record,date,holidays);
+    // Larangan akhir pekan tetap berlaku walaupun Cuti/Surat Tugas tersedia
+    // atau operator menyetujui dokumen. Tidak bergantung pada tanggal merah.
+    record.statusWeekendIneligible=weekendStatusIneligible(record,date);
+    record.statusWeekendReviewNote=record.statusWeekendIneligible
+      ?`Tidak dapat diklaim: status ${record.status} pada Sabtu/Minggu tidak memenuhi syarat lembur dan uang makan lembur. Hasil final wajib 0 jam, meskipun jam presensi lengkap atau Surat Tugas/Cuti tersedia.`:'';
     // Seperti Tukin, Surat Tugas non-pertanggungjawaban tidak cukup
     // untuk mengesahkan status Offsite/Tidak Hadir.
     const supported=(record?.documentSources||[]).some(source=>source.kind==='cuti'||source.accountable!==false);
@@ -68,7 +83,7 @@
   function recalculateRecord(record){
     const sources=record.documentSources||[];
     const previousBlock=Boolean(record.documentBlocksOvertime);
-    const blocked=Boolean(record.statusDocumentNeedsReview)||sources.some(source=>source.blockByDefault||validReview(record,source)?.choice==='deny');
+    const blocked=Boolean(record.statusWeekendIneligible||record.statusDocumentNeedsReview)||sources.some(source=>source.blockByDefault||validReview(record,source)?.choice==='deny');
     record.documentReviewPending=sources.some(source=>!validReview(record,source));
     record.documentBlocksOvertime=blocked;
     record.documentSignature=sources.length?JSON.stringify(sources.map(s=>[s.key,s.signature]).sort((a,b)=>a[0].localeCompare(b[0]))):'';
@@ -77,7 +92,9 @@
     }
     if(blocked){
       if(Number(record.overtimeHours||0)!==0||!previousBlock){record.overtimeHours=0;record.manualOverride=false;}
-      record.documentBlockNote=record.statusDocumentNeedsReview
+      record.documentBlockNote=record.statusWeekendIneligible
+        ?record.statusWeekendReviewNote
+        :record.statusDocumentNeedsReview
         ?record.statusDocumentReviewNote
         :sources.some(s=>s.blockByDefault)
         ?'Klaim lembur tidak diperkenankan karena ada Cuti yang berlaku atau Surat Tugas yang dipertanggungjawabkan, meskipun presensi tercatat WFO.'
@@ -186,5 +203,5 @@
     return Math.max(pendingDays,reviewGroups(employees).filter(group=>!group.verified).length);
   }
   return Object.freeze({apply,applyDocuments,remaining,reviewGroups,verifySource,
-    requiresStatusDocument,isWorkingDay,refreshStatusRestriction});
+    requiresStatusDocument,isWorkingDay,isWeekendDate,weekendStatusIneligible,refreshStatusRestriction});
 });

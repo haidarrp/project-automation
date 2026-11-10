@@ -114,16 +114,23 @@
   }
 
   // Penilaian jam kerja berbeda dari verifikasi keabsahan status kehadiran.
-  // Offsite/tidak_hadir wajib didukung Cuti/Surat Tugas yang terdaftar pada
-  // tanggal dan pegawai yang sama, bahkan ketika TL/PSW menghasilkan 0,00%.
+  // Offsite/tidak_hadir pada HARI KERJA wajib didukung Cuti/Surat Tugas;
+  // Sabtu dan Minggu dikecualikan dari pemeriksaan status dan potongan Tukin.
   function normalizedAttendanceStatus(status) {
     return String(status || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
   }
   function requiresStatusDocument(status) {
     return ['offsite', 'off_site', 'tidak_hadir'].includes(normalizedAttendanceStatus(status));
   }
+  function isWeekendRecord(record) {
+    if (record?.isWeekend === true) return true;
+    const date = record?.date instanceof Date ? record.date
+      : /^\d{4}-\d{2}-\d{2}$/.test(String(record?.key || record?.date || ''))
+        ? dateFromKey(record.key || record.date) : null;
+    return Boolean(date && !Number.isNaN(date.getTime()) && isWeekend(date));
+  }
   function statusDocumentNeedsReview(record) {
-    if (!requiresStatusDocument(record?.status)) return false;
+    if (!requiresStatusDocument(record?.status) || isWeekendRecord(record)) return false;
     const current = record?.statusDocumentReview;
     if (current && typeof current === 'object') return current.state !== 'supported';
     // Riwayat dari versi lama tidak memiliki statusDocumentReview. Jika sudah
@@ -131,13 +138,13 @@
     return !Boolean(record?.cutiAdjustment?.automatic || record?.assignmentAdjustment?.assignments?.length);
   }
   function recalculateVerification(record) {
-    const attendanceIssue = Number(record?.autoTotalPercent || 0) > 0 ||
-      (record?.flags || []).some(flag => flag !== 'L');
+    const attendanceIssue = !isWeekendRecord(record) && (Number(record?.autoTotalPercent || 0) > 0 ||
+      (record?.flags || []).some(flag => flag !== 'L'));
     record.needsVerification = attendanceIssue || statusDocumentNeedsReview(record);
     return record.needsVerification;
   }
   function setStatusDocumentReview(record, hasValidDocument) {
-    record.statusDocumentReview = requiresStatusDocument(record?.status)
+    record.statusDocumentReview = requiresStatusDocument(record?.status) && !isWeekendRecord(record)
       ? { state: hasValidDocument === true ? 'supported' : hasValidDocument === false ? 'missing' : 'pending' }
       : null;
     return recalculateVerification(record);
@@ -152,6 +159,9 @@
   }
 
   function recordFinalPercent(record) {
+    // Offsite/Tidak Hadir pada akhir pekan tidak boleh menimbulkan potongan
+    // sekalipun ada koreksi lama yang tersimpan pada hari tersebut.
+    if (isWeekendRecord(record) && requiresStatusDocument(record?.status)) return 0;
     return record && record.adjustedPercent !== null && record.adjustedPercent !== undefined
       ? Number(record.adjustedPercent)
       : Number(record?.autoTotalPercent || 0);
@@ -187,7 +197,7 @@
   window.TukinRules = Object.freeze({
     pad2, normalizeName, dateKey, dateFromKey, addDays, inRange, attendancePeriod, formatDate,
     formatPeriodRange, formatMinutes, isWeekend, isManualHoliday, isSourceHoliday, isRamadan,
-    getSchedule, calculateDay, normalizedAttendanceStatus, requiresStatusDocument,
+    getSchedule, calculateDay, normalizedAttendanceStatus, requiresStatusDocument, isWeekendRecord,
     statusDocumentNeedsReview, setStatusDocumentReview, recalculateVerification,
     statusDocumentReviewMessage, recordFinalPercent, summarizeEmployee, employeeKey, safeFolderName,
     normalizeHolidays, periodContainsKey

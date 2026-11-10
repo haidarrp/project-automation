@@ -162,10 +162,35 @@ test('Koreksi manual 0% tanpa dokumen tetap ditandai Perlu Cek',async()=>{
   assert.equal(h.r.summarizeEmployee(emp).flaggedRecords,1);
 });
 
-test('Status Offsite pada hari libur tetap memerlukan dokumen',async()=>{
-  const h=harness();const {rec,emp}=h.make('Offsite',{date:'2026-11-08'});
+test('Tukin: Sabtu dan Minggu Offsite/Tidak Hadir diabaikan, tanpa perlu Surat Tugas/Cuti',async()=>{
+  for(const date of ['2026-11-07','2026-11-08']){
+    for(const status of ['Offsite','tidak_hadir']){
+      const h=harness();const {rec,emp}=h.make(status,{date,adjustedPercent:2.5});
+      rec.flags=['TK'];
+      h.r.recalculateVerification(rec);
+      const result=await h.sync(emp);
+      assert.equal(rec.isHoliday,true);
+      assert.equal(rec.autoTotalPercent,0);
+      assert.equal(rec.statusDocumentReview,null);
+      assert.equal(rec.needsVerification,false);
+      assert.equal(h.r.statusDocumentNeedsReview(rec),false);
+      assert.equal(h.r.statusDocumentReviewMessage(rec),'');
+      assert.equal(h.r.recordFinalPercent(rec),0);
+      assert.equal(h.r.summarizeEmployee(emp).attendancePercent,0);
+      assert.equal(result.missingStatusDocumentRecords,0);
+      assert.equal(result.pendingStatusDocumentRecords,0);
+      assert.equal(h.ui.calendarType(rec),'holiday');
+    }
+  }
+});
+
+test('Tukin: tanggal merah pada Senin bukan Sabtu/Minggu tetap mengikuti validasi dokumen',async()=>{
+  const h=harness();const {rec,emp}=h.make('Offsite',{date:'2026-11-09'});
+  h.win.TukinParser.recalculateEmployee(emp,{holidays:['2026-11-09']});
   await h.sync(emp);
   assert.equal(rec.isHoliday,true);
+  assert.equal(rec.isWeekend,false);
+  assert.equal(h.r.statusDocumentNeedsReview(rec),true);
   assert.equal(h.ui.calendarType(rec),'review');
 });
 

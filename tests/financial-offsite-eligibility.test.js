@@ -102,7 +102,7 @@ test('Lembur: ST non-pertanggungjawaban masih Perlu Cek; ST accountable menghapu
  assert.equal(e.records[date].overtimeHours,0);
 });
 
-test('Lembur: WFO/WFH/Dinas tidak memperoleh pembatas baru, weekend/tanggal merah Offsite tidak ditandai',()=>{
+test('Lembur: status umum tidak berubah; weekend Offsite/Tidak Hadir selalu ditolak',()=>{
  for(const status of ['WFO','WFH','Dinas','Libur']){
   const e=overtime(status);verify([e]);
   assert.equal(e.records[date].statusDocumentNeedsReview,false,status);
@@ -110,10 +110,22 @@ test('Lembur: WFO/WFH/Dinas tidak memperoleh pembatas baru, weekend/tanggal mera
  }
  const holiday=overtime('Offsite');verify([holiday],[],[],[date]);
  assert.equal(holiday.records[date].statusDocumentNeedsReview,false);
- const weekendDate='2026-11-07';
- const weekend={id:'pegawai-1',records:{[weekendDate]:{status:'Offsite',overtimeHours:3}}};
- verify([weekend]);
- assert.equal(weekend.records[weekendDate].statusDocumentNeedsReview,false);
+ for(const weekendDate of ['2026-11-07','2026-11-08']){
+  for(const status of ['Offsite','off-site','tidak_hadir','Tidak Hadir']){
+   const weekend={id:'pegawai-1',records:{[weekendDate]:{status,overtimeHours:3,originalOvertimeHours:3,manualOverride:true}}};
+   const result=verify([weekend]);
+   const rec=weekend.records[weekendDate];
+   assert.equal(rec.statusDocumentNeedsReview,false,status);
+   assert.equal(rec.statusWeekendIneligible,true,status);
+   assert.equal(rec.documentBlocksOvertime,true,status);
+   assert.equal(rec.originalOvertimeHours,3,status);
+   assert.equal(rec.overtimeHours,0,status);
+   assert.equal(rec.manualOverride,false,status);
+   assert.match(rec.documentBlockNote,/Sabtu\/Minggu/);
+   assert.equal(result.held,1);
+   assert.equal(result.missingStatus,0);
+  }
+ }
 });
 
 test('Lembur: saat tanggal merah diubah, Perlu Cek ikut dihitung ulang tanpa membiarkan nilai manual melewati pembatas',()=>{

@@ -45,12 +45,24 @@
     return isWeekend(date) || isHoliday(date, holidays);
   }
 
+  function isWeekendStatusIneligible(date, status) {
+    return isWeekend(date) && ['offsite', 'off_site', 'tidak_hadir'].includes(
+      String(status || '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  }
+
   function calculateOvertime(date, inMinutes, outMinutes, status, holidays) {
     const r = cfg.RULES;
     const day = date.getDay();
     const weekend = isWeekendLike(date, holidays);
     const statusUpper = String(status || '').trim().toUpperCase();
     const normalEnd = day === 5 ? r.NORMAL_END_FRIDAY_MINUTES : r.NORMAL_END_MON_THU_MINUTES;
+
+    // Sabtu/Minggu: Offsite dan Tidak Hadir TIDAK memenuhi syarat lembur
+    // meski jam presensi lengkap, ada dokumen, atau ada jam lebih.
+    if (isWeekendStatusIneligible(date, status)) {
+      return {hours: 0, normalEndMinutes: null,
+        adjustedWorkEndMinutes: null, overtimeStartMinutes: null};
+    }
 
     if (inMinutes === null || outMinutes === null) {
       return {
@@ -230,6 +242,7 @@
     dateFromKey,
     employeeKey,
     isWeekend,
+    isWeekendStatusIneligible,
     normalizeHolidays,
     isHoliday,
     isWeekendLike,
