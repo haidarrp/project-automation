@@ -39,3 +39,16 @@
 .rg-footnote{font-size:.79rem;color:#657488;line-height:1.6;margin:16px 3px}
 @media(max-width:1100px){.rg-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.rg-search-label{grid-column:span 2}.rg-filters button{justify-self:stretch}}
 @media(max-width:680px){.rg-card{padding:13px}.rg-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.rg-search-label{grid-column:span 2}.rg-filters button{grid-column:span 2}.rg-source-list{grid-template-columns:1fr}.rg-table{min-width:600px}.rg-lead h1{font-size:1.5rem}}
+/* Status presensi dan input Excel baca-saja */
+.rg-import{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px dashed #bfd1e2;background:#f8fbfd;border-radius:10px;padding:13px 15px;margin-bottom:15px}
+.rg-import>div{display:grid;gap:4px}.rg-import b{font-size:.85rem}.rg-import small{font-size:.76rem;color:#5e7188;line-height:1.5;max-width:780px}
+.rg-file-label{position:relative;white-space:nowrap;cursor:pointer;font-size:.8rem;display:flex;align-items:center;justify-content:center;min-height:40px}
+.rg-file-label input[type=file]{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+.rg-file-label:focus-within{outline:2px solid #1761a1;outline-offset:3px}
+.rg-status-summary{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;color:#496078;font-size:.78rem;line-height:1.5}
+.rg-status-summary>b{margin-right:4px}.rg-stat{border:1px solid #dfe7ee;border-radius:6px;padding:5px 9px;background:#f9fbfd}
+.rg-stat strong{color:#293f58}.rg-presence{display:inline-block;background:#e9f3fb;border-radius:6px;padding:5px 8px;color:#25527a;font-size:.79rem;font-weight:700}
+.rg-presence-warn,.rg-kind-warn{background:#fff0de;color:#865524}.rg-status-detail{display:block;margin-top:6px;font-size:.73rem;color:#617389;overflow-wrap:anywhere}
+.rg-missing{display:grid;gap:5px;min-width:245px}.rg-missing strong{color:#855023;font-size:.84rem}.rg-missing small{color:#5c6977;font-size:.76rem;line-height:1.5}
+.rg-missing-links{display:flex;flex-wrap:wrap;gap:12px;margin-top:3px}.rg-alert-ok{background:#eaf5ee;color:#28613c;border:1px solid #c7e3ce}
+@media(max-width:680px){.rg-import{flex-direction:column;align-items:stretch}.rg-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.rg-status-summary{align-items:flex-start}}

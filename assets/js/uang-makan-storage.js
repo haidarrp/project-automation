@@ -83,6 +83,8 @@
      const batch=db().batch();children.docs.slice(i,i+200).forEach(d=>batch.delete(d.ref));await batch.commit();
    }
    await ref.delete();
+   try {await window.AttendanceStatusStorage?.removeForRun?.('uangMakan', id);}
+   catch(error){console.warn('Pembersihan status presensi dari Monitoring gagal:',error);}
  }
  window.UangMakanStorage=Object.freeze({list,save,get,remove});
 })();

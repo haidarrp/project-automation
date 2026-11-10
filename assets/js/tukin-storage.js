@@ -396,6 +396,8 @@
     if (!leftovers.empty) {
       throw new Error(`Penghapusan belum tuntas: masih ada ${leftovers.size} dokumen Tukin dengan ID ${id} di Firestore.`);
     }
+    try { await window.AttendanceStatusStorage?.removeForRun?.('tukin', id); }
+    catch (error) { console.warn('Pembersihan status presensi dari Monitoring gagal:', error); }
     return true;
   }
 

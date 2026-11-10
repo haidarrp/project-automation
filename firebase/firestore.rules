@@ -293,6 +293,47 @@ service cloud.firestore {
       ));
       allow delete: if canDo('surat','data','delete');
     }
+    // Status harian saja: tidak menyimpan nilai Tukin/Uang Makan, dokumen, atau file.
+    // Hanya operator pemrosesan yang dapat menyinkronkan; Register hanya membaca.
+    function validAttendanceStatusRecord() {
+      return request.resource.data.keys().hasOnly([
+          'employeeId', 'year', 'month', 'source', 'sourceRunId', 'ownerUid', 'days', 'updatedAt', 'updatedByUid'
+        ])
+        && request.resource.data.keys().hasAll([
+          'employeeId', 'year', 'month', 'source', 'sourceRunId', 'ownerUid', 'days', 'updatedAt', 'updatedByUid'
+        ])
+        && request.resource.data.employeeId is string
+        && request.resource.data.employeeId.size() > 0
+        && request.resource.data.year is int
+        && request.resource.data.year >= 2000
+        && request.resource.data.year <= 2100
+        && request.resource.data.month is int
+        && request.resource.data.month >= 1
+        && request.resource.data.month <= 12
+        && request.resource.data.source in ['tukin', 'uangMakan']
+        && request.resource.data.sourceRunId is string
+        && request.resource.data.ownerUid is string
+        && request.resource.data.ownerUid.size() > 0
+        && request.resource.data.days is map
+        && request.resource.data.days.size() <= 31
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedByUid == request.auth.uid;
+    }
+    match /attendanceStatusRecords/{recordId} {
+      allow read: if anyRegisterView() || canDo('tukin','history','delete')
+        || canDo('uangMakan','history','delete');
+      allow create, update: if isAllowedUser() && validAttendanceStatusRecord()
+        && (
+          (request.resource.data.source == 'tukin'
+            && (canDo('tukin','process','save') || canDo('tukin','history','edit')))
+          || (request.resource.data.source == 'uangMakan'
+            && canDo('uangMakan','process','save'))
+        );
+      allow delete: if isAllowedUser()
+        && (resource.data.ownerUid == request.auth.uid || isAdmin())
+        && ((resource.data.source == 'tukin' && canDo('tukin','history','delete'))
+          || (resource.data.source == 'uangMakan' && canDo('uangMakan','history','delete')));
+    }
     // Register status administrasi kehadiran, tanpa hak mutasi terhadap dokumen sumber.
     function validAttendanceCase() {
       return request.resource.data.get('key','') is string

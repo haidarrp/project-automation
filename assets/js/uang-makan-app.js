@@ -773,7 +773,15 @@ async function saveRun(){
    holidays:state.holidays,holidayNotes:state.holidayNotes,archiveKey:state.archiveKey
   });
   state.savedRun=run;state.dirty=false;await refreshHistory();
-  state.message='Hasil periode '+R.periodLabel(state.year,state.month)+' tersimpan di Riwayat bersama referensi arsip absensi SharePoint.';
+  let attendanceNote=' Status presensi telah disinkronkan ke Monitoring Konflik.';
+  try {
+   const synced=await window.AttendanceStatusStorage.saveFromUangMakan(run,state.employees);
+   if(synced.unmatched)attendanceNote=` ${synced.unmatched} pegawai tidak dapat disinkronkan ke Monitoring Konflik karena identitas tidak valid.`;
+  }catch(error){
+   console.warn('Sinkronisasi status presensi ke Monitoring gagal:',error);
+   attendanceNote=' Catatan: status presensi belum tersinkron ke Monitoring Konflik. Periksa izin Firestore dan simpan ulang.';
+  }
+  state.message='Hasil periode '+R.periodLabel(state.year,state.month)+' tersimpan di Riwayat bersama referensi arsip absensi SharePoint.'+attendanceNote;
  }
  catch(e){fail(e);return;}
  state.busy=false;render();

@@ -31,3 +31,14 @@ test('navigasi Register hanya satu menu dan arsip verifikasi tidak dapat ditulis
     assert.match(block,/allow create, update, delete: if false;/);
   }
 });
+
+test('Register dapat membaca ringkasan status, tetapi bukan menulis/menghapusnya', () => {
+ const rules=fs.readFileSync('firebase/firestore.rules','utf8');
+ const block=rules.split('match /attendanceStatusRecords/{recordId} {')[1].split('\n    }')[0];
+ assert.match(block,/allow read: if anyRegisterView\(\)/);
+ assert.match(block,/allow create, update: if isAllowedUser\(\) && validAttendanceStatusRecord\(\)/);
+ assert.match(block,/canDo\('tukin','process','save'\)/);
+ assert.match(block,/canDo\('uangMakan','process','save'\)/);
+ assert.match(block,/allow delete: if isAllowedUser\(\)/);
+ assert.doesNotMatch(block,/allow (create|update|delete): if anyRegisterView\(\)/);
+});

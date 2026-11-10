@@ -814,6 +814,15 @@
       sharePoint: state.sharePointRun || null
     };
     const savedRun = await storage.saveRun(run);
+    state.attendanceStatusWarning = '';
+    try {
+      const synced = await window.AttendanceStatusStorage.saveFromTukin(savedRun);
+      if (synced.unmatched) state.attendanceStatusWarning =
+        `${synced.unmatched} pegawai belum cocok dengan master, sehingga status presensinya belum masuk Monitoring Konflik.`;
+    } catch (error) {
+      console.warn('Sinkronisasi status presensi ke Monitoring gagal:', error);
+      state.attendanceStatusWarning = 'Status presensi belum tersinkron ke Monitoring Konflik. Periksa izin Firestore dan ulangi penyimpanan.';
+    }
     state.editingHistoryId = savedRun.id;
     state.currentRunId = savedRun.id;
     state.sharePointRun = savedRun.sharePoint || state.sharePointRun || null;
@@ -886,7 +895,7 @@
       }
 
       state.generated = null;
-      alert(`Data Tunjangan Kinerja ${periodLabel()} berhasil disimpan. File absensi, rekap, dan bukti dukung tersimpan di SharePoint; tidak ada file yang diunduh ke perangkat.`);
+      alert(`Data Tunjangan Kinerja ${periodLabel()} berhasil disimpan. File absensi, rekap, dan bukti dukung tersimpan di SharePoint; tidak ada file yang diunduh ke perangkat.${state.attendanceStatusWarning ? `\n\nCatatan Monitoring: ${state.attendanceStatusWarning}` : ' Status presensi telah disinkronkan ke Monitoring Konflik.'}`);
     } catch (error) {
       console.error(error);
       alert(`Gagal menyimpan data Tukin: ${error.message || error}`);
