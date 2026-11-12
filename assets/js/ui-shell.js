@@ -75,7 +75,8 @@
       items: [
         { view: 'dashboard', label: 'Dashboard' },
         { view: 'data', label: 'Data Surat Tugas' },
-        { view: 'kalender', label: 'Kalender' }
+        { view: 'kalender', label: 'Kalender' },
+        { view: 'permohonan', label: 'Permohonan Perubahan ST' }
       ]
     }
   });
@@ -98,7 +99,7 @@
         <span class="nav-chevron">${icon('chevron')}</span>
       </button>
       <div class="nav-submenu">
-        ${items.map((item) => `<a class="nav-sub-button ${active && activeView === item.view ? 'active' : ''}" href="${config.file}#${item.view}"><span class="nav-sub-dot"></span><span>${item.label}</span></a>`).join('')}
+        ${items.map((item) => `<a class="nav-sub-button ${active && activeView === item.view ? 'active' : ''}" href="${config.file}#${item.view}"><span class="nav-sub-dot"></span><span>${item.label}</span>${module === 'assignment' && item.view === 'permohonan' && Number(window.STRequestMenuBadgeCount || 0) > 0 ? `<span class="st-request-nav-badge">${Number(window.STRequestMenuBadgeCount)}</span>` : ''}</a>`).join('')}
       </div>
     </div>`;
   }

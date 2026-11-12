@@ -15,7 +15,8 @@
       { id:'dashboard',label:'Dashboard Surat Tugas',actions:[] },
       { id:'data',label:'Data Surat Tugas',actions:[['create','Input Surat Tugas'],['edit','Edit Surat Tugas'],['delete','Hapus Surat Tugas']] },
       { id:'documents',label:'Berkas Surat Tugas',parent:'data',actions:[['upload','Unggah/Ganti Berkas'],['download','Unduh Berkas']] },
-      { id:'kalender',label:'Kalender Surat Tugas',actions:[] }
+      { id:'kalender',label:'Kalender Surat Tugas',actions:[] },
+      { id:'permohonan',label:'Permohonan Perubahan ST (Excel SharePoint)',actions:[] }
     ]},
     { id:'register',label:'Monitoring Konflik Kehadiran',sections:[
       { id:'cases',label:'Monitoring Konflik',actions:[] }

@@ -10,7 +10,8 @@
   const VIEW_LABELS = Object.freeze({
     dashboard: 'Dashboard',
     data: 'Data Surat Tugas',
-    kalender: 'Kalender'
+    kalender: 'Kalender',
+    permohonan: 'Permohonan Perubahan ST'
   });
   const ASSIGNMENT_TYPES = Object.freeze({
     official_travel: 'Dinas Luar / Perjalanan Dinas',
@@ -56,7 +57,10 @@
     modal: null,
     detailId: '',
     previewModal: null,
-    inlinePreviews: {}
+    inlinePreviews: {},
+    requests: { rows: [], loaded: false, loading: false, error: '', updatedAt: null,
+      filter: 'all', search: '', detailId: '', unread: new Set(), known: new Set(),
+      fileName: '', worksheet: '', info: '', updatingId: '', updateError: '' }
   };
 
   const esc = (value) => String(value == null ? '' : value)
@@ -511,18 +515,206 @@
     return `<div class="assignment-modal-backdrop assignment-preview-backdrop" data-action="close-preview-modal"><div class="assignment-modal assignment-preview-modal" role="dialog" aria-modal="true"><div class="assignment-modal-head assignment-preview-head"><div><h3>${esc(ctx.fileName || 'Surat Tugas')}</h3><p>Preview ditampilkan langsung dari file SharePoint.</p></div><div class="assignment-row-actions">${sharePointAction}<button class="icon-btn" type="button" data-action="close-preview-modal">×</button></div></div><div class="assignment-preview-body">${body}</div></div></div>`;
   }
 
+  // Permohonan Perubahan ST: Refresh manual dari Excel; status disimpan ke SharePoint
+  // melalui Microsoft Graph saat petugas mengonfirmasi penyelesaian.
+  // Penanda BARU tetap lokal per browser, status permohonan bersumber dari Excel.
+  function requestStorageKey() {
+    return `pkp-st-request-read-v1:${String(user()?.uid || 'anon')}`;
+  }
+
+  function readRequestMarkers() {
+    try {
+      const data = JSON.parse(localStorage.getItem(requestStorageKey()) || '{}');
+      state.requests.known = new Set(Array.isArray(data.known) ? data.known.map(String) : []);
+      state.requests.unread = new Set(Array.isArray(data.unread) ? data.unread.map(String) : []);
+    } catch (_) {
+      state.requests.known = new Set();
+      state.requests.unread = new Set();
+    }
+    window.STRequestMenuBadgeCount = state.requests.unread.size;
+  }
+
+  function saveRequestMarkers() {
+    window.STRequestMenuBadgeCount = state.requests.unread.size;
+    try {
+      localStorage.setItem(requestStorageKey(), JSON.stringify({
+        known: [...state.requests.known].slice(-5000),
+        unread: [...state.requests.unread].slice(-5000)
+      }));
+    } catch (error) { console.warn('Penanda permohonan tidak dapat disimpan di browser:', error); }
+  }
+
+  function requestDone(item) {
+    return /^(selesai|ditolak|dibatalkan|batal|closed|resolved)$/i.test(String(item?.status || '').trim());
+  }
+
+  function requestStatusClass(item) {
+    if (requestDone(item)) return 'st-req-done';
+    if (/proses|verifikasi|tindak lanjut/i.test(String(item.status))) return 'st-req-process';
+    return 'st-req-pending';
+  }
+
+  function requestStatistics() {
+    const rows = state.requests.rows;
+    return {
+      total: rows.length,
+      pending: rows.filter(row => !requestDone(row)).length,
+      done: rows.filter(requestDone).length,
+      newCount: rows.filter(row => state.requests.unread.has(row.id)).length
+    };
+  }
+
+  function requestRowsFiltered() {
+    const needle = state.requests.search.trim().toLowerCase();
+    const filter = state.requests.filter;
+    return state.requests.rows.filter(row => {
+      if (filter === 'unread' && !state.requests.unread.has(row.id)) return false;
+      if (filter === 'pending' && requestDone(row)) return false;
+      if (filter === 'done' && !requestDone(row)) return false;
+      if (!needle) return true;
+      return [row.name,row.id,row.letter,row.description,row.type,row.status].some(value => String(value || '').toLowerCase().includes(needle));
+    });
+  }
+
+  function requestView() {
+    const info = state.requests;
+    const summary = requestStatistics();
+    const filtered = requestRowsFiltered();
+    const sourceUrl = String(window.ST_CHANGE_REQUESTS_CONFIG?.shareUrl || '');
+    const sourceLink = /^https:\/\//i.test(sourceUrl) ? `<a class="btn btn-secondary btn-sm" href="${esc(sourceUrl)}" target="_blank" rel="noopener noreferrer">Buka Excel SharePoint ↗</a>` : '';
+    const recent = info.updatedAt ? new Intl.DateTimeFormat('id-ID', { day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit' }).format(info.updatedAt) : 'Belum pernah disinkronkan dalam sesi ini';
+    const rows = filtered.map(row => {
+      const unread = info.unread.has(row.id);
+      return `<tr class="${unread ? 'st-req-unread-row' : ''}">
+        <td data-label="Diterima"><span class="st-req-small">${esc(row.completed || '—')}</span></td>
+        <td data-label="Pemohon"><strong>${esc(row.name)}</strong><small>#${esc(row.id)} · ${esc(row.type)}</small></td>
+        <td data-label="Nomor Surat"><span class="st-req-letter">${esc(row.letter)}</span></td>
+        <td data-label="Uraian"><span class="st-req-description">${esc(row.description || '—')}</span></td>
+        <td data-label="Status"><span class="st-req-pill ${requestStatusClass(row)}">${esc(row.status)}</span>${unread ? '<span class="st-req-new-mark">BARU</span>' : ''}</td>
+        <td data-label="Tindakan"><button type="button" class="btn btn-secondary btn-sm" data-action="st-request-detail" data-request-id="${esc(row.id)}">Detail</button></td>
+      </tr>`;
+    }).join('');
+    return `<section class="assignment-page st-request-page">
+      <div class="assignment-head st-request-header"><div><h1>Permohonan Perubahan Surat Tugas</h1><p>Monitoring respons Microsoft Forms dari Excel SharePoint. Pembaruan hanya dijalankan ketika tombol Refresh diklik.</p></div>
+        <div class="assignment-head-actions">${sourceLink}<button class="btn btn-primary" type="button" data-action="st-request-refresh" ${info.loading || info.updatingId ? 'disabled aria-busy="true"' : ''}>${info.loading ? 'Mengambil data…' : '↻ Refresh dari SharePoint'}</button></div>
+      </div>
+      <div class="st-req-hint">${info.loading ? 'Sedang membaca Excel SharePoint melalui akun Microsoft Anda…' : `Terakhir diperiksa: <strong>${esc(recent)}</strong>`}${info.fileName ? ` · ${esc(info.fileName)} / ${esc(info.worksheet)}` : ''} <span>Refresh membaca data; penyelesaian tiket mengubah kolom Status di Excel SharePoint.</span></div>
+      ${info.error ? `<div class="alert alert-warning" role="alert"><div class="alert-title">Gagal mengambil respons Microsoft Forms</div>${esc(info.error)}<div class="st-req-error-help">Pastikan Anda login dengan akun Microsoft yang diberi akses ke file dan file tetap berada di OneDrive/SharePoint organisasi.</div></div>` : ''}
+      ${info.info ? `<div class="st-req-message" role="status">${esc(info.info)}</div>` : ''}
+      <div class="st-req-metrics">
+        ${metric('Total Permohonan',summary.total,'Respons dengan Completion time')}
+        ${metric('Belum Selesai',summary.pending,'Status dari Excel')}
+        ${metric('Selesai / Ditutup',summary.done,'Status dari Excel')}
+        ${metric('Baru / Belum Dibaca',summary.newCount,'Penanda lokal browser')}
+      </div>
+      <section class="card st-req-list-card">
+        <div class="st-req-list-head"><div><h2>Daftar Permohonan</h2><p>${info.loaded ? `${filtered.length} dari ${summary.total} permohonan ditampilkan` : 'Klik Refresh untuk membaca data terbaru dari Excel SharePoint.'}</p></div></div>
+        <div class="st-req-controls"><label class="st-req-search-field">Cari permohonan<input id="st-request-search" type="search" placeholder="Nama pegawai, nomor ST, atau uraian..." value="${esc(info.search)}" autocomplete="off"></label>
+          <label class="st-req-filter-field">Status<select id="st-request-status-filter"><option value="all" ${info.filter === 'all' ? 'selected' : ''}>Semua</option><option value="unread" ${info.filter === 'unread' ? 'selected' : ''}>Baru / Belum Dibaca</option><option value="pending" ${info.filter === 'pending' ? 'selected' : ''}>Belum Selesai</option><option value="done" ${info.filter === 'done' ? 'selected' : ''}>Selesai / Ditutup</option></select></label></div>
+        <div class="st-req-table-scroll"><table class="st-req-table"><thead><tr><th>Diterima</th><th>Pemohon</th><th>Nomor Surat/Perihal</th><th>Deskripsi Permohonan</th><th>Status Excel</th><th>Tindakan</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" class="st-req-empty">${info.loaded ? 'Tidak ada permohonan yang sesuai filter.' : 'Belum ada data. Gunakan tombol Refresh dari SharePoint.'}</td></tr>`}</tbody></table></div>
+      </section>
+    </section>`;
+  }
+
+  function requestDetailModal() {
+    const id = state.requests.detailId;
+    if (!id || state.view !== 'permohonan') return '';
+    const item = state.requests.rows.find(row => row.id === id);
+    if (!item) return '';
+    const isPending = !requestDone(item);
+    const isSaving = state.requests.updatingId === item.id;
+    const candidates = state.assignments.filter(row => String(row.letterNumber || '').replace(/[^a-z0-9]/gi,'').toLowerCase() === String(item.letter || '').replace(/[^a-z0-9]/gi,'').toLowerCase());
+    const assignments = window.UserAccess.canView('surat','data') && candidates.length
+      ? `<div class="st-req-detail-field"><span>Surat Tugas terkait di aplikasi</span>${candidates.map(row => `<button type="button" class="btn btn-secondary btn-sm" data-assignment-detail="${esc(row.id)}">${esc(row.letterNumber)} · Lihat Surat Tugas</button>`).join(' ')}</div>` : '';
+    return `<div class="assignment-modal-backdrop st-request-detail-backdrop" data-action="st-request-close"><section class="assignment-modal st-request-detail-modal" role="dialog" aria-modal="true" aria-labelledby="st-request-detail-heading">
+      <div class="assignment-modal-head"><div><h3 id="st-request-detail-heading">Permohonan #${esc(item.id)}</h3><p>Data dari Excel Microsoft Forms (status dapat diperbarui)</p></div><button class="icon-btn" type="button" data-action="st-request-close" aria-label="Tutup">×</button></div>
+      <div class="st-req-detail-body">
+        <div class="st-req-detail-grid"><div class="st-req-detail-field"><span>Nama Pemohon</span><strong>${esc(item.name)}</strong></div><div class="st-req-detail-field"><span>Waktu Pengiriman</span><strong>${esc(item.completed || '—')}</strong></div>
+        <div class="st-req-detail-field"><span>Jenis Permohonan</span><strong>${esc(item.type)}</strong></div><div class="st-req-detail-field"><span>Status pada Excel</span><strong><span class="st-req-pill ${requestStatusClass(item)}">${esc(item.status)}</span></strong></div></div>
+        <div class="st-req-detail-field"><span>Nomor Surat/Perihal</span><strong>${esc(item.letter)}</strong></div>
+        <div class="st-req-detail-field"><span>Rincian Permohonan</span><div class="st-req-detail-description">${esc(item.description || 'Tidak diisi.')}</div></div>
+        ${assignments}
+        <div class="st-req-detail-footnote">Tombol Tandai Sudah Dibaca sekaligus menyimpan <strong>Selesai</strong> ke kolom Status di Excel SharePoint. Gunakan hanya setelah permohonan ditindaklanjuti.</div>
+        ${state.requests.updateError ? `<div class="alert alert-warning" role="alert"><div class="alert-title">Gagal menyimpan status</div>${esc(state.requests.updateError)}</div>` : ''}
+      </div>
+      <div class="st-req-detail-actions">${isPending ? `<button type="button" class="btn btn-primary" data-action="st-request-read" data-request-id="${esc(item.id)}" ${state.requests.updatingId ? 'disabled aria-busy="true"' : ''}>${isSaving ? 'Menyimpan ke Excel…' : 'Tandai Sudah Dibaca & Selesai'}</button>` : ''}<button type="button" class="btn btn-secondary" data-action="st-request-close" ${isSaving ? 'disabled' : ''}>Tutup</button></div>
+    </section></div>`;
+  }
+
+  async function refreshRequests() {
+    if (state.requests.loading || state.requests.updatingId || !window.UserAccess.canView('surat','permohonan')) return;
+    state.requests.loading = true;
+    state.requests.error = '';
+    state.requests.info = '';
+    render();
+    try {
+      const result = await window.STChangeRequests.fetchRequests();
+      const rows = result.rows;
+      const existing = state.requests.known;
+      const newPending = rows.filter(row => !existing.has(row.id) && !requestDone(row));
+      for (const row of rows) existing.add(row.id);
+      for (const row of newPending) state.requests.unread.add(row.id);
+      // Respons yang sudah ditutup tidak lagi memunculkan penanda tindakan baru.
+      for (const row of rows) if (requestDone(row)) state.requests.unread.delete(row.id);
+      saveRequestMarkers();
+      state.requests.rows = rows;
+      state.requests.loaded = true;
+      state.requests.updatedAt = new Date();
+      state.requests.fileName = result.fileName;
+      state.requests.worksheet = result.worksheet;
+      state.requests.info = newPending.length
+        ? `${newPending.length} permohonan baru yang belum selesai ditemukan.`
+        : `Sinkronisasi berhasil. ${rows.length} respons lengkap ditemukan; tidak ada permohonan baru yang belum selesai.`;
+    } catch (error) {
+      state.requests.error = error?.message || String(error);
+    } finally {
+      state.requests.loading = false;
+      render();
+    }
+  }
+
+  async function markRequestRead(id) {
+    if (state.requests.loading || state.requests.updatingId || !window.UserAccess.canView('surat','permohonan')) return;
+    const item = state.requests.rows.find(row => row.id === id);
+    if (!item || requestDone(item)) return;
+    const confirmation = `Tandai permohonan #${id} dari ${item.name} sebagai Selesai?\n\nTindakan ini akan MENULIS \"Selesai\" ke kolom Status pada Excel SharePoint, bukan hanya menghilangkan notifikasi.`;
+    if (!window.confirm(confirmation)) return;
+    state.requests.updatingId = id;
+    state.requests.updateError = '';
+    render();
+    try {
+      const result = await window.STChangeRequests.completeRequest(id);
+      item.status = result.status;
+      state.requests.known.add(id);
+      state.requests.unread.delete(id);
+      saveRequestMarkers();
+      state.requests.detailId = '';
+      state.requests.info = result.alreadyDone
+        ? `Permohonan #${id} sudah berstatus Selesai di Excel SharePoint.`
+        : `Status permohonan #${id} berhasil disimpan sebagai Selesai pada Excel SharePoint.`;
+    } catch (error) {
+      state.requests.updateError = error?.message || String(error);
+    } finally {
+      state.requests.updatingId = '';
+      render();
+    }
+  }
+
+
   function overlays() {
-    return `${assignmentDetail()}${assignmentModal()}${previewModal()}${state.toast ? `<div class="assignment-toast">${esc(state.toast)}</div>` : ''}`;
+    return `${assignmentDetail()}${assignmentModal()}${previewModal()}${requestDetailModal()}${state.toast ? `<div class="assignment-toast">${esc(state.toast)}</div>` : ''}`;
   }
 
   function viewMarkup() {
+    if (state.view === 'permohonan') return requestView();
     if (state.view === 'data') return dataView();
     if (state.view === 'kalender') return calendarView();
     return dashboardView();
   }
 
   function render() {
-    document.body.classList.toggle('wide-records', state.view === 'data');
+    document.body.classList.toggle('wide-records', state.view === 'data' || state.view === 'permohonan');
     if (state.loading) {
       app.innerHTML = window.AppShell.render({ module: 'assignment', view: state.view, viewLabel: VIEW_LABELS[state.view], content: '<div class="card assignment-loading"><strong>Memuat modul Surat Tugas</strong>Membaca master pegawai dan arsip penugasan dari Cloud Firestore...</div>' });
       return;
@@ -548,6 +740,10 @@
     state.error = '';
     render();
     try {
+      if (!['dashboard', 'data', 'kalender'].some(view => window.UserAccess.canView('surat', view))) {
+        state.employees = []; state.directory = new Map(); state.assignments = [];
+        return;
+      }
       const [masterBundle, snapshot] = await Promise.all([
         window.MasterDataService.getBundle(false),
         db().collection('assignmentRecords').get()
@@ -781,6 +977,7 @@
   }
 
   function openAssignmentDetail(id) {
+    state.requests.detailId = '';
     state.modal = null;
     state.previewModal = null;
     state.inlinePreviews = {};
@@ -856,6 +1053,7 @@
     const target = event.target;
     if (target.matches?.('[data-assignment-employee]')) { updateEmployeeSummary(); return; }
     if (target.id === 'assignment-file') { renderLocalFilePreview(target.files?.[0] || null); return; }
+    if (target.id === 'st-request-status-filter') { state.requests.filter = target.value || 'all'; render(); return; }
     if (target.id === 'assignment-filter-year') { state.filters.year = Number(target.value || CURRENT_YEAR); render(); return; }
     if (target.id === 'assignment-filter-unit') { state.filters.unit = String(target.value || ''); render(); return; }
     if (target.id === 'assignment-filter-status') { state.filters.status = String(target.value || ''); render(); return; }
@@ -867,6 +1065,16 @@
 
   app.addEventListener('input', (event) => {
     const target = event.target;
+    if (target.id === 'st-request-search') {
+      state.requests.search = String(target.value || '');
+      const cursor = target.selectionStart;
+      render();
+      requestAnimationFrame(() => {
+        const input = document.getElementById('st-request-search');
+        if (input) { input.focus(); try { input.setSelectionRange(cursor, cursor); } catch (_) {} }
+      });
+      return;
+    }
     if (target.id === 'assignment-filter-search') {
       state.filters.search = String(target.value || '');
       const cursor = target.selectionStart;
@@ -887,6 +1095,12 @@
     if (action === 'close-assignment-detail' && actionEl.classList.contains('assignment-detail-backdrop') && event.target !== actionEl) return;
     if (action === 'close-preview-modal' && actionEl.classList.contains('assignment-modal-backdrop') && event.target !== actionEl) return;
 
+    if (action === 'st-request-refresh') { refreshRequests(); return; }
+    if (action === 'st-request-detail') { state.requests.detailId = String(actionEl.dataset.requestId || ''); render(); return; }
+    if (action === 'st-request-close' && state.requests.updatingId) return;
+    if (action === 'st-request-close' && actionEl.classList.contains('st-request-detail-backdrop') && event.target !== actionEl) return;
+    if (action === 'st-request-close') { state.requests.detailId = ''; render(); return; }
+    if (action === 'st-request-read') { markRequestRead(String(actionEl.dataset.requestId || '')); return; }
     if (action === 'add-assignment') { openAssignmentModal(''); return; }
     if (action === 'close-assignment-modal') { state.modal = null; render(); return; }
     if (action === 'close-assignment-detail') { state.detailId = ''; state.inlinePreviews = {}; render(); return; }
@@ -934,6 +1148,7 @@
     state.detailId = '';
     state.previewModal = null;
     state.inlinePreviews = {};
+    state.requests.detailId = '';
     render();
   });
 
@@ -944,6 +1159,7 @@
   async function init() {
     if (!(await window.UserAccess.requireModule('surat'))) return;
     state.view = viewFromHash();
+    readRequestMarkers();
     if (!location.hash || !window.UserAccess.canView('surat',state.view)) {
       state.view = window.UserAccess.firstView('surat') || 'dashboard';
       history.replaceState(null, '', '#'+state.view);
