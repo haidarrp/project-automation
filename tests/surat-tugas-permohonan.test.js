@@ -34,7 +34,7 @@ test('duplicate rows are suppressed, alternate spelling Deskripsi supported', ()
   assert.equal(service.parseWorksheet({values:[['NOT','MATCH']]}),null);
 });
 
-test('service uses signed in delegated Graph token and only GET endpoints', async () => {
+test('service uses delegated Graph token to read dedicated ticket table with GET only', async () => {
   const calls=[];
   const serviceCode = fs.readFileSync(path.join(root,'assets/js/surat-tugas-permohonan-service.js'),'utf8');
   const fakeWindow = { MICROSOFT_CONFIG: {graphBaseUrl:'https://graph.microsoft.com/v1.0'},
@@ -43,17 +43,16 @@ test('service uses signed in delegated Graph token and only GET endpoints', asyn
   const context={window:fakeWindow,TextEncoder, btoa, fetch:async(url,options)=>{
     calls.push({url,options});
     if(url.includes('/shares/')) return {ok:true,async json(){return {id:'item1',name:'Responses.xlsx',webUrl:'https://example.com',parentReference:{driveId:'drive1'}};}};
-    if(url.endsWith('/worksheets?$select=id,name')) return {ok:true,async json(){return {value:[{id:'sheet1',name:'Sheet1'}]};}};
-    if(url.includes('usedRange')) return {ok:true,async json(){return {values:mockRows};}};
+    if(url.endsWith('/worksheets/Tiket/tables/TblPermohonanST/range')) return {ok:true,async json(){return {values:mockRows,rowIndex:0,columnIndex:0};}};
     throw new Error('Unexpected '+url);
   },module:{exports:{}}};
   vm.runInNewContext(serviceCode,context,{filename:'surat-tugas-permohonan-service.js'});
   const result=await context.module.exports.fetchRequests();
   assert.equal(result.rows.length,3);
-  assert.equal(calls.length,3);
+  assert.equal(calls.length,2);
   for(const c of calls){assert.equal(c.options.method,'GET');assert.equal(c.options.headers.Authorization,'Bearer test-token');}
   assert.match(calls[0].url,/\/shares\/u!/);
-  assert.match(calls[2].url,/usedRange\(valuesOnly=true\)/);
+  assert.match(calls[1].url,/worksheets\/Tiket\/tables\/TblPermohonanST\/range$/);
 });
 
 test('new view integrated into navigation and permission models', () => {
@@ -101,7 +100,7 @@ async function mountRequests() {
   return {app,click,window:browserWindow,handlers,setRows(rows){resultRows=rows;},storage,getWrites(){return writes.slice();},setFail(value){shouldFail=value;}};
 }
 
-test('completeRequest PATCH writes only the Status cell for the ID re-read from latest usedRange',async()=>{
+test('completeRequest PATCH writes only Status cell for ID resolved from latest ticket table',async()=>{
   const calls=[];
   const serviceCode=fs.readFileSync(path.join(root,'assets/js/surat-tugas-permohonan-service.js'),'utf8');
   const fakeWindow={MICROSOFT_CONFIG:{graphBaseUrl:'https://graph.microsoft.com/v1.0'},
@@ -111,8 +110,7 @@ test('completeRequest PATCH writes only the Status cell for the ID re-read from 
   const context={window:fakeWindow,TextEncoder,btoa,module:{exports:{}},fetch:async(url,options)=>{
     calls.push({url,options});
     if(url.includes('/shares/'))return {ok:true,async json(){return {id:'item1',parentReference:{driveId:'drive1'}};}};
-    if(url.includes('/worksheets?$select'))return {ok:true,async json(){return {value:[{id:'sheet1',name:'Responses'}]};}};
-    if(url.includes('usedRange'))return {ok:true,async json(){return shiftedRange;}};
+    if(url.endsWith('/worksheets/Tiket/tables/TblPermohonanST/range'))return {ok:true,async json(){return shiftedRange;}};
     if(options.method==='PATCH')return {ok:true,status:200,async json(){return {values:[['Selesai']]};}};
     throw Error('Unexpected Graph URL: '+url);
   }};
@@ -121,8 +119,9 @@ test('completeRequest PATCH writes only the Status cell for the ID re-read from 
   assert.equal(updated.status,'Selesai');
   assert.equal(updated.address,'L7'); // usedRange starts at row 3; the final mocked ID is at relative index 4
   assert.equal(calls.filter(c=>c.options.method==='PATCH').length,1);
+  assert.equal(calls.filter(c=>c.options.method==='GET').length,2);
   const patch=calls.find(c=>c.options.method==='PATCH');
-  assert.match(patch.url,/\/range\(address='L7'\)$/);
+  assert.match(patch.url,/\/worksheets\/Tiket\/range\(address='L7'\)$/);
   assert.equal(patch.options.headers['Content-Type'],'application/json');
   assert.deepEqual(JSON.parse(patch.options.body),{values:[['Selesai']]});
   assert.equal(patch.options.headers.Authorization,'Bearer valid-token');
@@ -170,4 +169,48 @@ test('UI refresh reads rows, completion updates SharePoint, then badge/status; f
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(ui.window.STRequestMenuBadgeCount,1);
   assert.match(ui.app.innerHTML,/Pegawai Baru/);
+});
+
+
+test('empty dedicated ticket table is supported and new ISO timestamp is parsed in Jakarta timezone', () => {
+  const header=['Id','Start time','Completion time','Email','Name','Nama','Jenis','Nomor Surat/Perihal','Deskripsi','Status'];
+  assert.equal(service.parseWorksheet({values:[header]}).length,0);
+  const rows=service.parseWorksheet({values:[header,['123','','2026-11-12T07:00:00Z','','','Pegawai Uji','Perubahan','45/ST/2026','Uji perubahan','']]});
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].status,'Belum ditangani');
+  assert.equal(rows[0].completedSort,Date.parse('2026-11-12T07:00:00Z'));
+  assert.match(rows[0].completed,/14[.:]00/);
+});
+
+test('config uses existing Forms workbook but reads only the Power Automate ticket table',()=>{
+  const config=fs.readFileSync(path.join(root,'assets/js/surat-tugas-permohonan-config.js'),'utf8');
+  assert.match(config,/tableName: 'TblPermohonanST'/);
+  assert.match(config,/sheetName: 'Tiket'/);
+  assert.match(config,/kemenpkp-my\.sharepoint\.com/);
+  assert.match(config,/haidar_rasyid/);
+  assert.doesNotMatch(config,/OfficeForms\.Table'\s*[,}]/);
+  const app=fs.readFileSync(path.join(root,'assets/js/surat-tugas.js'),'utf8');
+  assert.match(app,/Atur Sumber Excel/);
+  assert.match(app,/pkp-st-ticket-source-v2/);
+  assert.match(app,/pkp-st-request-read-v3/);
+  assert.match(app,/function requestWorkbookUrl/);
+});
+
+
+test('invalid sheet selection cannot redirect writes to the Forms response table',async()=>{
+  const source=fs.readFileSync(path.join(root,'assets/js/surat-tugas-permohonan-service.js'),'utf8');
+  const urls=[];
+  const fakeWindow={MICROSOFT_CONFIG:{graphBaseUrl:'https://graph.microsoft.com/v1.0'},
+    ST_CHANGE_REQUESTS_CONFIG:{shareUrl:'https://example.com/forms.xlsx',sheetName:'Sheet1',tableName:'OfficeForms.Table'},
+    MicrosoftAuth:{async acquireToken(){return 'test-token';}}};
+  const sandbox={window:fakeWindow,TextEncoder,btoa,module:{exports:{}},fetch:async(url,options)=>{
+    urls.push({url,method:options.method});
+    if (url.includes('/shares/'))return {ok:true,async json(){return {id:'item1',parentReference:{driveId:'drive1'}};}};
+    throw Error('Unsafe Microsoft Graph call to Forms-managed data: '+url);
+  }};
+  vm.runInNewContext(source,sandbox);
+  await assert.rejects(()=>sandbox.module.exports.completeRequest('9'),/Konfigurasi tidak valid/);
+  assert.equal(urls.length,1);
+  assert.equal(urls[0].method,'GET');
+  assert.doesNotMatch(urls[0].url,/workbook/);
 });

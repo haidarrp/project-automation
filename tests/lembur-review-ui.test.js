@@ -126,7 +126,7 @@ test('HTML mengandung cache-busting baru untuk CSS dan JavaScript serta SW dinai
  assert.match(html,/lembur-calendar\.css\?v=5/);
  assert.match(html,/lembur-document-integration\.js\?v=5/);
  assert.match(html,/assets\/js\/app\.js\?v=20/);
- assert.match(fs.readFileSync(path.join(root,'sw.js'),'utf8'),/pusdatin-static-v46/);
+ assert.match(fs.readFileSync(path.join(root,'sw.js'),'utf8'),/pusdatin-static-v48/);
 });
 
 test('Dua dokumen beririsan tetap memiliki kontrol tersendiri dalam panel tanggal yang sama',()=>{

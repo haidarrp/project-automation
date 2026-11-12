@@ -34,6 +34,13 @@
     const numeric = Number(raw);
     if (/^\d{5}(\.\d+)?$/.test(raw)) return toExcelDate(numeric);
     const parsed = Date.parse(raw);
+    if (!Number.isNaN(parsed) && /^\d{4}-\d{2}-\d{2}T/.test(raw)) {
+      const display = new Intl.DateTimeFormat('id-ID', {
+        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+        hourCycle: 'h23', timeZone: 'Asia/Jakarta'
+      }).format(new Date(parsed));
+      return { display, sort: parsed };
+    }
     return { display: raw, sort: Number.isNaN(parsed) ? 0 : parsed };
   }
 
@@ -98,7 +105,8 @@
   function graphError(status, code, detail) {
     if (status === 401) return 'Sesi Microsoft kedaluwarsa. Hubungkan kembali akun Microsoft lalu coba Refresh.';
     if (status === 403) return 'Akses ke Excel ditolak (403). Pastikan akun Microsoft Anda memiliki akses ke file dan izin Files.ReadWrite telah disetujui.';
-    if (status === 404) return 'File Excel tidak ditemukan (404). Periksa URL SharePoint dan apakah tautannya masih aktif.';
+    if (status === 404) return 'Workbook/sheet/tabel tidak ditemukan (404). Pastikan workbook lama memiliki sheet Tiket dan tabel TblPermohonanST, serta tautan masih dapat diakses.';
+    if (status === 409 || status === 423) return 'Excel sedang dipakai/terkunci. Tunggu hingga proses Power Automate selesai, lalu ulangi.';
     if (status === 429) return 'Layanan Microsoft sedang membatasi permintaan (429). Coba Refresh kembali nanti.';
     return `Microsoft Graph ${status}${code ? ` (${code})` : ''}: ${detail || 'Permintaan gagal'}`;
   }
@@ -176,50 +184,57 @@
     };
   }
 
-  async function workbookContext(client) {
+  // Same workbook as Microsoft Forms, but read ONLY the separate
+  // Power Automate-managed Excel table on sheet Tiket. Never read OfficeForms.Table.
+  async function workbookContext(client, sourceUrl) {
     const cfg = window.ST_CHANGE_REQUESTS_CONFIG || {};
-    const share = shareIdFromUrl(cfg.shareUrl);
+    const url = String(sourceUrl || cfg.shareUrl || '').trim();
+    if (!url) throw new Error('Sumber Excel belum diatur. Klik Atur Sumber Excel dan tempel tautan workbook respons Forms dari SharePoint.');
+    const share = shareIdFromUrl(url);
     const item = await client.get(`/shares/${share}/driveItem?$select=id,name,webUrl,file,parentReference`, { Prefer: 'redeemSharingLink' });
     const driveId = item?.remoteItem?.parentReference?.driveId || item?.parentReference?.driveId;
     const itemId = item?.remoteItem?.id || item?.id;
-    if (!driveId || !itemId) throw new Error('Microsoft Graph tidak memberikan driveId/itemId untuk file Excel ini. Pastikan tautan mengarah ke file Excel yang dapat diakses.');
+    if (!driveId || !itemId) throw new Error('Microsoft Graph tidak memberikan driveId/itemId. Pastikan tautan mengarah ke workbook respons Forms yang dapat diakses.');
     const prefix = `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/workbook`;
-    const sheets = await client.get(`${prefix}/worksheets?$select=id,name`);
-    if (!Array.isArray(sheets?.value) || !sheets.value.length) throw new Error('Workbook Excel tidak mempunyai worksheet yang dapat dibaca.');
-    return { cfg, item, prefix, sheets: sheets.value };
-  }
-
-  async function findRequestSheet(client, book) {
-    for (const sheet of book.sheets) {
-      const range = await client.get(`${book.prefix}/worksheets/${encodeURIComponent(sheet.id)}/usedRange(valuesOnly=true)`);
-      const records = parseWorksheet(range);
-      if (records !== null) return { sheet, range, records };
+    const tableName = String(cfg.tableName || 'TblPermohonanST');
+    const sheetName = String(cfg.sheetName || 'Tiket');
+    // This feature must never read/write the Forms-managed table (OfficeForms.Table).
+    if (sheetName !== 'Tiket' || tableName !== 'TblPermohonanST') {
+      throw new Error('Konfigurasi tidak valid: gunakan sheet Tiket dan tabel TblPermohonanST, bukan tabel respons asli Forms.');
     }
-    throw new Error('Kolom Excel tidak sesuai. Diperlukan Id, Completion time, Nama, dan Nomor Surat/ Perihal.');
+    return { cfg, url, item, prefix, tableName, sheetName };
   }
 
-  async function fetchRequests() {
+  async function readTicketTable(client, book) {
+    const path = `${book.prefix}/worksheets/${encodeURIComponent(book.sheetName)}/tables/${encodeURIComponent(book.tableName)}/range`;
+    const range = await client.get(path);
+    const records = parseWorksheet(range);
+    if (records === null) throw new Error('Header tabel tiket tidak sesuai template. Pastikan Id, Completion time, Nama, Nomor Surat/Perihal, dan Status tersedia.');
+    return { range, records, sheet: { name: book.sheetName } };
+  }
+
+  async function fetchRequests(sourceUrl) {
     const client = await graphClient();
-    const book = await workbookContext(client);
-    const { sheet, records } = await findRequestSheet(client, book);
-    return { rows: records, worksheet: sheet.name || '', fileName: book.item.name || 'Respons Microsoft Forms', webUrl: book.item.webUrl || book.cfg.shareUrl };
+    const book = await workbookContext(client, sourceUrl);
+    const { sheet, records } = await readTicketTable(client, book);
+    return { rows: records, worksheet: sheet.name, fileName: book.item.name || 'Workbook Formulir Perubahan ST', webUrl: book.item.webUrl || book.url };
   }
 
   // Called only on explicit user confirmation. Re-read the latest range and resolve
   // the target from Forms' response ID, never from the old table's row position.
-  async function completeRequest(responseId) {
+  async function completeRequest(responseId, sourceUrl) {
     const id = String(responseId || '').trim();
     if (!id) throw new Error('ID respons permohonan tidak valid.');
     const client = await graphClient();
-    const book = await workbookContext(client);
-    const { sheet, range } = await findRequestSheet(client, book);
+    const book = await workbookContext(client, sourceUrl);
+    const { sheet, range } = await readTicketTable(client, book);
     const cell = findStatusCell(range, id);
     if (/^(selesai)$/i.test(cell.status)) return { id, status: 'Selesai', alreadyDone: true };
     if (/^(ditolak|dibatalkan|batal|closed|resolved)$/i.test(cell.status)) {
       throw new Error(`Status permohonan ini telah berubah menjadi "${cell.status}" di Excel. Klik Refresh untuk memperbarui tampilan.`);
     }
     const encodedAddress = encodeURIComponent(cell.address);
-    const path = `${book.prefix}/worksheets/${encodeURIComponent(sheet.id)}/range(address='${encodedAddress}')`;
+    const path = `${book.prefix}/worksheets/${encodeURIComponent(sheet.name)}/range(address='${encodedAddress}')`;
     const result = await client.patch(path, { values: [['Selesai']] });
     if (Array.isArray(result?.values) && String(result.values?.[0]?.[0] || '').trim() !== 'Selesai') {
       throw new Error('Microsoft Graph tidak mengonfirmasi nilai Selesai pada sel Status. Periksa Excel lalu klik Refresh.');
