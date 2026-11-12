@@ -186,10 +186,10 @@
 
   // Same workbook as Microsoft Forms, but read ONLY the separate
   // Power Automate-managed Excel table on sheet Tiket. Never read OfficeForms.Table.
-  async function workbookContext(client, sourceUrl) {
+  async function workbookContext(client) {
     const cfg = window.ST_CHANGE_REQUESTS_CONFIG || {};
-    const url = String(sourceUrl || cfg.shareUrl || '').trim();
-    if (!url) throw new Error('Sumber Excel belum diatur. Klik Atur Sumber Excel dan tempel tautan workbook respons Forms dari SharePoint.');
+    const url = String(cfg.shareUrl || '').trim();
+    if (!url) throw new Error('URL SharePoint belum ditetapkan dalam konfigurasi aplikasi. Hubungi administrator.');
     const share = shareIdFromUrl(url);
     const item = await client.get(`/shares/${share}/driveItem?$select=id,name,webUrl,file,parentReference`, { Prefer: 'redeemSharingLink' });
     const driveId = item?.remoteItem?.parentReference?.driveId || item?.parentReference?.driveId;
@@ -213,20 +213,20 @@
     return { range, records, sheet: { name: book.sheetName } };
   }
 
-  async function fetchRequests(sourceUrl) {
+  async function fetchRequests() {
     const client = await graphClient();
-    const book = await workbookContext(client, sourceUrl);
+    const book = await workbookContext(client);
     const { sheet, records } = await readTicketTable(client, book);
     return { rows: records, worksheet: sheet.name, fileName: book.item.name || 'Workbook Formulir Perubahan ST', webUrl: book.item.webUrl || book.url };
   }
 
   // Called only on explicit user confirmation. Re-read the latest range and resolve
   // the target from Forms' response ID, never from the old table's row position.
-  async function completeRequest(responseId, sourceUrl) {
+  async function completeRequest(responseId) {
     const id = String(responseId || '').trim();
     if (!id) throw new Error('ID respons permohonan tidak valid.');
     const client = await graphClient();
-    const book = await workbookContext(client, sourceUrl);
+    const book = await workbookContext(client);
     const { sheet, range } = await readTicketTable(client, book);
     const cell = findStatusCell(range, id);
     if (/^(selesai)$/i.test(cell.status)) return { id, status: 'Selesai', alreadyDone: true };

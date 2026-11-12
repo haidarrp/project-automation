@@ -188,12 +188,18 @@ test('config uses existing Forms workbook but reads only the Power Automate tick
   assert.match(config,/sheetName: 'Tiket'/);
   assert.match(config,/kemenpkp-my\.sharepoint\.com/);
   assert.match(config,/haidar_rasyid/);
+  assert.match(config,/e=lDSvfU&nav=MTVfezNFMjNFNjk1LTk3QTctNEFCQS04NUE0LUY0MzZGNDVCMkY2NH0/);
   assert.doesNotMatch(config,/OfficeForms\.Table'\s*[,}]/);
   const app=fs.readFileSync(path.join(root,'assets/js/surat-tugas.js'),'utf8');
-  assert.match(app,/Atur Sumber Excel/);
-  assert.match(app,/pkp-st-ticket-source-v2/);
+  assert.doesNotMatch(app,/Atur Sumber Excel|st-request-source|editRequestWorkbookUrl/);
+  assert.doesNotMatch(app,/pkp-st-ticket-source-v2|window\.prompt/);
   assert.match(app,/pkp-st-request-read-v3/);
   assert.match(app,/function requestWorkbookUrl/);
+  assert.match(app,/ST_CHANGE_REQUESTS_CONFIG\?\.shareUrl/);
+  assert.match(app,/STChangeRequests\.fetchRequests\(\)/);
+  assert.match(app,/STChangeRequests\.completeRequest\(id\)/);
+  const serviceCode=fs.readFileSync(path.join(root,'assets/js/surat-tugas-permohonan-service.js'),'utf8');
+  assert.doesNotMatch(serviceCode,/sourceUrl/);
 });
 
 
@@ -213,4 +219,16 @@ test('invalid sheet selection cannot redirect writes to the Forms response table
   assert.equal(urls.length,1);
   assert.equal(urls[0].method,'GET');
   assert.doesNotMatch(urls[0].url,/workbook/);
+});
+
+
+test('source input is removed from ticket UI and fixed URL is used despite stored legacy override',async () => {
+  const ui=await mountRequests();
+  ui.storage.set('pkp-st-ticket-source-v2:staff-1','https://invalid.example/bad.xlsx');
+  assert.doesNotMatch(ui.app.innerHTML,/Atur Sumber Excel|st-request-source/);
+  assert.match(ui.app.innerHTML,/Buka Excel SharePoint/);
+  assert.match(ui.app.innerHTML,/Refresh dari SharePoint/);
+  ui.click('st-request-refresh');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.match(ui.app.innerHTML,/Khusnul Arifin/);
 });

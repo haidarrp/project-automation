@@ -518,39 +518,10 @@
   // Permohonan Perubahan ST: Refresh manual dari Excel; status disimpan ke SharePoint
   // melalui Microsoft Graph saat petugas mengonfirmasi penyelesaian.
   // Penanda BARU tetap lokal per browser, status permohonan bersumber dari Excel.
-  function requestSourceStorageKey() {
-    return `pkp-st-ticket-source-v2:${String(user()?.uid || 'anon')}`;
-  }
-
+  // Sumber SharePoint ditetapkan administrator pada file konfigurasi; tidak
+  // menerima override dari localStorage atau isian URL pengguna.
   function requestWorkbookUrl() {
-    const defaultUrl = String(window.ST_CHANGE_REQUESTS_CONFIG?.shareUrl || '').trim();
-    try { return String(localStorage.getItem(requestSourceStorageKey()) || '').trim() || defaultUrl; }
-    catch { return defaultUrl; }
-  }
-
-  function editRequestWorkbookUrl() {
-    if (state.requests.loading || state.requests.updatingId || !window.UserAccess.canView('surat', 'permohonan')) return;
-    const current = requestWorkbookUrl();
-    const next = window.prompt('Tautan workbook respons Microsoft Forms di SharePoint (sheet Tiket):', current);
-    if (next === null) return;
-    const url = next.trim();
-    if (url && !/^https:\/\//i.test(url)) {
-      state.requests.error = 'Tautan harus menggunakan https://.';
-      render();
-      return;
-    }
-    try { localStorage.setItem(requestSourceStorageKey(), url); }
-    catch { state.requests.error = 'Pengaturan URL tidak dapat disimpan pada browser ini.'; render(); return; }
-    readRequestMarkers();
-    state.requests.rows = [];
-    state.requests.loaded = false;
-    state.requests.updatedAt = null;
-    state.requests.fileName = '';
-    state.requests.worksheet = '';
-    state.requests.error = '';
-    state.requests.info = url ? 'Tautan workbook tersimpan. Aplikasi hanya membaca tabel TblPermohonanST pada sheet Tiket.'
-      : 'Pengaturan lokal dikosongkan. Aplikasi kembali memakai tautan workbook asli dari konfigurasi administrator.';
-    render();
+    return String(window.ST_CHANGE_REQUESTS_CONFIG?.shareUrl || '').trim();
   }
 
   function requestStorageKey() {
@@ -639,9 +610,9 @@
     }).join('');
     return `<section class="assignment-page st-request-page">
       <div class="assignment-head st-request-header"><div><h1>Permohonan Perubahan Surat Tugas</h1><p>Data diambil dari sheet Tiket pada workbook respons Microsoft Forms yang sama. Power Automate mengisi tabel TblPermohonanST; klik Refresh untuk memperbarui.</p></div>
-        <div class="assignment-head-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="st-request-source" ${info.loading || info.updatingId ? 'disabled' : ''}>Atur Sumber Excel</button>${sourceLink}<button class="btn btn-primary" type="button" data-action="st-request-refresh" ${info.loading || info.updatingId ? 'disabled aria-busy="true"' : ''}>${info.loading ? 'Mengambil data…' : '↻ Refresh dari SharePoint'}</button></div>
+        <div class="assignment-head-actions">${sourceLink}<button class="btn btn-primary" type="button" data-action="st-request-refresh" ${info.loading || info.updatingId ? 'disabled aria-busy="true"' : ''}>${info.loading ? 'Mengambil data…' : '↻ Refresh dari SharePoint'}</button></div>
       </div>
-      ${!sourceUrl ? '<div class="st-req-message" role="status">Tautan workbook belum diatur. Klik Atur Sumber Excel, lalu gunakan tautan workbook Microsoft Forms yang sudah ada.</div>' : ''}
+      
       <div class="st-req-hint">${info.loading ? 'Sedang membaca Excel SharePoint melalui akun Microsoft Anda…' : `Terakhir diperiksa: <strong>${esc(recent)}</strong>`}${info.fileName ? ` · ${esc(info.fileName)} / ${esc(info.worksheet)}` : ''} <span>Sumber: sheet Tiket / tabel TblPermohonanST (bukan Sheet1). Penyelesaian tiket mengubah kolom Status pada sheet Tiket.</span></div>
       ${info.error ? `<div class="alert alert-warning" role="alert"><div class="alert-title">Gagal mengambil respons Microsoft Forms</div>${esc(info.error)}<div class="st-req-error-help">Pastikan Anda login dengan akun Microsoft yang diberi akses ke file dan file tetap berada di OneDrive/SharePoint organisasi.</div></div>` : ''}
       ${info.info ? `<div class="st-req-message" role="status">${esc(info.info)}</div>` : ''}
@@ -693,7 +664,7 @@
     state.requests.info = '';
     render();
     try {
-      const result = await window.STChangeRequests.fetchRequests(requestWorkbookUrl());
+      const result = await window.STChangeRequests.fetchRequests();
       const rows = result.rows;
       const existing = state.requests.known;
       const newPending = rows.filter(row => !existing.has(row.id) && !requestDone(row));
@@ -728,7 +699,7 @@
     state.requests.updateError = '';
     render();
     try {
-      const result = await window.STChangeRequests.completeRequest(id, requestWorkbookUrl());
+      const result = await window.STChangeRequests.completeRequest(id);
       item.status = result.status;
       state.requests.known.add(id);
       state.requests.unread.delete(id);
@@ -1140,7 +1111,6 @@
     if (action === 'close-preview-modal' && actionEl.classList.contains('assignment-modal-backdrop') && event.target !== actionEl) return;
 
     if (action === 'st-request-refresh') { refreshRequests(); return; }
-    if (action === 'st-request-source') { editRequestWorkbookUrl(); return; }
     if (action === 'st-request-detail') { state.requests.detailId = String(actionEl.dataset.requestId || ''); render(); return; }
     if (action === 'st-request-close' && state.requests.updatingId) return;
     if (action === 'st-request-close' && actionEl.classList.contains('st-request-detail-backdrop') && event.target !== actionEl) return;
