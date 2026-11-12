@@ -47,8 +47,12 @@
     },
     calendar: {
       year: CURRENT_YEAR,
-      month: CURRENT_MONTH
+      month: CURRENT_MONTH,
+      unit: '',
+      type: ''
     },
+    calendarMode: 'calendar',
+    expandedCalendarDays: new Set(),
     modal: null,
     detailId: '',
     previewModal: null,
@@ -325,20 +329,92 @@
     </div>`;
   }
 
+  function calendarPeople(item) {
+    return assignmentPeople(item).filter((person) => !state.calendar.unit || person.unit === state.calendar.unit);
+  }
+
   function calendarRows() {
     const year = Number(state.calendar.year);
     const month = Number(state.calendar.month);
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
     const end = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
-    return state.assignments.filter((item) => item.startDate <= end && item.endDate >= start).sort((a, b) => a.startDate.localeCompare(b.startDate));
+    return state.assignments
+      .filter((item) => item.startDate && item.startDate <= end && (item.endDate || item.startDate) >= start)
+      .filter((item) => !state.calendar.unit || calendarPeople(item).length > 0)
+      .filter((item) => !state.calendar.type || normalizeAssignmentType(item.assignmentType) === state.calendar.type)
+      .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.letterNumber.localeCompare(b.letterNumber));
+  }
+
+  function calendarYearOptions() {
+    const current = Number(state.calendar.year);
+    const years = new Set([current, CURRENT_YEAR - 2, CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2]);
+    state.assignments.forEach((item) => {
+      if (item.startDate) years.add(Number(item.startDate.slice(0, 4)));
+      if (item.endDate) years.add(Number(item.endDate.slice(0, 4)));
+    });
+    return [...years].filter(Number.isFinite).sort((a, b) => b - a)
+      .map((year) => `<option value="${year}" ${year === current ? 'selected' : ''}>${year}</option>`).join('');
+  }
+
+  function calendarGrid(rows) {
+    const year = Number(state.calendar.year);
+    const month = Number(state.calendar.month);
+    const first = new Date(year, month - 1, 1);
+    const lastDay = new Date(year, month, 0).getDate();
+    const mondayOffset = (first.getDay() + 6) % 7;
+    const cells = [];
+    for (let i = 0; i < mondayOffset; i += 1) {
+      cells.push('<div class="assignment-calendar-cell muted" aria-hidden="true"></div>');
+    }
+    for (let day = 1; day <= lastDay; day += 1) {
+      const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const date = new Date(year, month - 1, day);
+      const events = rows.filter((item) => item.startDate <= iso && item.endDate >= iso)
+        .flatMap((item) => {
+          const people = calendarPeople(item);
+          return (people.length ? people : [{ name: 'Pegawai belum diisi' }])
+            .map((person) => ({ item, person }));
+        });
+      const expanded = state.expandedCalendarDays.has(iso);
+      const visible = expanded ? events : events.slice(0, 4);
+      const isToday = iso === TODAY;
+      const weekend = date.getDay() === 0 || date.getDay() === 6;
+      cells.push(`<div class="assignment-calendar-cell ${weekend ? 'weekend' : ''} ${isToday ? 'today' : ''}">
+        <div class="assignment-calendar-day">${day}${isToday ? '<span>Hari ini</span>' : ''}</div>
+        <div class="assignment-calendar-events">
+          ${visible.map(({ item, person }) => `<button type="button" data-assignment-detail="${esc(item.id)}" title="${esc(`${person.name || 'Pegawai'} — ${item.activity || item.letterNumber || 'Surat Tugas'} (${formatDateRange(item)})`)}"><strong>${esc(person.name || 'Pegawai')}</strong><span>${esc(item.activity || item.letterNumber || 'Surat Tugas')}</span></button>`).join('')}
+          ${events.length > 4 ? `<button type="button" class="assignment-calendar-more" data-action="calendar-toggle-day" data-calendar-day="${iso}" aria-expanded="${expanded}">${expanded ? 'Tampilkan lebih sedikit' : `+${events.length - 4} pegawai lainnya`}</button>` : ''}
+        </div>
+      </div>`);
+    }
+    while (cells.length % 7) cells.push('<div class="assignment-calendar-cell muted" aria-hidden="true"></div>');
+    return `<div class="assignment-calendar"><div class="assignment-calendar-weekdays">${['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'].map((day) => `<span>${day}</span>`).join('')}</div><div class="assignment-calendar-grid">${cells.join('')}</div></div>`;
+  }
+
+  function calendarList(rows) {
+    return `<div class="assignment-calendar-list">${rows.length ? rows.map((item) => `<button class="assignment-calendar-row" type="button" data-assignment-detail="${esc(item.id)}"><div class="date">${esc(formatDateRange(item))}</div><div class="activity"><strong>${esc(item.activity || item.letterNumber || 'Surat Tugas')}</strong><span>${esc(item.letterNumber || 'Tanpa nomor')}</span></div><div>${esc(calendarPeople(item).map((person) => person.name).filter(Boolean).join(', ') || 'Pegawai belum diisi')}</div><div><span class="assignment-pill ${statusOf(item).key}">${esc(statusOf(item).label)}</span></div></button>`).join('') : '<div class="assignment-empty"><strong>Tidak ada penugasan</strong>Belum ada Surat Tugas pada bulan dan filter yang dipilih.</div>'}</div>`;
   }
 
   function calendarView() {
     const rows = calendarRows();
+    const cal = state.calendar;
+    const units = [...new Set([...uniqueUnits(), ...state.assignments.flatMap((item) => assignmentPeople(item).map((person) => person.unit))].filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'id'));
+    const monthOptions = Array.from({ length: 12 }, (_, index) => {
+      const month = index + 1;
+      return `<option value="${month}" ${month === cal.month ? 'selected' : ''}>${esc(monthName(month))}</option>`;
+    }).join('');
     return `<div class="assignment-page">
-      <div class="assignment-head"><div><h1>Kalender Surat Tugas</h1><p>Daftar penugasan berdasarkan rentang tanggal pelaksanaan.</p></div><div class="assignment-head-actions"><button class="btn btn-primary" type="button" data-action="add-assignment">+ Tambah Surat Tugas</button></div></div>
-      <section class="card assignment-card"><div class="assignment-card-head assignment-calendar-toolbar"><div><h2>${esc(monthName(state.calendar.month))} ${esc(state.calendar.year)}</h2><p>${rows.length} Surat Tugas beririsan dengan bulan ini.</p></div><div class="assignment-calendar-nav"><button class="btn btn-secondary btn-sm" type="button" data-action="calendar-prev">←</button><strong>${esc(monthName(state.calendar.month))}</strong><button class="btn btn-secondary btn-sm" type="button" data-action="calendar-next">→</button></div></div>
-        <div class="assignment-calendar-list">${rows.length ? rows.map((item) => `<button class="assignment-calendar-row" type="button" data-assignment-detail="${esc(item.id)}" style="width:100%;border-left:0;border-right:0;border-top:0;background:#fff;text-align:left"><div class="date">${esc(formatDateRange(item))}</div><div class="activity"><strong>${esc(item.activity || item.letterNumber || 'Surat Tugas')}</strong><span>${esc(item.letterNumber || 'Tanpa nomor')}</span></div><div>${esc(assignmentPeople(item).map((person) => person.name).filter(Boolean).slice(0, 2).join(', '))}${assignmentPeople(item).length > 2 ? ` +${assignmentPeople(item).length - 2}` : ''}</div><div><span class="assignment-pill ${statusOf(item).key}">${esc(statusOf(item).label)}</span></div></button>`).join('') : '<div class="assignment-empty"><strong>Tidak ada penugasan</strong>Belum ada Surat Tugas pada bulan ini.</div>'}</div>
+      <div class="assignment-head"><div><h1>Kalender Surat Tugas</h1><p>Pantau penugasan pada kalender bulanan. Nama pegawai ditampilkan pada setiap tanggal selama periode Surat Tugas.</p></div><div class="assignment-head-actions"><button class="btn btn-primary" type="button" data-action="add-assignment">+ Tambah Surat Tugas</button></div></div>
+      <section class="card assignment-calendar-filter-card"><div class="assignment-calendar-filters">
+        <div class="field"><label for="assignment-calendar-month">Bulan</label><select id="assignment-calendar-month">${monthOptions}</select></div>
+        <div class="field"><label for="assignment-calendar-year">Tahun</label><select id="assignment-calendar-year">${calendarYearOptions()}</select></div>
+        <div class="field"><label for="assignment-calendar-unit">Unit/Bidang</label><select id="assignment-calendar-unit"><option value="">Semua Unit/Bidang</option>${units.map((unit) => `<option value="${esc(unit)}" ${cal.unit === unit ? 'selected' : ''}>${esc(unit)}</option>`).join('')}</select></div>
+        <div class="field"><label for="assignment-calendar-type">Jenis Penugasan</label><select id="assignment-calendar-type"><option value="">Semua Jenis</option>${Object.entries(ASSIGNMENT_TYPES).map(([key, label]) => `<option value="${esc(key)}" ${cal.type === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
+        <div class="assignment-calendar-view-toggle"><button type="button" class="btn btn-sm ${state.calendarMode === 'list' ? 'btn-primary' : 'btn-secondary'}" data-assignment-calendar-mode="list" aria-pressed="${state.calendarMode === 'list'}">Daftar</button><button type="button" class="btn btn-sm ${state.calendarMode === 'calendar' ? 'btn-primary' : 'btn-secondary'}" data-assignment-calendar-mode="calendar" aria-pressed="${state.calendarMode === 'calendar'}">Kalender</button></div>
+      </div></section>
+      <section class="card assignment-card"><div class="assignment-card-head assignment-calendar-toolbar"><div><h2>${esc(monthName(cal.month))} ${esc(cal.year)}</h2><p>${rows.length} Surat Tugas pada bulan dan filter aktif. Klik nama pegawai untuk melihat detail.</p></div><div class="assignment-calendar-nav"><button class="btn btn-secondary btn-sm" type="button" data-action="calendar-prev" aria-label="Bulan sebelumnya">←</button><strong>${esc(monthName(cal.month))}</strong><button class="btn btn-secondary btn-sm" type="button" data-action="calendar-next" aria-label="Bulan berikutnya">→</button></div></div>
+        ${state.calendarMode === 'calendar' ? calendarGrid(rows) : calendarList(rows)}
       </section>
     </div>`;
   }
@@ -770,7 +846,9 @@
     let month = Number(state.calendar.month) + Number(delta || 0);
     if (month < 1) { month = 12; year -= 1; }
     if (month > 12) { month = 1; year += 1; }
-    state.calendar = { year, month };
+    state.calendar.year = year;
+    state.calendar.month = month;
+    state.expandedCalendarDays.clear();
     render();
   }
 
@@ -780,7 +858,11 @@
     if (target.id === 'assignment-file') { renderLocalFilePreview(target.files?.[0] || null); return; }
     if (target.id === 'assignment-filter-year') { state.filters.year = Number(target.value || CURRENT_YEAR); render(); return; }
     if (target.id === 'assignment-filter-unit') { state.filters.unit = String(target.value || ''); render(); return; }
-    if (target.id === 'assignment-filter-status') { state.filters.status = String(target.value || ''); render(); }
+    if (target.id === 'assignment-filter-status') { state.filters.status = String(target.value || ''); render(); return; }
+    if (target.id === 'assignment-calendar-month') { state.calendar.month = Number(target.value || CURRENT_MONTH); state.expandedCalendarDays.clear(); render(); return; }
+    if (target.id === 'assignment-calendar-year') { state.calendar.year = Number(target.value || CURRENT_YEAR); state.expandedCalendarDays.clear(); render(); return; }
+    if (target.id === 'assignment-calendar-unit') { state.calendar.unit = String(target.value || ''); state.expandedCalendarDays.clear(); render(); return; }
+    if (target.id === 'assignment-calendar-type') { state.calendar.type = String(target.value || ''); state.expandedCalendarDays.clear(); render(); }
   });
 
   app.addEventListener('input', (event) => {
@@ -813,6 +895,16 @@
     if (action === 'reset-filter') { state.filters = { year: CURRENT_YEAR, search: '', unit: '', status: '' }; render(); return; }
     if (action === 'calendar-prev') { changeCalendarMonth(-1); return; }
     if (action === 'calendar-next') { changeCalendarMonth(1); return; }
+    if (action === 'calendar-toggle-day') {
+      const day = actionEl?.dataset.calendarDay;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day || '')) return;
+      if (state.expandedCalendarDays.has(day)) state.expandedCalendarDays.delete(day);
+      else state.expandedCalendarDays.add(day);
+      render();
+      return;
+    }
+    const calendarMode = event.target.closest?.('[data-assignment-calendar-mode]')?.dataset.assignmentCalendarMode;
+    if (calendarMode) { state.calendarMode = calendarMode === 'list' ? 'list' : 'calendar'; render(); return; }
     if (action === 'select-all-employees') {
       document.querySelectorAll('[data-assignment-employee]').forEach((input) => { if (input.closest('[data-employee-search-text]')?.style.display !== 'none') input.checked = true; });
       updateEmployeeSummary();
